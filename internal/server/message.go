@@ -141,6 +141,10 @@ func (a *API) appendMessage(ctx context.Context, tenantID, conversationID uuid.U
 	if err := tx.Commit(ctx); err != nil {
 		return messageView{}, err
 	}
+	// Attachments are linked inside the transaction but read back after it, so
+	// the response and the realtime event both carry the download URLs. Without
+	// this the sender of an image would receive a message with no picture.
+	view.Attachments = a.messageAttachments(ctx, view.ID)
 	a.afterMessageCommitted(ctx, tenantID, conversationID, view, newAssignee, in.SenderType)
 	return view, nil
 }

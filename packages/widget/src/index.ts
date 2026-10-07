@@ -1,38 +1,122 @@
-export interface RelayDeskWidgetOptions {
-  endpoint: string;
-  inboxKey: string;
-  externalId?: string;
-  displayName?: string;
+// Public entry point. Importing this module registers the element; loading it as
+// a script on someone else's site additionally auto-mounts a widget when the
+// script tag carries data-endpoint and data-inbox-key.
+
+import { TAG_NAME, RelayDeskWidgetElement, optionsFromElement } from './widget.js';
+import type { RelayDeskWidgetOptions, WidgetEvent, WidgetBridge } from './config.js';
+
+export type { RelayDeskWidgetOptions, WidgetEvent, WidgetBridge } from './config.js';
+export type { ChatMessage, Conversation, Message, SenderType, MessageType, ConversationStatus } from './types.js';
+export { RelayDeskWidgetElement, optionsFromElement } from './widget.js';
+
+interface RelayDeskGlobal {
+  mount: (options: RelayDeskWidgetOptions) => RelayDeskWidgetElement;
+  unmount: () => void;
+  /** Present once a widget has been mounted. */
+  readonly widget?: RelayDeskWidgetElement;
 }
 
-export class RelayDeskWidget extends HTMLElement {
-  #options?: RelayDeskWidgetOptions;
-  #root = this.attachShadow({ mode: 'open' });
-
-  configure(options: RelayDeskWidgetOptions): void {
-    this.#options = options;
-  }
-
-  connectedCallback(): void {
-    this.#render();
-  }
-
-  #render(): void {
-    const title = this.getAttribute('title') ?? '在线客服';
-    this.#root.innerHTML = `
-      <style>
-        :host { position: fixed; right: 20px; bottom: 20px; z-index: 2147483000; font-family: system-ui, sans-serif; }
-        button { border: 0; border-radius: 999px; padding: 14px 20px; color: white; background: #356ae6; cursor: pointer;
-          font: inherit; font-weight: 600; box-shadow: 0 10px 30px rgb(25 55 120 / 25%); }
-        button:focus-visible { outline: 3px solid #9bb8ff; outline-offset: 3px; }
-      </style>
-      <button type="button" aria-label="打开${title}">${title}</button>`;
-    this.#root.querySelector('button')?.addEventListener('click', () => {
-      this.dispatchEvent(new CustomEvent('relaydesk:open', { detail: this.#options }));
-    });
+declare global {
+  interface Window {
+    RelayDesk?: RelayDeskGlobal;
+    /** Optional configuration object, read before the script attributes. */
+    RelayDeskSettings?: RelayDeskWidgetOptions;
   }
 }
 
-if (!customElements.get('relaydesk-widget')) {
-  customElements.define('relaydesk-widget', RelayDeskWidget);
+if (typeof window !== 'undefined' && !customElements.get(TAG_NAME)) {
+  customElements.define(TAG_NAME, RelayDeskWidgetElement);
 }
+
+let mounted: RelayDeskWidgetElement | undefined;
+
+function mount(options: RelayDeskWidgetOptions): RelayDeskWidgetElement {
+  if (mounted?.isConnected) {
+    mounted.configure(options);
+    return mounted;
+  }
+  const element = document.createElement(TAG_NAME) as RelayDeskWidgetElement;
+  // configure() before insertion, so the first paint already has data and the
+  // panel never flashes an empty shell.
+  element.configure(options);
+  document.body.appendChild(element);
+  mounted = element;
+  return element;
+}
+
+function unmount(): void {
+  mounted?.remove();
+  mounted = undefined;
+}
+
+if (typeof window !== 'undefined') {
+  const api: RelayDeskGlobal = {
+    mount,
+    unmount,
+    get widget() {
+      return mounted;
+    },
+  };
+  window.RelayDesk = api;
+
+  // Auto-mount: prefer an explicit window.RelayDeskSettings (a CMS or a tag
+  // manager usually sets that), then fall back to the loading script's own
+  // data-* attributes.
+  const boot = (): void => {
+    const settings = window.RelayDeskSettings;
+    if (settings?.endpoint && settings.inboxKey) {
+      api.mount(settings);
+      return;
+    }
+    const script = document.currentScript as HTMLScriptElement | null;
+    // The script tag that loaded us is the usual source, but a tag manager may
+    // inject us without currentScript, so any matching tag is accepted.
+    const candidates: HTMLScriptElement[] = script
+      ? [script]
+      : Array.from(document.querySelectorAll<HTMLScriptElement>('script[data-inbox-key]'));
+    for (const candidate of candidates) {
+      const options = optionsFromScript(candidate);
+      if (options) {
+        api.mount(options);
+        return;
+      }
+    }
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot, { once: true });
+  } else {
+    boot();
+  }
+}
+
+/** Reads the widgets configuration straight off a <script> tag. */
+function optionsFromScript(script: HTMLScriptElement): RelayDeskWidgetOptions | undefined {
+  const endpoint = script.dataset.endpoint;
+  const inboxKey = script.dataset.inboxKey;
+  if (!endpoint || !inboxKey) {
+    return undefined;
+  }
+  const options: RelayDeskWidgetOptions = { endpoint, inboxKey };
+  if (script.dataset.title) {
+    options.title = script.dataset.title;
+  }
+  if (script.dataset.primaryColor) {
+    options.primaryColor = script.dataset.primaryColor;
+  }
+  if (script.dataset.position === 'left' || script.dataset.position === 'right') {
+    options.position = script.dataset.position;
+  }
+  if (script.dataset.launcher === 'bubble' || script.dataset.launcher === 'bar' || script.dataset.launcher === 'none') {
+    options.launcher = script.dataset.launcher;
+  }
+  if (script.dataset.autoOpen === 'true') {
+    options.autoOpen = true;
+  }
+  if (script.dataset.storage !== undefined) {
+    options.storage = script.dataset.storage;
+  }
+  return options;
+}
+
+export { mount, unmount };
