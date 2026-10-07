@@ -1,0 +1,41 @@
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs and runtime files
+*.log
+logs/
+tmp/
+
+# Build and dependencies
+node_modules/
+dist/
+build/
+target/
+.gradle/
+coverage/
+
+# Go
+relaydesk
+*.test
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+pubspec.lock
+**/ios/Pods/
+**/macos/Pods/

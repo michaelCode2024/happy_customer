@@ -1,0 +1,8 @@
+.git
+.idea
+.vscode
+apps/**/.dart_tool
+apps/**/build
+packages/**/node_modules
+coverage
+tmp

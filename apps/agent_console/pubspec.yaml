@@ -1,0 +1,20 @@
+name: relaydesk_agent_console
+description: RelayDesk cross-platform agent and operations console.
+publish_to: none
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.13.1 <4.0.0"
+  flutter: ">=3.47.1"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
