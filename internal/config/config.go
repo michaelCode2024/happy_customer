@@ -63,6 +63,8 @@ type RateLimit struct {
 	LoginBurst      int
 	UploadPerMinute int
 	UploadBurst     int
+	OpenPerMinute   int
+	OpenBurst       int
 }
 
 type Upload struct {
@@ -128,6 +130,12 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	// A tenant's own backend legitimately bursts, so the open API gets a higher
+	// ceiling than the public widget.
+	openRate, err := integer("RATE_LIMIT_OPEN_API_PER_MINUTE", 600)
+	if err != nil {
+		return Config{}, err
+	}
 
 	storage := Storage{
 		Driver:            env("STORAGE_DRIVER", "local"),
@@ -176,6 +184,8 @@ func Load() (Config, error) {
 			LoginBurst:      loginRate,
 			UploadPerMinute: uploadRate,
 			UploadBurst:     uploadRate,
+			OpenPerMinute:   openRate,
+			OpenBurst:       openRate,
 		},
 		Upload: Upload{
 			MaxBytes: int64(maxUploadMB) << 20,

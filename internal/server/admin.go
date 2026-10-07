@@ -1079,7 +1079,8 @@ func (a *API) adminTestWebhook(w http.ResponseWriter, r *http.Request, p auth.Pr
 // ---------------------------------------------------------------- api keys
 
 func (a *API) adminAPIKeys(w http.ResponseWriter, r *http.Request, p auth.Principal) {
-	rows, err := a.db.Query(r.Context(), `select id, name, key_prefix, status, created_at, last_used_at
+	rows, err := a.db.Query(r.Context(), `select id, name, key_prefix, status, created_at, last_used_at,
+			scopes, coalesce(description,''), request_count, expires_at, revoked_at
 		from api_key where tenant_id = $1 order by created_at desc`, p.TenantID)
 	if err != nil {
 		fail(w, 500, "查询 API 密钥失败")
@@ -1091,20 +1092,28 @@ func (a *API) adminAPIKeys(w http.ResponseWriter, r *http.Request, p auth.Princi
 		var id uuid.UUID
 		var name, prefix, status string
 		var createdAt time.Time
-		var lastUsed *time.Time
-		if err := rows.Scan(&id, &name, &prefix, &status, &createdAt, &lastUsed); err != nil {
+		var lastUsed, expiresAt, revokedAt *time.Time
+		var scopes []string
+		var description string
+		var requestCount int64
+		if err := rows.Scan(&id, &name, &prefix, &status, &createdAt, &lastUsed,
+			&scopes, &description, &requestCount, &expiresAt, &revokedAt); err != nil {
 			fail(w, 500, "查询 API 密钥失败")
 			return
 		}
 		items = append(items, map[string]any{"id": id, "name": name, "keyPrefix": prefix,
-			"status": status, "createdAt": createdAt, "lastUsedAt": lastUsed})
+			"status": status, "createdAt": createdAt, "lastUsedAt": lastUsed,
+			"scopes": scopes, "description": description, "requestCount": requestCount,
+			"expiresAt": expiresAt, "revokedAt": revokedAt})
 	}
 	respond(w, 200, map[string]any{"items": items})
 }
 
 func (a *API) adminCreateAPIKey(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 	var in struct {
-		Name string `json:"name"`
+		Name        string   `json:"name"`
+		Scopes      []string `json:"scopes"`
+		Description string   `json:"description"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -1113,20 +1122,33 @@ func (a *API) adminCreateAPIKey(w http.ResponseWriter, r *http.Request, p auth.P
 		fail(w, 400, "密钥名称不能为空")
 		return
 	}
+	scopes := make([]string, 0, len(in.Scopes))
+	for _, scope := range in.Scopes {
+		scope = strings.ToLower(strings.TrimSpace(scope))
+		switch scope {
+		case "read", "write", "admin":
+			scopes = append(scopes, scope)
+		case "":
+		default:
+			fail(w, 400, "权限只能是 read、write 或 admin")
+			return
+		}
+	}
 	token, hash, prefix, err := auth.NewAPIKey()
 	if err != nil {
 		fail(w, 500, "生成密钥失败")
 		return
 	}
 	id := uuid.New()
-	if _, err := a.db.Exec(r.Context(), `insert into api_key(id, tenant_id, name, key_prefix, key_hash, status)
-		values($1,$2,$3,$4,$5,'ACTIVE')`, id, p.TenantID, in.Name, prefix, hash); err != nil {
+	if _, err := a.db.Exec(r.Context(), `insert into api_key(id, tenant_id, name, key_prefix, key_hash, status, scopes, description)
+		values($1,$2,$3,$4,$5,'ACTIVE',$6,$7)`,
+		id, p.TenantID, in.Name, prefix, hash, scopes, nullable(in.Description)); err != nil {
 		fail(w, 500, "创建密钥失败")
 		return
 	}
 	a.recordAudit(r.Context(), p.TenantID, "AGENT", p.AgentID, "api_key.create", "api_key", id, map[string]any{"prefix": prefix})
 	// The plaintext key is shown exactly once.
-	respond(w, 201, map[string]any{"id": id, "name": in.Name, "key": token, "keyPrefix": prefix})
+	respond(w, 201, map[string]any{"id": id, "name": in.Name, "key": token, "keyPrefix": prefix, "scopes": scopes})
 }
 
 func (a *API) adminRevokeAPIKey(w http.ResponseWriter, r *http.Request, p auth.Principal) {

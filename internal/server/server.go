@@ -35,6 +35,7 @@ type API struct {
 	widgetRate *ratelimit.Limiter
 	loginRate  *ratelimit.Limiter
 	uploadRate *ratelimit.Limiter
+	openRate   *ratelimit.Limiter
 	logger     *slog.Logger
 	startedAt  time.Time
 }
@@ -66,6 +67,7 @@ func New(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) (*API, error)
 		widgetRate: ratelimit.New(cfg.RateLimit.WidgetPerMinute, cfg.RateLimit.WidgetBurst),
 		loginRate:  ratelimit.New(cfg.RateLimit.LoginPerMinute, cfg.RateLimit.LoginBurst),
 		uploadRate: ratelimit.New(cfg.RateLimit.UploadPerMinute, cfg.RateLimit.UploadBurst),
+		openRate:   ratelimit.New(cfg.RateLimit.OpenPerMinute, cfg.RateLimit.OpenBurst),
 		logger:     logger,
 		startedAt:  time.Now(),
 	}
@@ -87,6 +89,7 @@ func (a *API) Handler() http.Handler {
 	a.registerConsole(mux)
 	a.registerAdmin(mux)
 	a.registerPlatform(mux)
+	a.registerOpen(mux)
 	a.registerUploads(mux)
 	return chain(mux, a.logger, a.cfg.AllowedOrigins, a.bodyLimit, a.metrics)
 }
