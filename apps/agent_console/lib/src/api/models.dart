@@ -179,6 +179,161 @@ class StoredSession {
 
 /// ----------------------------------------------------------------- messages
 
+/// One aggregated reaction on a message. The server groups by emoji and lists
+/// the actors, so the console can render a count and highlight the ones this
+/// agent chose without a second request.
+class MessageReaction {
+  const MessageReaction({
+    required this.emoji,
+    required this.count,
+    required this.actors,
+    required this.mine,
+  });
+
+  factory MessageReaction.fromJson(Map<String, dynamic> json, String selfId) {
+    final actors = (json['actors'] as List<dynamic>? ?? const <dynamic>[])
+        .whereType<String>()
+        .toList(growable: false);
+    return MessageReaction(
+      emoji: asString(json['emoji']),
+      count: json['count'] == null ? actors.length : asInt(json['count']),
+      actors: actors,
+      mine: selfId.isNotEmpty && actors.contains(selfId),
+    );
+  }
+
+  final String emoji;
+  final int count;
+  final List<String> actors;
+  final bool mine;
+}
+
+/// The emoji an agent may react with. The server refuses anything else, so the
+/// picker and the allow-list cannot drift apart without this changing too.
+const List<String> kReactionEmoji = <String>[
+  '👍',
+  '👎',
+  '😀',
+  '🎉',
+  '❤️',
+  '🙏',
+  '😅',
+  '😢',
+  '🔥',
+  '✅',
+];
+
+const Map<String, String> kReactionLabels = <String, String>{
+  '👍': '赞',
+  '👎': '踩',
+  '😀': '开心',
+  '🎉': '庆祝',
+  '❤️': '喜欢',
+  '🙏': '感谢',
+  '😅': '尴尬',
+  '😢': '难过',
+  '🔥': '重要',
+  '✅': '已确认',
+};
+
+/// The snapshot of a quoted message, taken when the reply was written. It is
+/// deliberately a copy rather than a reference: the original may be edited or
+/// recalled afterwards, and the reply must still show what it answered.
+class QuotedMessage {
+  const QuotedMessage({
+    required this.id,
+    required this.sequence,
+    required this.senderType,
+    required this.senderName,
+    required this.messageType,
+    required this.content,
+    required this.deletedAt,
+  });
+
+  factory QuotedMessage.fromJson(Map<String, dynamic> json) => QuotedMessage(
+        id: asString(json['id']),
+        sequence: asInt(json['sequence']),
+        senderType: asString(json['senderType']),
+        senderName: asString(json['senderName']),
+        messageType: asString(json['messageType']),
+        content: asString(json['content']),
+        deletedAt: asDate(json['deletedAt']),
+      );
+
+  final String id;
+  final int sequence;
+  final String senderType;
+  final String senderName;
+  final String messageType;
+  final String content;
+  final DateTime? deletedAt;
+
+  bool get isDeleted => deletedAt != null;
+
+  /// What the quote block shows. A recalled original reads as a tombstone
+  /// rather than as an empty quote.
+  String get label {
+    if (isDeleted) {
+      return '该消息已被撤回';
+    }
+    if (messageType == 'TEXT') {
+      return content;
+    }
+    return '[${messageTypeLabel(messageType)}]';
+  }
+}
+
+/// A human label for a non-text message, used by the quote block and the
+/// conversation preview. Kept in the client so a transcript renders correctly
+/// even for a message type the console does not have a bubble for.
+String messageTypeLabel(String messageType) => switch (messageType) {
+      'IMAGE' => '图片',
+      'FILE' => '文件',
+      'AUDIO' => '语音',
+      'VIDEO' => '视频',
+      'CARD' => '卡片',
+      'RATING' => '评价',
+      'EVENT' => '事件',
+      'SYSTEM' => '系统消息',
+      _ => '消息',
+    };
+
+/// One search hit inside a transcript. The excerpt carries `<< >>` around the
+/// matched terms, which the console renders as a highlight; the server builds
+/// it because PostgreSQL's ts_headline cannot segment Chinese.
+class SearchHit {
+  const SearchHit({
+    required this.messageId,
+    required this.conversationId,
+    required this.sequence,
+    required this.excerpt,
+    required this.createdAt,
+    required this.messageType,
+    required this.senderType,
+    required this.senderName,
+  });
+
+  factory SearchHit.fromJson(Map<String, dynamic> json) => SearchHit(
+        messageId: asString(json['messageId']),
+        conversationId: asString(json['conversationId']),
+        sequence: asInt(json['sequence']),
+        excerpt: asString(json['excerpt']),
+        createdAt: asDate(json['createdAt']) ?? DateTime.now(),
+        messageType: asString(json['messageType']),
+        senderType: asString(json['senderType']),
+        senderName: asString(json['senderName']),
+      );
+
+  final String messageId;
+  final String conversationId;
+  final int sequence;
+  final String excerpt;
+  final DateTime createdAt;
+  final String messageType;
+  final String senderType;
+  final String senderName;
+}
+
 class Attachment {
   const Attachment({
     required this.id,
@@ -234,28 +389,52 @@ class ChatMessage {
     required this.attachments,
     required this.metadata,
     required this.createdAt,
+    this.isPrivate = false,
+    this.replyToId,
+    this.replyTo,
+    this.editedAt,
+    this.deletedAt,
+    this.pinnedAt,
+    this.forwardedFromId,
+    this.reactions = const <MessageReaction>[],
     this.delivery = DeliveryState.sent,
     this.error,
   });
 
-  factory ChatMessage.fromJson(Map<String, dynamic> json) => ChatMessage(
-        id: asString(json['id']),
-        conversationId: asString(json['conversationId']),
-        senderType: asString(json['senderType']),
-        senderId: asNullableString(json['senderId']),
-        senderName: asString(json['senderName']),
-        clientMessageId: asNullableString(json['clientMessageId']),
-        sequence: asInt(json['sequence']),
-        messageType: asString(json['messageType']),
-        content: asString(json['content']),
-        attachments: asMapList(json['attachments'])
-            .map(Attachment.fromJson)
-            .toList(growable: false),
-        metadata: asMap(json['metadata']),
-        createdAt: asDate(json['createdAt']) ?? DateTime.now(),
-        delivery: DeliveryState.sent,
-      );
-
+  factory ChatMessage.fromJson(Map<String, dynamic> json, {String selfId = ''}) {
+    final replyTo = asMap(json['replyTo']);
+    return ChatMessage(
+      id: asString(json['id']),
+      conversationId: asString(json['conversationId']),
+      senderType: asString(json['senderType']),
+      senderId: asNullableString(json['senderId']),
+      senderName: asString(json['senderName']),
+      clientMessageId: asNullableString(json['clientMessageId']),
+      sequence: asInt(json['sequence']),
+      messageType: asString(json['messageType']),
+      content: asString(json['content']),
+      attachments: asMapList(json['attachments'])
+          .map(Attachment.fromJson)
+          .toList(growable: false),
+      metadata: asMap(json['metadata']),
+      createdAt: asDate(json['createdAt']) ?? DateTime.now(),
+      // The server sends an explicit flag now. The metadata fallback stays
+      // because a message written before the column existed is still in the
+      // transcript, and a note rendered as a normal reply would be sent to the
+      // visitor by mistake.
+      isPrivate: asBool(json['private']) || asBool(asMap(json['metadata'])['private']),
+      replyToId: asNullableString(json['replyToId']),
+      replyTo: replyTo.isEmpty ? null : QuotedMessage.fromJson(replyTo),
+      editedAt: asDate(json['editedAt']),
+      deletedAt: asDate(json['deletedAt']),
+      pinnedAt: asDate(json['pinnedAt']),
+      forwardedFromId: asNullableString(json['forwardedFromId']),
+      reactions: asMapList(json['reactions'])
+          .map((item) => MessageReaction.fromJson(item, selfId))
+          .toList(growable: false),
+      delivery: DeliveryState.sent,
+    );
+  }
   /// A locally created message that has not been acknowledged yet. [localId] is
   /// the idempotency key sent to the server, so a retry cannot duplicate it.
   factory ChatMessage.optimistic({
@@ -268,6 +447,7 @@ class ChatMessage {
     String senderName = '',
     String? senderId,
     bool isPrivate = false,
+    QuotedMessage? replyTo,
   }) =>
       ChatMessage(
         id: localId,
@@ -280,8 +460,11 @@ class ChatMessage {
         messageType: isPrivate ? 'EVENT' : messageType,
         content: content,
         attachments: attachments,
-        metadata: isPrivate ? const <String, dynamic>{'private': true} : const <String, dynamic>{},
+        metadata: const <String, dynamic>{},
         createdAt: DateTime.now(),
+        isPrivate: isPrivate,
+        replyToId: replyTo?.id,
+        replyTo: replyTo,
         delivery: DeliveryState.sending,
       );
 
@@ -295,12 +478,30 @@ class ChatMessage {
   final String? clientMessageId;
   final int sequence;
 
-  /// TEXT, IMAGE, FILE, EVENT, SYSTEM, RICH, RATING.
+  /// TEXT, IMAGE, FILE, AUDIO, VIDEO, CARD, EVENT, SYSTEM, RATING.
   final String messageType;
   final String content;
   final List<Attachment> attachments;
   final Map<String, dynamic> metadata;
   final DateTime createdAt;
+
+  /// An internal note: visible to the whole team, never delivered to the
+  /// visitor. The server owns this flag so a note can never leak through a
+  /// client that forgot to check metadata.
+  final bool isPrivate;
+
+  final String? replyToId;
+  final QuotedMessage? replyTo;
+
+  /// Set when the text was rewritten. A recalled message keeps its row and its
+  /// sequence and carries [deletedAt] instead, so the console replaces the
+  /// bubble rather than shifting everything below it.
+  final DateTime? editedAt;
+  final DateTime? deletedAt;
+  final DateTime? pinnedAt;
+  final String? forwardedFromId;
+  final List<MessageReaction> reactions;
+
   final DeliveryState delivery;
   final String? error;
 
@@ -310,20 +511,59 @@ class ChatMessage {
 
   bool get isSystem => senderType == 'SYSTEM';
 
-  /// Internal notes are stored as EVENT messages flagged in metadata so they are
-  /// never delivered to the visitor, but are visible to the whole team.
-  bool get isPrivate => asBool(metadata['private']);
+  bool get isDeleted => deletedAt != null;
+
+  bool get isEdited => editedAt != null;
+
+  bool get isPinned => pinnedAt != null;
+
+  bool get isForwarded => forwardedFromId != null;
+
+  /// Whether this agent wrote the message, which decides who may edit or recall
+  /// it. The server enforces the same rule; this only hides controls that would
+  /// come back as an error.
+  bool isMine(String? selfId) =>
+      isFromAgent && selfId != null && selfId.isNotEmpty && senderId == selfId;
 
   bool get isTransfer =>
       asBool(metadata['transfer']) || asBool(metadata['ai_handoff']);
 
   bool get isAi => asBool(metadata['ai']) || senderId == 'bot';
 
+  /// The duration a sender's device measured for a voice note. The audio
+  /// element cannot report a duration for a stream it has not buffered, so the
+  /// value travels with the message instead.
+  Duration? get voiceDuration {
+    final value = metadata['durationMs'];
+    if (value is num && value > 0) {
+      return Duration(milliseconds: value.round());
+    }
+    return null;
+  }
+
+  /// The quote snapshot this message would produce. Snapshotting rather than
+  /// referencing is deliberate: the original can be edited or recalled after the
+  /// reply is written, and the reply must still show what it answered.
+  QuotedMessage toQuote() => QuotedMessage(
+        id: id,
+        sequence: sequence,
+        senderType: senderType,
+        senderName: senderName,
+        messageType: messageType,
+        content: content,
+        deletedAt: deletedAt,
+      );
+
   ChatMessage copyWith({
     int? sequence,
     DeliveryState? delivery,
     String? error,
     List<Attachment>? attachments,
+    List<MessageReaction>? reactions,
+    DateTime? editedAt,
+    DateTime? deletedAt,
+    DateTime? pinnedAt,
+    bool clearPinned = false,
   }) =>
       ChatMessage(
         id: id,
@@ -338,6 +578,16 @@ class ChatMessage {
         attachments: attachments ?? this.attachments,
         metadata: metadata,
         createdAt: createdAt,
+        isPrivate: isPrivate,
+        replyToId: replyToId,
+        replyTo: replyTo,
+        editedAt: editedAt ?? this.editedAt,
+        deletedAt: deletedAt ?? this.deletedAt,
+        // Unpinning needs its own flag: `pinnedAt: null` is indistinguishable
+        // from "leave it alone" in a nullable parameter.
+        pinnedAt: clearPinned ? null : (pinnedAt ?? this.pinnedAt),
+        forwardedFromId: forwardedFromId,
+        reactions: reactions ?? this.reactions,
         delivery: delivery ?? this.delivery,
         error: error ?? this.error,
       );

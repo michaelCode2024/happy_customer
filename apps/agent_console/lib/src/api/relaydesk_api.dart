@@ -39,11 +39,34 @@ class MessagePage {
     required this.items,
     required this.lastSequence,
     required this.agentUnread,
+    this.hasMore = false,
+    this.hasOlder = false,
+    this.firstSequence = 0,
+    this.lastReadSequence = 0,
+    this.visitorUnread = 0,
   });
 
   final List<ChatMessage> items;
   final int lastSequence;
   final int agentUnread;
+
+  /// There is a newer slice than this one, which the console reaches with
+  /// `after:`.
+  final bool hasMore;
+
+  /// There is an older slice, which the console reaches with `before:` when the
+  /// agent scrolls back.
+  final bool hasOlder;
+
+  /// Sequence bounds of this page. `firstSequence` is what a "load older" call
+  /// passes back as its cursor.
+  final int firstSequence;
+
+  /// This agent's read cursor, which is where the "以下为新消息" divider belongs.
+  final int lastReadSequence;
+
+  /// How many messages the visitor has not read, shown on the thread header.
+  final int visitorUnread;
 }
 
 class ConversationPage {
@@ -228,23 +251,190 @@ class RelayDeskApi {
     return ConversationDetail.fromJson(body);
   }
 
-  /// Messages after [after] in ascending order. `after: 0` returns the oldest
+  /// Messages after [after] in ascending order, or the slice preceding [before]
+  /// when the agent scrolls back through history. `after: 0` returns the oldest
   /// window, which is how the console fills a freshly opened thread.
-  Future<MessagePage> messages(String id, {int after = 0, int limit = 50}) async {
+  Future<MessagePage> messages(
+    String id, {
+    int after = 0,
+    int before = 0,
+    int limit = 50,
+    String selfId = '',
+  }) async {
     final body = await _send(
       'GET',
       '/api/v1/console/conversations/$id/messages',
-      query: <String, String>{'after': '$after', 'limit': '$limit'},
+      query: <String, String>{
+        'after': '$after',
+        if (before > 0) 'before': '$before',
+        'limit': '$limit',
+      },
     );
     return MessagePage(
-      items: asMapList(body['items']).map(ChatMessage.fromJson).toList(),
+      items: asMapList(body['items'])
+          .map((item) => ChatMessage.fromJson(item, selfId: selfId))
+          .toList(),
       lastSequence: asInt(body['lastSequence']),
       agentUnread: asInt(body['agentUnread']),
+      hasMore: asBool(body['hasMore']),
+      hasOlder: asBool(body['hasOlder']),
+      firstSequence: asInt(body['firstSequence']),
+      lastReadSequence: asInt(body['lastReadSequence']),
+      visitorUnread: asInt(body['visitorUnread']),
     );
   }
 
+  /// Searches the open thread. The server returns excerpts with the matched
+  /// terms already wrapped in `<< >>`, having run the same tokenizer that
+  /// indexed the message, so the highlight is exactly what was matched rather
+  /// than a client-side guess at Chinese word boundaries.
+  Future<List<SearchHit>> searchConversation(
+    String id, {
+    required String query,
+    int limit = 30,
+  }) async {
+    final body = await _send(
+      'GET',
+      '/api/v1/console/conversations/$id/search',
+      query: <String, String>{'q': query, 'limit': '$limit'},
+    );
+    return asMapList(body['items']).map(SearchHit.fromJson).toList();
+  }
+
+  /// The pinned messages of a conversation, used to draw the pin bar before any
+  /// messages have loaded.
+  Future<List<ChatMessage>> pins(String id, {String selfId = ''}) async {
+    final body = await _send(
+      'GET',
+      '/api/v1/console/conversations/$id/pins',
+    );
+    return asMapList(body['items'])
+        .map((item) => ChatMessage.fromJson(item, selfId: selfId))
+        .toList();
+  }
+
+  /// Pins or unpins a message. Returns the resulting pin bar so the caller
+  /// re-renders from authoritative state rather than from the request it made.
+  Future<List<ChatMessage>> setPinned(
+    String conversationId,
+    String messageId, {
+    required bool pinned,
+    String selfId = '',
+  }) async {
+    final body = await _send(
+      'POST',
+      '/api/v1/console/conversations/$conversationId/messages/$messageId/pin',
+      body: <String, dynamic>{'pinned': pinned},
+    );
+    return asMapList(body['items'])
+        .map((item) => ChatMessage.fromJson(item, selfId: selfId))
+        .toList();
+  }
+
+  /// Toggles one emoji on a message. The endpoint removes the reaction when it
+  /// is already there, so the same call adds and removes, and the response
+  /// carries the full aggregate for the message.
+  Future<List<MessageReaction>> toggleReaction(
+    String conversationId,
+    String messageId, {
+    required String emoji,
+    String selfId = '',
+  }) async {
+    final body = await _send(
+      'POST',
+      '/api/v1/console/conversations/$conversationId/messages/$messageId/reactions',
+      body: <String, dynamic>{'emoji': emoji},
+    );
+    return asMapList(body['reactions'])
+        .map((item) => MessageReaction.fromJson(item, selfId))
+        .toList();
+  }
+
+  /// Rewrites the text of a message the caller wrote. The server refuses an edit
+  /// by anyone but the author, and a tenant manager correcting a record.
+  Future<ChatMessage> editMessage(
+    String conversationId,
+    String messageId, {
+    required String content,
+    String selfId = '',
+  }) async {
+    final body = await _send(
+      'PATCH',
+      '/api/v1/console/conversations/$conversationId/messages/$messageId',
+      body: <String, dynamic>{'content': content},
+    );
+    return ChatMessage.fromJson(body, selfId: selfId);
+  }
+
+  /// Recalls a message. It keeps its row and its sequence so a client that
+  /// already rendered it replaces the bubble instead of shifting the transcript.
+  Future<ChatMessage> deleteMessage(
+    String conversationId,
+    String messageId, {
+    String selfId = '',
+  }) async {
+    final body = await _send(
+      'DELETE',
+      '/api/v1/console/conversations/$conversationId/messages/$messageId',
+    );
+    return ChatMessage.fromJson(body, selfId: selfId);
+  }
+
+  /// The draft this agent left in a conversation, so switching threads does not
+  /// lose a half-written answer.
+  Future<String> draft(String conversationId) async {
+    final body = await _send(
+      'GET',
+      '/api/v1/console/conversations/$conversationId/draft',
+    );
+    return asString(body['content']);
+  }
+
+  /// Saves the draft, or clears it when [content] is blank — which is what the
+  /// server does with an empty body, rather than keeping a row every console
+  /// would have to filter out.
+  Future<void> saveDraft(String conversationId, String content) async {
+    await _send(
+      'PUT',
+      '/api/v1/console/conversations/$conversationId/draft',
+      body: <String, dynamic>{'content': content},
+    );
+  }
+
+  /// Reports the highest sequence this console holds, which lets the agent's
+  /// screen distinguish "delivered" from "read" for the visitor. Delivery is
+  /// separate from reading: a thread opened in a background tab has received
+  /// the message without anyone having looked at it.
+  Future<void> markDelivered(String conversationId, {int sequence = 0}) async {
+    await _send(
+      'POST',
+      '/api/v1/console/conversations/$conversationId/delivered',
+      body: <String, dynamic>{'sequence': sequence},
+    );
+  }
+
+  /// Copies a message into another conversation, recording where it came from.
+  Future<ChatMessage> forwardMessage(
+    String conversationId,
+    String messageId, {
+    required String targetConversationId,
+    String note = '',
+    String selfId = '',
+  }) async {
+    final body = await _send(
+      'POST',
+      '/api/v1/console/conversations/$conversationId/messages/$messageId/forward',
+      body: <String, dynamic>{
+        'conversationId': targetConversationId,
+        'note': note,
+      },
+    );
+    return ChatMessage.fromJson(body, selfId: selfId);
+  }
+
   /// Sends a reply. [clientMessageId] makes the send idempotent, so a retry
-  /// after a timeout cannot post the same answer twice.
+  /// after a timeout cannot post the same answer twice. [replyToId] turns the
+  /// send into a quote.
   Future<ChatMessage> send({
     required String conversationId,
     required String content,
@@ -252,7 +442,9 @@ class RelayDeskApi {
     String messageType = 'TEXT',
     List<String> attachmentIds = const <String>[],
     bool private = false,
+    String? replyToId,
     Map<String, dynamic>? metadata,
+    String selfId = '',
   }) async {
     final body = await _send(
       'POST',
@@ -263,10 +455,11 @@ class RelayDeskApi {
         'messageType': messageType,
         'attachmentIds': attachmentIds,
         'private': private,
+        if (replyToId != null && replyToId.isNotEmpty) 'replyToId': replyToId,
         if (metadata != null) 'metadata': metadata,
       },
     );
-    return ChatMessage.fromJson(body);
+    return ChatMessage.fromJson(body, selfId: selfId);
   }
 
   /// Claims the conversation for the caller. The endpoint answers with a bare

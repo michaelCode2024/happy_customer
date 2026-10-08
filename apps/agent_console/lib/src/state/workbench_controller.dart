@@ -38,9 +38,14 @@ extension QueueFilterLabel on QueueFilter {
 /// That is what makes a dropped connection a non-event rather than a data-loss
 /// bug.
 class WorkbenchController extends ChangeNotifier {
-  WorkbenchController({required this.api});
+  WorkbenchController({required this.api, this.selfId = ''});
 
   final RelayDeskApi api;
+
+  /// The signed-in agent's id. The server never says "this is yours", so the
+  /// console compares `senderId` against this to decide who may edit or recall
+  /// a message, and which reactions are already chosen.
+  final String selfId;
 
   // ------------------------------------------------------------------- state
 
@@ -62,6 +67,32 @@ class WorkbenchController extends ChangeNotifier {
   bool _loadingMore = false;
   bool _hasMoreHistory = false;
   String? _threadError;
+
+  /// The message the composer is answering. Null means a plain reply.
+  ChatMessage? _replyTo;
+
+  /// The pin bar. Held apart from [_messages] because a pinned message may have
+  /// scrolled out of the retained window and must still stay visible.
+  List<ChatMessage> _pins = const <ChatMessage>[];
+
+  /// In-thread search. The hits are excerpts with the matched terms marked, so
+  /// they are only useful while the query that produced them is on screen.
+  List<SearchHit> _searchHits = const <SearchHit>[];
+  String _searchQuery = '';
+  bool _searching = false;
+  String? _searchError;
+
+  /// Where "以下为新消息" belongs. This is the read cursor as the server knows
+  /// it, captured when the thread was opened, so the divider does not move as
+  /// the agent reads.
+  int _readBoundary = 0;
+
+  /// The highest sequence this console has rendered, reported back as a
+  /// delivery receipt. Delivery and reading are separate: a thread that is open
+  /// but not being looked at has delivered its messages without anyone reading
+  /// them.
+  int _deliveredSequence = 0;
+  Timer? _deliveredDebounce;
 
   List<AgentSummary> _agents = const <AgentSummary>[];
   List<CannedResponse> _canned = const <CannedResponse>[];
@@ -136,6 +167,30 @@ class WorkbenchController extends ChangeNotifier {
 
   String? get threadError => _threadError;
 
+  /// The quoted message the composer is answering, if any.
+  ChatMessage? get replyTo => _replyTo;
+
+  List<ChatMessage> get pins => _pins;
+
+  List<SearchHit> get searchHits => _searchHits;
+
+  String get searchQuery => _searchQuery;
+
+  bool get searching => _searching;
+
+  String? get searchError => _searchError;
+
+  /// The sequence the "以下为新消息" divider sits after, or 0 when there is
+  /// nothing new in this thread.
+  int get readBoundary => _readBoundary;
+
+  /// True when the divider belongs in the transcript at all: the unread slice
+  /// must actually be inside the window that is loaded.
+  bool get showUnreadDivider =>
+      _readBoundary > 0 &&
+      _messages.any((message) => message.sequence > _readBoundary) &&
+      _messages.any((message) => message.sequence <= _readBoundary);
+
   List<AgentSummary> get agents => _agents;
 
   List<CannedResponse> get canned => _canned;
@@ -183,6 +238,7 @@ class WorkbenchController extends ChangeNotifier {
   void _onEvent(RealtimeEvent event) {
     switch (event.type) {
       case 'message.created':
+      case 'message.updated':
       case 'conversation.created':
       case 'conversation.assigned':
       case 'conversation.transferred':
@@ -196,6 +252,15 @@ class WorkbenchController extends ChangeNotifier {
     }
     if (event.type == 'message.created') {
       _applyIncomingMessage(event);
+    }
+    if (event.type == 'message.updated') {
+      _applyUpdatedMessage(event);
+    }
+    if (event.type == 'message.reaction') {
+      _applyReactions(event);
+    }
+    if (event.type == 'message.pinned') {
+      _applyPins(event);
     }
     if (event.type == 'typing' && event.conversationId == _selectedId) {
       _typingConversationId = event.conversationId;
@@ -220,7 +285,7 @@ class WorkbenchController extends ChangeNotifier {
     if (event.conversationId != _selectedId) {
       return;
     }
-    final incoming = ChatMessage.fromJson(event.data);
+    final incoming = ChatMessage.fromJson(event.data, selfId: selfId);
     if (incoming.id.isEmpty) {
       return;
     }
@@ -240,6 +305,113 @@ class WorkbenchController extends ChangeNotifier {
     merged.sort(_bySequence);
     _messages = _trimHistory(merged);
     _lastSequence = math.max(_lastSequence, incoming.sequence);
+    // Anything that arrives while the agent is looking at the thread has been
+    // delivered even if it is never read, so the visitor's tick advances.
+    _scheduleDelivered();
+    _notify();
+  }
+
+  /// Replaces one message wholesale after an edit or a recall. The row keeps its
+  /// sequence, so a client that already rendered it substitutes the bubble
+  /// rather than shifting everything below it.
+  void _applyUpdatedMessage(RealtimeEvent event) {
+    if (event.conversationId != _selectedId) {
+      return;
+    }
+    final updated = ChatMessage.fromJson(event.data, selfId: selfId);
+    if (updated.id.isEmpty) {
+      return;
+    }
+    final index = _messages.indexWhere((message) => message.id == updated.id);
+    if (index < 0) {
+      // A message outside the retained window was recalled; the pin bar may
+      // still be showing it, so it is dropped from there too.
+      if (updated.isDeleted && _pins.any((pin) => pin.id == updated.id)) {
+        _pins = _pins.where((pin) => pin.id != updated.id).toList(growable: false);
+        _notify();
+      }
+      return;
+    }
+    _messages = List<ChatMessage>.of(_messages)..[index] = updated;
+    if (updated.isDeleted) {
+      _pins = _pins.where((pin) => pin.id != updated.id).toList(growable: false);
+    } else if (_pins.any((pin) => pin.id == updated.id) ||
+        _pins.any((pin) => pin.pinnedAt == null)) {
+      _pins = _pins
+          .map((pin) => pin.id == updated.id ? updated : pin)
+          .toList(growable: false);
+    }
+    _notify();
+  }
+
+  /// Applies a reaction event. Reactions travel on their own channel because
+  /// they change nothing about the message itself, and re-reading the whole
+  /// thread to draw one emoji would be absurd.
+  void _applyReactions(RealtimeEvent event) {
+    if (event.conversationId != _selectedId) {
+      return;
+    }
+    final data = event.data;
+    final messageId = data['messageId'];
+    if (messageId is! String) {
+      return;
+    }
+    final reactions = asMapList(data['reactions'])
+        .map((item) => MessageReaction.fromJson(item, selfId))
+        .toList(growable: false);
+    var changed = false;
+    _messages = _messages.map((message) {
+      if (message.id != messageId) {
+        return message;
+      }
+      changed = true;
+      return message.copyWith(reactions: reactions);
+    }).toList(growable: false);
+    _pins = _pins.map((pin) {
+      if (pin.id != messageId) {
+        return pin;
+      }
+      return pin.copyWith(reactions: reactions);
+    }).toList(growable: false);
+    if (changed) {
+      _notify();
+    }
+  }
+
+  /// Applies a pin event. The event carries the whole pin bar, so the console
+  /// adopts that rather than guessing which entries moved.
+  void _applyPins(RealtimeEvent event) {
+    if (event.conversationId != _selectedId) {
+      return;
+    }
+    final data = event.data;
+    final pinned = data['pinned'];
+    final messageId = data['messageId'];
+    if (data['pinnedMessages'] != null) {
+      _pins = asMapList(data['pinnedMessages'])
+          .map((item) => ChatMessage.fromJson(item, selfId: selfId))
+          .toList(growable: false);
+    } else if (messageId is String) {
+      // Fallback for a payload without the list: patch the one message.
+      _pins = _pins.where((pin) => pin.id != messageId).toList(growable: false);
+      if (pinned == true) {
+        final match = _messages.where((message) => message.id == messageId);
+        if (match.isNotEmpty) {
+          _pins = <ChatMessage>[..._pins, match.first];
+        }
+      }
+    }
+    // The pin state also lives on the message itself, so the bubble's marker
+    // stays in step with the bar.
+    _messages = _messages.map((message) {
+      if (message.id != messageId) {
+        return message;
+      }
+      return message.copyWith(
+        pinnedAt: pinned == true ? (message.pinnedAt ?? DateTime.now()) : null,
+        clearPinned: pinned != true,
+      );
+    }).toList(growable: false);
     _notify();
   }
 
@@ -360,8 +532,16 @@ class WorkbenchController extends ChangeNotifier {
     _hasMoreHistory = false;
     _threadError = null;
     _typingConversationId = null;
+    _replyTo = null;
+    _pins = const <ChatMessage>[];
+    _readBoundary = 0;
+    _deliveredSequence = 0;
+    clearSearch();
     _notify();
     await _loadDetail(conversationId);
+    // The pin bar is loaded before the transcript so it is on screen even if the
+    // pinned message itself has aged out of the window.
+    unawaited(_loadPins(conversationId));
     await _loadLatest(conversationId);
     unawaited(markRead(conversationId));
   }
@@ -371,6 +551,10 @@ class WorkbenchController extends ChangeNotifier {
     _detail = null;
     _messages = const <ChatMessage>[];
     _lastSequence = 0;
+    _replyTo = null;
+    _pins = const <ChatMessage>[];
+    _readBoundary = 0;
+    clearSearch();
     _notify();
   }
 
@@ -416,13 +600,27 @@ class WorkbenchController extends ChangeNotifier {
     var cursor = 0;
     var serverLast = 0;
     var pages = 0;
+    var readBoundary = 0;
+    var delivered = 0;
     try {
       while (pages < maxPages) {
-        final page = await api.messages(conversationId, after: cursor, limit: pageSize);
+        final page = await api.messages(
+          conversationId,
+          after: cursor,
+          limit: pageSize,
+          selfId: selfId,
+        );
         if (_selectedId != conversationId || generation != _threadGeneration) {
           return;
         }
         serverLast = math.max(serverLast, page.lastSequence);
+        // The boundary is whatever the server said on the first page: it does
+        // not change while the walk continues, and only the opening page can
+        // describe where the agent left off.
+        if (pages == 0) {
+          readBoundary = page.lastReadSequence;
+          delivered = page.hasMore ? 0 : serverLast;
+        }
         collected.addAll(page.items);
         pages += 1;
         if (page.items.isEmpty) {
@@ -450,15 +648,38 @@ class WorkbenchController extends ChangeNotifier {
     _hasMoreHistory = pages >= maxPages;
     _messages = _trimHistory(collected);
     _lastSequence = math.max(serverLast, collected.isEmpty ? 0 : collected.last.sequence);
+    _readBoundary = readBoundary;
     _loadingThread = false;
     _notify();
     _refreshSelectedRow();
+    _scheduleDelivered(sequence: math.max(delivered, _lastSequence));
+  }
+
+  /// Loads the pin bar. The pins are a small, bounded list, so they are fetched
+  /// whole rather than derived from whatever is in the transcript window.
+  Future<void> _loadPins(String conversationId) async {
+    try {
+      final pins = await api.pins(conversationId, selfId: selfId);
+      if (_selectedId != conversationId) {
+        return;
+      }
+      _pins = pins;
+      _notify();
+    } on ApiException {
+      // The pin bar is an affordance, not the transcript: a failure here must
+      // not blank the thread.
+    }
   }
 
   /// Pulls only what arrived while the socket was down.
   Future<void> _pullMissed(String conversationId) async {
     try {
-      final page = await api.messages(conversationId, after: _lastSequence, limit: 200);
+      final page = await api.messages(
+        conversationId,
+        after: _lastSequence,
+        limit: 200,
+        selfId: selfId,
+      );
       if (_selectedId != conversationId || page.items.isEmpty) {
         return;
       }
@@ -466,18 +687,18 @@ class WorkbenchController extends ChangeNotifier {
       merged.sort(_bySequence);
       _messages = _trimHistory(merged);
       _lastSequence = math.max(_lastSequence, page.lastSequence);
+      _scheduleDelivered();
       _notify();
     } on ApiException {
       // The next reconnect or manual refresh will pick it up.
     }
   }
 
-  /// Fetches one page of older messages, prepended to the thread.
+  /// Fetches one page of older messages and prepends it to the thread.
   ///
-  /// Walking backwards is not something the API offers, so this is implemented
-  /// by paging forward from zero and keeping the window that ends just before
-  /// what is already loaded. It is only reachable when a very long thread hit
-  /// the page cap, which is rare enough to justify the extra requests.
+  /// This asks for what precedes the oldest loaded sequence (`before=`), so a
+  /// long thread costs one request per screenful instead of re-walking from the
+  /// top of the conversation every time the agent scrolls up.
   Future<void> loadOlder() async {
     final id = _selectedId;
     if (id == null || _loadingMore || !_hasMoreHistory || _messages.isEmpty) {
@@ -486,44 +707,37 @@ class WorkbenchController extends ChangeNotifier {
     _loadingMore = true;
     _notify();
     final oldestLoaded = _messages.first.sequence;
-    const pageSize = 200;
-    final collected = <ChatMessage>[];
-    var cursor = 0;
     try {
-      while (true) {
-        final page = await api.messages(id, after: cursor, limit: pageSize);
-        if (_selectedId != id) {
-          return;
-        }
-        final older = page.items
-            .where((message) => message.sequence < oldestLoaded)
-            .toList(growable: false);
-        collected.addAll(older);
-        if (page.items.isEmpty ||
-            page.items.last.sequence >= oldestLoaded ||
-            collected.length >= pageSize) {
-          break;
-        }
-        cursor = page.items.last.sequence;
+      final page = await api.messages(
+        id,
+        before: oldestLoaded,
+        limit: pageSize,
+        selfId: selfId,
+      );
+      if (_selectedId != id) {
+        return;
       }
+      final older = page.items
+          .where((message) => message.sequence < oldestLoaded)
+          .toList(growable: false);
+      if (older.isNotEmpty) {
+        final merged = <ChatMessage>[...older, ..._messages]..sort(_bySequence);
+        _messages = merged;
+      }
+      _hasMoreHistory = page.hasOlder;
     } on ApiException catch (failure) {
       _threadError = failure.message;
-      _loadingMore = false;
-      _notify();
-      return;
     } finally {
       if (_selectedId == id) {
         _loadingMore = false;
+        _notify();
       }
     }
-    if (_selectedId != id) {
-      return;
-    }
-    final merged = <ChatMessage>[...collected, ..._messages]..sort(_bySequence);
-    _messages = merged;
-    _hasMoreHistory = collected.length >= pageSize;
-    _notify();
   }
+
+  /// The number of messages fetched per page. Matches what the walk uses, so a
+  /// screenful of scroll-back and the opening load agree on their granularity.
+  static const int pageSize = 200;
 
   /// Re-reads the open row in the queue so its preview and unread badge match
   /// the thread that is on screen.
@@ -552,11 +766,16 @@ class WorkbenchController extends ChangeNotifier {
     List<Attachment> attachments = const <Attachment>[],
     bool private = false,
     String? clientMessageId,
+    QuotedMessage? quote,
   }) async {
     final id = _selectedId;
     if (id == null) {
       return false;
     }
+    // A quote is taken from the argument or, when the caller passes nothing,
+    // from whatever the composer had selected. Passing it explicitly is what
+    // makes a retry re-send the same quote rather than the one that replaced it.
+    final quoted = quote ?? _replyTo?.toQuote();
     final localId = clientMessageId ?? 'local-${DateTime.now().microsecondsSinceEpoch}';
     final messageType = attachments.isEmpty
         ? 'TEXT'
@@ -567,10 +786,13 @@ class WorkbenchController extends ChangeNotifier {
       content: content,
       messageType: messageType,
       attachments: attachments,
-      senderId: _detail?.conversation.assigneeId,
+      senderId: selfId.isEmpty ? _detail?.conversation.assigneeId : selfId,
+      senderName: _detail?.conversation.assigneeName ?? '',
       isPrivate: private,
+      replyTo: quoted,
     );
     _messages = _trimHistory(<ChatMessage>[..._messages, optimistic]);
+    _replyTo = null;
     _notify();
     try {
       final saved = await api.send(
@@ -580,10 +802,15 @@ class WorkbenchController extends ChangeNotifier {
         messageType: messageType,
         attachmentIds: attachments.map((item) => item.id).toList(growable: false),
         private: private,
+        replyToId: quoted?.id,
+        selfId: selfId,
       );
       _replaceLocal(localId, saved.copyWith(delivery: DeliveryState.sent));
       _lastSequence = math.max(_lastSequence, saved.sequence);
       _notify();
+      // Sending a reply is what clears the stored draft; the server does the
+      // same on its side, so the two cannot disagree about what is pending.
+      unawaited(_clearDraft(id));
       _scheduleListRefresh();
       return true;
     } on ApiException catch (failure) {
@@ -596,8 +823,16 @@ class WorkbenchController extends ChangeNotifier {
     }
   }
 
+  /// Sets the message the next reply will quote. Passing null cancels the quote.
+  void quote(ChatMessage? message) {
+    _replyTo = message;
+    _notify();
+  }
+
   /// Retries a failed bubble, reusing its client message id so a message that
   /// actually arrived before the timeout cannot be duplicated server-side.
+  /// The quoting is replayed from the bubble itself, because the composer's
+  /// selection was cleared when the first attempt was made.
   Future<bool> retry(ChatMessage message) async {
     final localId = message.clientMessageId;
     if (localId == null) {
@@ -608,7 +843,226 @@ class WorkbenchController extends ChangeNotifier {
       attachments: message.attachments,
       private: message.isPrivate,
       clientMessageId: localId,
+      quote: message.replyTo,
     );
+  }
+
+  /// Rewrites the text of a message this agent wrote.
+  Future<void> editMessage(ChatMessage message, String content) async {
+    final id = _selectedId;
+    if (id == null) {
+      return;
+    }
+    try {
+      final updated = await api.editMessage(
+        id,
+        message.id,
+        content: content,
+        selfId: selfId,
+      );
+      _substitute(updated);
+    } on ApiException catch (failure) {
+      _threadError = failure.message;
+      _notify();
+    }
+  }
+
+  /// Recalls a message, leaving a tombstone in place so the transcript does not
+  /// shift under the reader.
+  Future<void> deleteMessage(ChatMessage message) async {
+    final id = _selectedId;
+    if (id == null) {
+      return;
+    }
+    try {
+      final updated = await api.deleteMessage(id, message.id, selfId: selfId);
+      _substitute(updated);
+      _pins = _pins.where((pin) => pin.id != updated.id).toList(growable: false);
+      _scheduleListRefresh();
+      _notify();
+    } on ApiException catch (failure) {
+      _threadError = failure.message;
+      _notify();
+    }
+  }
+
+  /// Toggles an emoji on a message. The response carries the full aggregate, so
+  /// the console adopts that instead of applying its own delta.
+  Future<void> react(ChatMessage message, String emoji) async {
+    final id = _selectedId;
+    if (id == null) {
+      return;
+    }
+    try {
+      final reactions = await api.toggleReaction(
+        id,
+        message.id,
+        emoji: emoji,
+        selfId: selfId,
+      );
+      _messages = _messages
+          .map((item) =>
+              item.id == message.id ? item.copyWith(reactions: reactions) : item)
+          .toList(growable: false);
+      _pins = _pins
+          .map((pin) => pin.id == message.id ? pin.copyWith(reactions: reactions) : pin)
+          .toList(growable: false);
+      _notify();
+    } on ApiException catch (failure) {
+      _threadError = failure.message;
+      _notify();
+    }
+  }
+
+  /// Pins or unpins a message. The server returns the resulting bar, which is
+  /// adopted whole so the console never guesses which entries moved.
+  Future<void> togglePin(ChatMessage message) async {
+    final id = _selectedId;
+    if (id == null) {
+      return;
+    }
+    final pinned = !message.isPinned;
+    // Optimistic, because a pin is a local reading aid and a round trip is
+    // visible on a tap.
+    _messages = _messages
+        .map((item) => item.id == message.id
+            ? item.copyWith(
+                pinnedAt: pinned ? DateTime.now() : null,
+                clearPinned: !pinned,
+              )
+            : item)
+        .toList(growable: false);
+    _notify();
+    try {
+      final pins = await api.setPinned(id, message.id, pinned: pinned, selfId: selfId);
+      if (_selectedId != id) {
+        return;
+      }
+      _pins = pins;
+      _notify();
+    } on ApiException catch (failure) {
+      _threadError = failure.message;
+      // The optimistic flip is undone by reloading the authoritative bar and
+      // the message row rather than by inverting the guess, which could be
+      // wrong if the same message was pinned elsewhere in the meantime.
+      await _loadPins(id);
+      final match = _messages.where((item) => item.id == message.id);
+      if (match.isNotEmpty) {
+        _substitute(match.first.copyWith(
+          pinnedAt: pinned ? null : (message.pinnedAt ?? DateTime.now()),
+          clearPinned: pinned,
+        ));
+      }
+      _notify();
+    }
+  }
+
+  /// Copies a message into another conversation.
+  ///
+  /// This is a copy rather than a move: the original stays where it was, and the
+  /// new one records `forwardedFromId`. The target is not opened, because an
+  /// agent forwarding a screenshot to a colleague usually wants to stay put.
+  Future<bool> forward(ChatMessage message, String targetConversationId) async {
+    final id = _selectedId;
+    if (id == null) {
+      return false;
+    }
+    try {
+      await api.forwardMessage(
+        id,
+        message.id,
+        targetConversationId: targetConversationId,
+        selfId: selfId,
+      );
+      _scheduleListRefresh();
+      return true;
+    } on ApiException catch (failure) {
+      _threadError = failure.message;
+      _notify();
+      return false;
+    }
+  }
+
+  // ------------------------------------------------------------------ drafts
+
+  /// The draft this agent left in the open conversation, loaded when the thread
+  /// is opened so switching away and back does not lose a half-written answer.
+  Future<String> loadDraft(String conversationId) async {
+    try {
+      return await api.draft(conversationId);
+    } on ApiException {
+      return '';
+    }
+  }
+
+  /// Saves the draft text. Blank content clears it.
+  Future<void> saveDraft(String content) async {
+    final id = _selectedId;
+    if (id == null) {
+      return;
+    }
+    try {
+      await api.saveDraft(id, content);
+    } on ApiException {
+      // A draft is a convenience: losing one must never interrupt a reply.
+    }
+  }
+
+  Future<void> _clearDraft(String conversationId) async {
+    try {
+      await api.saveDraft(conversationId, '');
+    } on ApiException {
+      // Ignored, as above.
+    }
+  }
+
+  // ------------------------------------------------------------------ search
+
+  /// Searches the open thread. The hits are excerpts rather than messages, so
+  /// they are held separately from the transcript and cleared when the query
+  /// changes — a stale hit list pointing at the previous keyword would be worse
+  /// than none.
+  Future<void> searchThread(String query) async {
+    final id = _selectedId;
+    final trimmed = query.trim();
+    _searchQuery = trimmed;
+    if (id == null || trimmed.isEmpty) {
+      _searchHits = const <SearchHit>[];
+      _searching = false;
+      _searchError = null;
+      _notify();
+      return;
+    }
+    _searching = true;
+    _searchError = null;
+    _notify();
+    try {
+      final hits = await api.searchConversation(id, query: trimmed);
+      // The query may have changed, or the thread, while the request was in
+      // flight; only the newest search may write its results.
+      if (_selectedId != id || _searchQuery != trimmed) {
+        return;
+      }
+      _searchHits = hits;
+    } on ApiException catch (failure) {
+      if (_selectedId != id || _searchQuery != trimmed) {
+        return;
+      }
+      _searchHits = const <SearchHit>[];
+      _searchError = failure.message;
+    } finally {
+      if (_selectedId == id && _searchQuery == trimmed) {
+        _searching = false;
+        _notify();
+      }
+    }
+  }
+
+  void clearSearch() {
+    _searchQuery = '';
+    _searchHits = const <SearchHit>[];
+    _searchError = null;
+    _searching = false;
   }
 
   void _replaceLocal(String localId, ChatMessage replacement) {
@@ -717,6 +1171,48 @@ class WorkbenchController extends ChangeNotifier {
     }
   }
 
+  /// Reports the highest sequence this console holds.
+  ///
+  /// Debounced and monotonic: a burst of arriving messages produces one request
+  /// carrying the newest watermark, and a late reply can never rewind it. The
+  /// server applies `greatest()` for the same reason, so both ends agree that
+  /// delivery only moves forward.
+  void _scheduleDelivered({int? sequence}) {
+    final target = math.max(sequence ?? _lastSequence, _deliveredSequence);
+    if (target <= _deliveredSequence) {
+      return;
+    }
+    _deliveredSequence = target;
+    _deliveredDebounce?.cancel();
+    _deliveredDebounce = Timer(const Duration(milliseconds: 400), () {
+      final id = _selectedId;
+      if (id == null) {
+        return;
+      }
+      unawaited(api
+          .markDelivered(id, sequence: _deliveredSequence)
+          .catchError((Object _) {}));
+    });
+  }
+
+  /// Replaces one message in the transcript by id, keeping the ordering intact.
+  void _substitute(ChatMessage updated) {
+    if (updated.id.isEmpty) {
+      return;
+    }
+    var found = false;
+    _messages = _messages.map((message) {
+      if (message.id != updated.id) {
+        return message;
+      }
+      found = true;
+      return updated;
+    }).toList(growable: false);
+    if (found) {
+      _notify();
+    }
+  }
+
   void notifyVisitorTyping(String conversationId) {
     _socket?.sendTyping(conversationId);
   }
@@ -818,6 +1314,7 @@ class WorkbenchController extends ChangeNotifier {
     _closed = true;
     _listDebounce?.cancel();
     _typingDecay?.cancel();
+    _deliveredDebounce?.cancel();
     _eventSubscription?.cancel();
     _stateSubscription?.cancel();
     _reconnectSubscription?.cancel();

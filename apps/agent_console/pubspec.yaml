@@ -20,6 +20,10 @@ dependencies:
   # Pinned to the 0.8 line on purpose: the console must build against whatever
   # Flutter a developer already has, and image_picker 1.x requires Dart 3.10+.
   image_picker: ^0.8.9
+  # Voice notes. Pinned to 0.9 because 0.10 reshuffled the platform packages;
+  # windows is not among the platforms it implements, so the console guards
+  # playback and falls back to a file chip there.
+  just_audio: ^0.9.39
 
 dev_dependencies:
   flutter_test:

@@ -13,6 +13,7 @@ import 'package:relaydesk_agent_console/src/ui/settings_page.dart';
 import 'package:relaydesk_agent_console/src/ui/stats_page.dart';
 import 'package:relaydesk_agent_console/src/ui/visitor_sidebar.dart';
 import 'package:relaydesk_agent_console/src/util/attachment_picker.dart';
+import 'package:relaydesk_agent_console/src/util/voice_player.dart';
 
 /// The console's top-level sections.
 enum WorkbenchSection { conversations, stats, knowledge, settings }
@@ -61,7 +62,10 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
   @override
   void initState() {
     super.initState();
-    _workbench = WorkbenchController(api: widget.session.api);
+    _workbench = WorkbenchController(
+      api: widget.session.api,
+      selfId: widget.session.agent?.id ?? '',
+    );
     _picker = widget.picker ?? ImageAttachmentPicker();
     _workbench.connectRealtime();
     unawaited(_workbench.refreshConversations());
@@ -71,6 +75,10 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
   @override
   void dispose() {
     _workbench.dispose();
+    // The player is a process-wide singleton, so it is released rather than
+    // disposed: signing out and back in must not hand the new session a dead
+    // audio backend.
+    unawaited(VoicePlayer.instance.release());
     super.dispose();
   }
 

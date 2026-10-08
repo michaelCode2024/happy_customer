@@ -8,6 +8,7 @@ import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
 import 'package:relaydesk_agent_console/src/theme.dart';
 import 'package:relaydesk_agent_console/src/util/attachment_picker.dart';
 import 'package:relaydesk_agent_console/src/util/format.dart';
+import 'package:relaydesk_agent_console/src/util/voice_player.dart';
 
 /// The middle pane: the conversation itself.
 ///
@@ -37,6 +38,7 @@ class _ChatPanelState extends State<ChatPanel> {
   final _composer = TextEditingController();
   final _composerFocus = FocusNode();
   final _scroll = ScrollController();
+  final _searchField = TextEditingController();
 
   /// Files chosen but not yet sent. They are attached to the next message, which
   /// is what a chat client is expected to do.
@@ -46,6 +48,21 @@ class _ChatPanelState extends State<ChatPanel> {
   bool _sending = false;
   bool _uploading = false;
   String? _uploadError;
+
+  /// The conversation whose draft is currently in the composer, and whether the
+  /// server's copy has been read yet. Until it has, an empty composer means "not
+  /// loaded" rather than "nothing written", so a save would erase a draft the
+  /// agent left on another device.
+  String? _draftConversationId;
+  bool _draftLoaded = false;
+  Timer? _draftDebounce;
+
+  bool _searchOpen = false;
+  Timer? _searchDebounce;
+
+  /// The message currently flashing after a jump from search or the pin bar.
+  int? _flashSequence;
+  Timer? _flashTimer;
 
   Timer? _typingThrottle;
   bool _typingSent = false;
@@ -58,15 +75,63 @@ class _ChatPanelState extends State<ChatPanel> {
   void initState() {
     super.initState();
     _scroll.addListener(_onScroll);
+    widget.workbench.addListener(_onWorkbenchChanged);
   }
 
   @override
   void dispose() {
+    _draftDebounce?.cancel();
+    _flashTimer?.cancel();
+    _searchDebounce?.cancel();
+    widget.workbench.removeListener(_onWorkbenchChanged);
     _composer.dispose();
     _composerFocus.dispose();
     _scroll.dispose();
+    _searchField.dispose();
     _typingThrottle?.cancel();
     super.dispose();
+  }
+
+  /// Keeps the composer in step with the open conversation: a draft is fetched
+  /// when one is opened, and saved as it is typed. The controller is the only
+  /// place that knows both the open thread and the half-written answer, so this
+  /// is where the two are joined.
+  void _onWorkbenchChanged() {
+    final id = widget.workbench.selectedId;
+    if (id == _draftConversationId) {
+      return;
+    }
+    unawaited(_syncDraft(id));
+  }
+
+  Future<void> _syncDraft(String? conversationId) async {
+    _draftDebounce?.cancel();
+    _draftConversationId = conversationId;
+    _draftLoaded = false;
+    _composer.clear();
+    if (conversationId == null) {
+      _draftLoaded = true;
+      return;
+    }
+    final draft = await widget.workbench.loadDraft(conversationId);
+    // The agent may have moved on while the request was in flight; adopting it
+    // then would drop the text they are typing into the new thread.
+    if (_draftConversationId != conversationId) {
+      return;
+    }
+    _composer.text = draft;
+    _composer.selection = TextSelection.collapsed(offset: draft.length);
+    _draftLoaded = true;
+  }
+
+  void _scheduleDraftSave(String value) {
+    if (!_draftLoaded) {
+      return;
+    }
+    _draftDebounce?.cancel();
+    _draftDebounce = Timer(const Duration(milliseconds: 600), () {
+      unawaited(widget.workbench.saveDraft(value));
+    });
   }
 
   void _onScroll() {
@@ -142,16 +207,21 @@ class _ChatPanelState extends State<ChatPanel> {
     }
     final workbench = widget.workbench;
     final attachments = List<Attachment>.of(_pending);
+    // The quote is captured before the composer is cleared, so the bubble keeps
+    // showing which message it answers.
+    final quote = workbench.replyTo?.toQuote();
     setState(() {
       _sending = true;
       _pending.clear();
       _composer.clear();
     });
+    _draftDebounce?.cancel();
     _stickToBottom = true;
     final ok = await workbench.send(
       content: text,
       attachments: attachments,
       private: _noteMode,
+      quote: quote,
     );
     if (!mounted) {
       return;
@@ -168,9 +238,193 @@ class _ChatPanelState extends State<ChatPanel> {
     }
   }
 
+  /// Rewrites an existing message. The dialog starts from the current text so a
+  /// correction is an edit rather than a retype.
+  Future<void> _editMessage(ChatMessage message) async {
+    final controller = TextEditingController(text: message.content);
+    final next = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('编辑消息'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          minLines: 1,
+          maxLines: 6,
+          decoration: const InputDecoration(hintText: '修改后的内容'),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    final trimmed = next?.trim();
+    if (trimmed == null || trimmed.isEmpty || trimmed == message.content) {
+      return;
+    }
+    await widget.workbench.editMessage(message, trimmed);
+  }
+
+  /// Recalls a message. Confirmed first, because the transcript keeps a
+  /// tombstone and the visitor sees the message disappear.
+  Future<void> _recallMessage(ChatMessage message) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('撤回这条消息？'),
+        content: const Text('撤回后访客将看不到这条消息，会话记录里会留下“已撤回”的标记。'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('撤回'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) {
+      return;
+    }
+    await widget.workbench.deleteMessage(message);
+  }
+
+  /// The reaction picker. Ten emoji, matching the server's allow-list, so a
+  /// choice can never come back as a validation error.
+  Future<void> _pickReaction(ChatMessage message) async {
+    final emoji = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: <Widget>[
+              for (final entry in kReactionLabels.entries)
+                Tooltip(
+                  message: entry.value,
+                  child: IconButton(
+                    onPressed: () => Navigator.of(context).pop(entry.key),
+                    iconSize: 26,
+                    icon: Text(entry.key),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (emoji == null) {
+      return;
+    }
+    await widget.workbench.react(message, emoji);
+  }
+
+  void _toggleSearch() {
+    setState(() => _searchOpen = !_searchOpen);
+    if (!_searchOpen) {
+      _searchField.clear();
+      widget.workbench.clearSearch();
+      return;
+    }
+    widget.workbench.clearSearch();
+  }
+
+  /// Searches the open thread. The query is debounced at the call site, so a
+  /// burst of typing produces one request rather than one per keystroke.
+  Future<void> _runSearch(String value) async {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+      unawaited(widget.workbench.searchThread(value));
+    });
+  }
+
+  /// Picks a conversation to forward a message into.
+  ///
+  /// The list is the queue the agent already has loaded rather than a fresh
+  /// search endpoint, which is both cheaper and matches their mental model: the
+  /// conversations they can see are the ones they can forward to.
+  Future<void> _forwardMessage(ChatMessage message) async {
+    final workbench = widget.workbench;
+    final options = workbench.conversations
+        .where((conversation) => conversation.id != message.conversationId)
+        .toList(growable: false);
+    final target = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('转发到'),
+        content: SizedBox(
+          width: 420,
+          height: 380,
+          child: options.isEmpty
+              ? const Center(child: Text('当前列表里没有其它会话'))
+              : ListView.builder(
+                  itemCount: options.length,
+                  itemBuilder: (context, index) {
+                    final conversation = options[index];
+                    return ListTile(
+                      dense: true,
+                      leading: Icon(
+                        conversation.isUnassigned
+                            ? Icons.inbox_outlined
+                            : Icons.support_agent,
+                        size: 18,
+                      ),
+                      title: Text(
+                        conversation.visitorName.isEmpty
+                            ? shortId(conversation.id)
+                            : conversation.visitorName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        conversation.lastMessagePreview.isEmpty
+                            ? conversation.subject
+                            : conversation.lastMessagePreview,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                      onTap: () => Navigator.of(context).pop(conversation.id),
+                    );
+                  },
+                ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+        ],
+      ),
+    );
+    if (target == null || !mounted) {
+      return;
+    }
+    final ok = await workbench.forward(message, target);
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(ok ? '已转发' : '转发失败，请稍后重试')),
+    );
+  }
+
   /// Tells the visitor the agent is typing. Throttled to one frame every few
   /// seconds: the indicator only needs to switch on.
   void _onComposerChanged(String value) {
+    _scheduleDraftSave(value);
     final conversationId = widget.workbench.selectedId;
     if (conversationId == null || _noteMode) {
       return;
@@ -201,16 +455,42 @@ class _ChatPanelState extends State<ChatPanel> {
             _ThreadHeader(
               conversation: conversation,
               workbench: workbench,
+              searchOpen: _searchOpen,
               onOpenProfile: widget.onOpenProfile,
+              onToggleSearch: _toggleSearch,
             ),
+            if (_searchOpen)
+              _SearchBar(
+                controller: _searchField,
+                onChanged: _runSearch,
+                onClose: _toggleSearch,
+              ),
+            if (workbench.searchQuery.isNotEmpty)
+              _SearchResults(
+                workbench: workbench,
+                onJump: (hit) => _scrollToMessage(workbench, hit.sequence),
+              ),
+            if (workbench.pins.isNotEmpty)
+              _PinBar(
+                pins: workbench.pins,
+                onJump: (message) => _scrollToMessage(workbench, message.sequence),
+                onUnpin: workbench.togglePin,
+              ),
             const Divider(height: 1),
             Expanded(
               child: _MessageList(
                 key: ValueKey<String>(conversation.id),
                 workbench: workbench,
                 scroll: _scroll,
+                flashSequence: _flashSequence,
                 onRetry: workbench.retry,
                 onLoadOlder: workbench.loadOlder,
+                onQuote: workbench.quote,
+                onEdit: _editMessage,
+                onRecall: _recallMessage,
+                onReact: _pickReaction,
+                onPin: workbench.togglePin,
+                onForward: _forwardMessage,
                 onJumpToBottom: () => _scrollToBottom(force: true),
               ),
             ),
@@ -226,9 +506,11 @@ class _ChatPanelState extends State<ChatPanel> {
               visitorTyping: workbench.visitorTyping,
               canned: workbench.cannedForSelection,
               supportsFiles: widget.picker.supportsArbitraryFiles,
+              quote: workbench.replyTo,
               onChanged: _onComposerChanged,
               onToggleNote: (value) => setState(() => _noteMode = value),
               onPickImage: _pickImage,
+              onClearQuote: () => workbench.quote(null),
               onRemovePending: (id) => setState(
                 () => _pending.removeWhere((item) => item.id == id),
               ),
@@ -238,6 +520,44 @@ class _ChatPanelState extends State<ChatPanel> {
         );
       },
     );
+  }
+
+  /// Scrolls to a message the agent picked out of the search panel or the pin
+  /// bar and flashes it, which is what makes a hit in a long thread findable.
+  void _scrollToMessage(WorkbenchController workbench, int sequence) {
+    final index = workbench.messages.indexWhere((item) => item.sequence == sequence);
+    if (index < 0) {
+      // The message is outside the retained window. Older history is loaded on
+      // demand, so the honest answer is that it is not loaded yet rather than
+      // silently doing nothing.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('这条消息不在已加载的范围内')),
+      );
+      return;
+    }
+    _stickToBottom = false;
+    setState(() => _flashSequence = sequence);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) {
+        return;
+      }
+      // Rows are laid out lazily, so an estimate is used only to get close; the
+      // highlight is what confirms the right row was reached.
+      final position = _scroll.position;
+      final fraction = workbench.messages.isEmpty
+          ? 0.0
+          : index / workbench.messages.length;
+      _scroll.jumpTo((position.maxScrollExtent * fraction).clamp(
+        0.0,
+        position.maxScrollExtent,
+      ));
+    });
+    _flashTimer?.cancel();
+    _flashTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) {
+        setState(() => _flashSequence = null);
+      }
+    });
   }
 
   /// Called by the parent when a conversation is opened, so the thread starts at
@@ -281,11 +601,15 @@ class _ThreadHeader extends StatelessWidget {
   const _ThreadHeader({
     required this.conversation,
     required this.workbench,
+    required this.searchOpen,
+    required this.onToggleSearch,
     this.onOpenProfile,
   });
 
   final Conversation conversation;
   final WorkbenchController workbench;
+  final bool searchOpen;
+  final VoidCallback onToggleSearch;
   final VoidCallback? onOpenProfile;
 
   @override
@@ -362,6 +686,12 @@ class _ThreadHeader extends StatelessWidget {
               onPressed: onOpenProfile,
               icon: const Icon(Icons.person_outline),
             ),
+          IconButton(
+            tooltip: searchOpen ? '关闭搜索' : '搜索会话内容',
+            onPressed: onToggleSearch,
+            isSelected: searchOpen,
+            icon: Icon(searchOpen ? Icons.search_off : Icons.search),
+          ),
           PopupMenuButton<String>(
             tooltip: '更多操作',
             onSelected: (value) {
@@ -517,15 +847,32 @@ class _MessageList extends StatelessWidget {
     super.key,
     required this.workbench,
     required this.scroll,
+    required this.flashSequence,
     required this.onRetry,
     required this.onLoadOlder,
+    required this.onQuote,
+    required this.onEdit,
+    required this.onRecall,
+    required this.onReact,
+    required this.onPin,
+    required this.onForward,
     required this.onJumpToBottom,
   });
 
   final WorkbenchController workbench;
   final ScrollController scroll;
+
+  /// The sequence to flash, set after a jump from search or the pin bar.
+  final int? flashSequence;
+
   final Future<bool> Function(ChatMessage) onRetry;
   final Future<void> Function() onLoadOlder;
+  final ValueChanged<ChatMessage?> onQuote;
+  final Future<void> Function(ChatMessage) onEdit;
+  final Future<void> Function(ChatMessage) onRecall;
+  final Future<void> Function(ChatMessage) onReact;
+  final Future<void> Function(ChatMessage) onPin;
+  final Future<void> Function(ChatMessage) onForward;
   final VoidCallback onJumpToBottom;
 
   @override
@@ -549,6 +896,11 @@ class _MessageList extends StatelessWidget {
     // conversation that spans weeks still reads as a timeline.
     final rows = <Widget>[];
     DateTime? lastDay;
+    // The divider belongs at the first message this agent had not read, which is
+    // the position it occupied when the thread was opened. It is inserted once
+    // and only when both sides of it are actually loaded, so it never appears at
+    // the very top of a window that simply started mid-thread.
+    var dividerPlaced = !workbench.showUnreadDivider;
     for (final message in messages) {
       final day = DateTime(
         message.createdAt.year,
@@ -559,11 +911,23 @@ class _MessageList extends StatelessWidget {
         rows.add(_DaySeparator(label: dayLabel(message.createdAt)));
         lastDay = day;
       }
+      if (!dividerPlaced && message.sequence > workbench.readBoundary) {
+        rows.add(const _UnreadDivider());
+        dividerPlaced = true;
+      }
       rows.add(
         _MessageBubble(
           message: message,
+          selfId: workbench.selfId,
           fileUrl: workbench.api.fileUrl,
+          flash: flashSequence != null && message.sequence == flashSequence,
           onRetry: () => onRetry(message),
+          onQuote: () => onQuote(message),
+          onEdit: () => onEdit(message),
+          onRecall: () => onRecall(message),
+          onReact: () => onReact(message),
+          onPin: () => onPin(message),
+          onForward: () => onForward(message),
         ),
       );
     }
@@ -602,6 +966,262 @@ class _MessageList extends StatelessWidget {
             child: _TypingHint(),
           ),
       ],
+    );
+  }
+}
+
+/// A "以下为新消息" rule, drawn at the message the agent had not read when the
+/// thread was opened. It is derived from the transcript rather than from a stored
+/// marker so it cannot drift as the list is re-paged.
+class _UnreadDivider extends StatelessWidget {
+  const _UnreadDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        children: <Widget>[
+          const Expanded(child: Divider(color: Colors.transparent)),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.errorContainer,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              '以下为新消息',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onErrorContainer,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Divider(color: theme.colorScheme.error.withAlpha(120)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The pin bar: the messages an agent keeps in view while scrolling.
+class _PinBar extends StatelessWidget {
+  const _PinBar({
+    required this.pins,
+    required this.onJump,
+    required this.onUnpin,
+  });
+
+  final List<ChatMessage> pins;
+  final ValueChanged<ChatMessage> onJump;
+  final Future<void> Function(ChatMessage) onUnpin;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      color: theme.colorScheme.surfaceContainerHighest,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: Row(
+        children: <Widget>[
+          Icon(Icons.push_pin, size: 15, color: theme.colorScheme.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: SizedBox(
+              height: 26,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: pins.length,
+                separatorBuilder: (context, _) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final pin = pins[index];
+                  return InkWell(
+                    onTap: () => onJump(pin),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: Row(
+                        children: <Widget>[
+                          Text(
+                            pin.isDeleted
+                                ? '已撤回的消息'
+                                : (pin.content.isEmpty
+                                    ? '[${messageTypeLabel(pin.messageType)}]'
+                                    : pin.content),
+                            style: theme.textTheme.labelSmall,
+                          ),
+                          IconButton(
+                            tooltip: '取消置顶',
+                            onPressed: () => onUnpin(pin),
+                            visualDensity: VisualDensity.compact,
+                            iconSize: 14,
+                            icon: const Icon(Icons.close),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The in-thread search field. The query is debounced by the caller so typing
+/// does not issue a request per keystroke against the full-text index.
+class _SearchBar extends StatelessWidget {
+  const _SearchBar({
+    required this.controller,
+    required this.onChanged,
+    required this.onClose,
+  });
+
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      color: theme.colorScheme.surface,
+      padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: TextField(
+              controller: controller,
+              autofocus: true,
+              onChanged: onChanged,
+              decoration: const InputDecoration(
+                isDense: true,
+                prefixIcon: Icon(Icons.search, size: 18),
+                hintText: '搜索本会话的消息',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: '关闭搜索',
+            onPressed: onClose,
+            icon: const Icon(Icons.close),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The search results, drawn above the transcript rather than inside it so a hit
+/// does not have to be loaded to be readable.
+class _SearchResults extends StatelessWidget {
+  const _SearchResults({required this.workbench, required this.onJump});
+
+  final WorkbenchController workbench;
+  final ValueChanged<SearchHit> onJump;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    if (workbench.searching) {
+      return const LinearProgressIndicator(minHeight: 2);
+    }
+    final hits = workbench.searchHits;
+    if (hits.isEmpty) {
+      return Container(
+        color: theme.colorScheme.surface,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        child: Text(
+          workbench.searchError ?? '没有找到包含该关键词的消息',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: workbench.searchError == null
+                ? theme.colorScheme.onSurfaceVariant
+                : theme.colorScheme.error,
+          ),
+        ),
+      );
+    }
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 190),
+      color: theme.colorScheme.surface,
+      child: ListView.separated(
+        shrinkWrap: true,
+        itemCount: hits.length,
+        separatorBuilder: (context, _) => const Divider(height: 1),
+        itemBuilder: (context, index) {
+          final hit = hits[index];
+          final fromVisitor = hit.senderType == 'VISITOR';
+          return ListTile(
+            dense: true,
+            leading: Icon(
+              fromVisitor ? Icons.person_outline : Icons.support_agent,
+              size: 18,
+            ),
+            title: _HighlightedExcerpt(text: hit.excerpt),
+            subtitle: Text(
+              '${hit.senderName.isEmpty ? (fromVisitor ? '访客' : '客服') : hit.senderName}'
+              ' · ${fullTime(hit.createdAt)}',
+              style: theme.textTheme.labelSmall,
+            ),
+            onTap: () => onJump(hit),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Renders a server-built excerpt, turning the `<< >>` markers into a highlight.
+///
+/// The markers are escaped before they are interpreted, so a message that
+/// literally contains `<<` cannot forge a highlight — only the delimiter the
+/// server inserted can.
+class _HighlightedExcerpt extends StatelessWidget {
+  const _HighlightedExcerpt({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final base = theme.textTheme.bodySmall;
+    final spans = <TextSpan>[];
+    var index = 0;
+    while (index < text.length) {
+      final open = text.indexOf('<<', index);
+      if (open < 0) {
+        spans.add(TextSpan(text: text.substring(index)));
+        break;
+      }
+      final close = text.indexOf('>>', open + 2);
+      if (close < 0) {
+        spans.add(TextSpan(text: text.substring(index)));
+        break;
+      }
+      if (open > index) {
+        spans.add(TextSpan(text: text.substring(index, open)));
+      }
+      spans.add(
+        TextSpan(
+          text: text.substring(open + 2, close),
+          style: base?.copyWith(
+            backgroundColor: theme.colorScheme.primaryContainer,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      );
+      index = close + 2;
+    }
+    return Text.rich(
+      TextSpan(style: base, children: spans),
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
     );
   }
 }
@@ -661,16 +1281,51 @@ class _DaySeparator extends StatelessWidget {
 /// agent can tell them apart without reading: the visitor's messages (left),
 /// their own (right, tinted), internal notes (full width, warning colour, never
 /// sent to the customer) and system events (centred, subtle).
+///
+/// A recalled message keeps its place as a tombstone rather than disappearing,
+/// so the transcript an agent scrolled past does not shift underneath them.
 class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     required this.message,
+    required this.selfId,
     required this.fileUrl,
+    required this.flash,
     required this.onRetry,
+    required this.onQuote,
+    required this.onEdit,
+    required this.onRecall,
+    required this.onReact,
+    required this.onPin,
+    required this.onForward,
   });
 
   final ChatMessage message;
+  final String selfId;
   final String Function(String) fileUrl;
+
+  /// True while this message is the target of a jump, which draws a brief
+  /// highlight so the agent can see where they landed.
+  final bool flash;
+
   final VoidCallback onRetry;
+  final VoidCallback onQuote;
+  final VoidCallback onEdit;
+  final VoidCallback onRecall;
+  final VoidCallback onReact;
+  final VoidCallback onPin;
+  final VoidCallback onForward;
+
+  /// The agent's own bubble keeps the reply bar and the quote control, but a
+  /// system event or a note has none of them.
+  bool get _mine => message.isMine(selfId);
+
+  bool get _canEdit =>
+      !message.isDeleted &&
+      message.messageType == 'TEXT' &&
+      message.attachments.isEmpty &&
+      _mine;
+
+  bool get _canRecall => !message.isDeleted && _mine;
 
   @override
   Widget build(BuildContext context) {
@@ -690,13 +1345,10 @@ class _MessageBubble extends StatelessWidget {
       );
     }
     if (message.isPrivate) {
-      return _NoteBubble(message: message);
+      return _NoteBubble(message: message, flash: flash);
     }
 
     final isAgent = message.isFromAgent;
-    final bubbleColor = isAgent
-        ? theme.colorScheme.primaryContainer
-        : RelayTheme.visitorBubble(theme.colorScheme);
     final textColor = isAgent
         ? theme.colorScheme.onPrimaryContainer
         : theme.colorScheme.onSurface;
@@ -740,60 +1392,335 @@ class _MessageBubble extends StatelessWidget {
                     ),
                   ),
                 ],
+                if (message.isForwarded) ...<Widget>[
+                  const SizedBox(width: 6),
+                  Text(
+                    '转发',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+                if (message.isEdited) ...<Widget>[
+                  const SizedBox(width: 6),
+                  Text(
+                    '已编辑',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+                if (message.isPinned) ...<Widget>[
+                  const SizedBox(width: 6),
+                  Icon(Icons.push_pin, size: 11, color: theme.colorScheme.primary),
+                ],
               ],
             ),
           ),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 720),
-            child: FractionallySizedBox(
-              widthFactor: _bubbleWidthFactor,
-              alignment: isAgent ? Alignment.centerRight : Alignment.centerLeft,
-              child: Container(
-                padding: EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: message.attachments.isEmpty ? 9 : 8,
-                ),
-                decoration: BoxDecoration(
-                  color: bubbleColor,
-                  borderRadius: BorderRadius.only(
-                    topLeft: const Radius.circular(12),
-                    topRight: const Radius.circular(12),
-                    bottomLeft: Radius.circular(isAgent ? 12 : 3),
-                    bottomRight: Radius.circular(isAgent ? 3 : 12),
+          _BubbleShell(
+            flash: flash,
+            isAgent: isAgent,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                if (message.replyTo != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: _QuoteBlock(
+                      quote: message.replyTo!,
+                      onSurface: isAgent,
+                    ),
                   ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    if (message.attachments.isNotEmpty)
-                      _Attachments(
-                        attachments: message.attachments,
-                        fileUrl: fileUrl,
-                        alignEnd: isAgent,
+                if (message.isDeleted)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Icon(
+                        Icons.block,
+                        size: 14,
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
-                    if (message.content.trim().isNotEmpty)
-                      Padding(
-                        padding: EdgeInsets.only(
-                          top: message.attachments.isEmpty ? 0 : 8,
-                        ),
-                        child: SelectableText(
-                          message.content,
-                          style:
-                              theme.textTheme.bodyMedium?.copyWith(color: textColor),
+                      const SizedBox(width: 6),
+                      Text(
+                        '这条消息已被撤回',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontStyle: FontStyle.italic,
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
-                  ],
-                ),
-              ),
+                    ],
+                  )
+                else ...<Widget>[
+                  if (message.attachments.isNotEmpty)
+                    _Attachments(
+                      attachments: message.attachments,
+                      fileUrl: fileUrl,
+                      alignEnd: isAgent,
+                      voiceDuration: message.voiceDuration,
+                    ),
+                  if (message.content.trim().isNotEmpty)
+                    Padding(
+                      padding: EdgeInsets.only(
+                        top: message.attachments.isEmpty ? 0 : 8,
+                      ),
+                      child: SelectableText(
+                        message.content,
+                        style:
+                            theme.textTheme.bodyMedium?.copyWith(color: textColor),
+                      ),
+                    ),
+                ],
+              ],
             ),
           ),
+          if (message.reactions.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: _ReactionRow(reactions: message.reactions),
+            ),
+          if (!message.isDeleted && message.sequence > 0)
+            _BubbleActions(
+              isAgent: isAgent,
+              onQuote: onQuote,
+              onReact: onReact,
+              onPin: onPin,
+              onForward: onForward,
+              onEdit: _canEdit ? onEdit : null,
+              onRecall: _canRecall ? onRecall : null,
+            ),
           if (message.delivery != DeliveryState.sent)
             Padding(
               padding: const EdgeInsets.only(top: 4, right: 2),
               child: _DeliveryFooter(message: message, onRetry: onRetry),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// The rounded box a message sits in, so the bubble and the jump highlight are
+/// defined once instead of at every call site.
+class _BubbleShell extends StatelessWidget {
+  const _BubbleShell({
+    required this.flash,
+    required this.isAgent,
+    required this.child,
+  });
+
+  final bool flash;
+  final bool isAgent;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final bubbleColor = isAgent
+        ? theme.colorScheme.primaryContainer
+        : RelayTheme.visitorBubble(theme.colorScheme);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 720),
+      child: FractionallySizedBox(
+        widthFactor: _bubbleWidthFactor,
+        alignment: isAgent ? Alignment.centerRight : Alignment.centerLeft,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          decoration: BoxDecoration(
+            color: bubbleColor,
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(12),
+              topRight: const Radius.circular(12),
+              bottomLeft: Radius.circular(isAgent ? 12 : 3),
+              bottomRight: Radius.circular(isAgent ? 3 : 12),
+            ),
+            border: flash
+                ? Border.all(color: theme.colorScheme.primary, width: 2)
+                : null,
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+/// The quote inside a reply. It is a snapshot taken when the reply was written,
+/// so editing or recalling the original afterwards does not rewrite history.
+class _QuoteBlock extends StatelessWidget {
+  const _QuoteBlock({required this.quote, required this.onSurface});
+
+  final QuotedMessage quote;
+  final bool onSurface;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = onSurface
+        ? theme.colorScheme.onPrimaryContainer
+        : theme.colorScheme.onSurfaceVariant;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+      decoration: BoxDecoration(
+        border: Border(
+          left: BorderSide(color: color.withAlpha(120), width: 3),
+        ),
+        color: color.withAlpha(20),
+        borderRadius: const BorderRadius.only(
+          topRight: Radius.circular(6),
+          bottomRight: Radius.circular(6),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Text(
+            quote.senderName.isEmpty
+                ? (quote.senderType == 'VISITOR' ? '访客' : '客服')
+                : quote.senderName,
+            style: theme.textTheme.labelSmall?.copyWith(color: color),
+          ),
+          Text(
+            quote.label,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: color,
+              fontStyle: quote.isDeleted ? FontStyle.italic : FontStyle.normal,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The aggregated reactions under a bubble.
+class _ReactionRow extends StatelessWidget {
+  const _ReactionRow({required this.reactions});
+
+  final List<MessageReaction> reactions;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Wrap(
+      spacing: 4,
+      runSpacing: 4,
+      children: <Widget>[
+        for (final reaction in reactions)
+          Tooltip(
+            message: kReactionLabels[reaction.emoji] ?? reaction.emoji,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: reaction.mine
+                    ? theme.colorScheme.primaryContainer
+                    : theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: reaction.mine
+                      ? theme.colorScheme.primary
+                      : theme.colorScheme.outlineVariant,
+                ),
+              ),
+              child: Text(
+                '${reaction.emoji} ${reaction.count}',
+                style: theme.textTheme.labelSmall,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// The hover actions under a bubble: reply, react, pin, and — for the agent's own
+/// text — edit and recall.
+///
+/// They are always in the tree rather than revealed on hover, because the same
+/// build runs on touch screens where hover does not exist; the affordances are
+/// small and dimmed so they do not compete with the message.
+class _BubbleActions extends StatelessWidget {
+  const _BubbleActions({
+    required this.isAgent,
+    required this.onQuote,
+    required this.onReact,
+    required this.onPin,
+    required this.onForward,
+    this.onEdit,
+    this.onRecall,
+  });
+
+  final bool isAgent;
+  final VoidCallback onQuote;
+  final VoidCallback onReact;
+  final VoidCallback onPin;
+  final VoidCallback onForward;
+  final VoidCallback? onEdit;
+  final VoidCallback? onRecall;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Opacity(
+      opacity: 0.65,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          _MiniAction(icon: Icons.reply, tooltip: '引用回复', onPressed: onQuote),
+          _MiniAction(icon: Icons.add_reaction_outlined, tooltip: '添加回应', onPressed: onReact),
+          _MiniAction(
+            icon: Icons.push_pin_outlined,
+            tooltip: '置顶',
+            onPressed: onPin,
+          ),
+          _MiniAction(
+            icon: Icons.forward_outlined,
+            tooltip: '转发到其它会话',
+            onPressed: onForward,
+          ),
+          if (onEdit != null)
+            _MiniAction(icon: Icons.edit_outlined, tooltip: '编辑', onPressed: onEdit),
+          if (onRecall != null)
+            _MiniAction(
+              icon: Icons.delete_outline,
+              tooltip: '撤回',
+              onPressed: onRecall,
+              color: theme.colorScheme.error,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniAction extends StatelessWidget {
+  const _MiniAction({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+    this.color,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onPressed;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: IconButton(
+        onPressed: onPressed,
+        icon: Icon(icon, size: 15),
+        color: color,
+        visualDensity: VisualDensity.compact,
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
       ),
     );
   }
@@ -856,9 +1783,10 @@ class _DeliveryFooter extends StatelessWidget {
 /// An internal note. Rendered full width in a warning tone, because the one
 /// mistake that matters here is an agent thinking they replied to the customer.
 class _NoteBubble extends StatelessWidget {
-  const _NoteBubble({required this.message});
+  const _NoteBubble({required this.message, this.flash = false});
 
   final ChatMessage message;
+  final bool flash;
 
   @override
   Widget build(BuildContext context) {
@@ -866,13 +1794,17 @@ class _NoteBubble extends StatelessWidget {
     final color = theme.colorScheme.tertiary;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 250),
         width: double.infinity,
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
         decoration: BoxDecoration(
           color: color.withAlpha(theme.brightness == Brightness.dark ? 36 : 24),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: color.withAlpha(80)),
+          border: Border.all(
+            color: flash ? theme.colorScheme.primary : color.withAlpha(80),
+            width: flash ? 2 : 1,
+          ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -893,6 +1825,15 @@ class _NoteBubble extends StatelessWidget {
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
+                if (message.isEdited) ...<Widget>[
+                  const SizedBox(width: 6),
+                  Text(
+                    '已编辑',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: 6),
@@ -912,11 +1853,16 @@ class _Attachments extends StatelessWidget {
     required this.attachments,
     required this.fileUrl,
     required this.alignEnd,
+    this.voiceDuration,
   });
 
   final List<Attachment> attachments;
   final String Function(String) fileUrl;
   final bool alignEnd;
+
+  /// The duration the sending device measured. Audio the player has not buffered
+  /// cannot report one, and a voice note that shows no length at all is unhelpful.
+  final Duration? voiceDuration;
 
   @override
   Widget build(BuildContext context) {
@@ -953,16 +1899,167 @@ class _Attachments extends StatelessWidget {
                       ),
                     ),
                   )
-                : _FileChip(
-                    attachment: attachment,
-                    url: fileUrl(attachment.url),
-                  ),
+                : attachment.isAudio
+                    ? _VoiceNote(
+                        url: fileUrl(attachment.url),
+                        duration: voiceDuration,
+                        onSurface: alignEnd,
+                      )
+                    : _FileChip(
+                        attachment: attachment,
+                        url: fileUrl(attachment.url),
+                      ),
           ),
         if (attachments.length > 1)
           Text(
             '共 ${attachments.length} 个附件',
             style: theme.textTheme.labelSmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// A voice note: one tap to play, one tap to stop.
+///
+/// The player is a singleton across the whole console, so this widget only has
+/// to remember whether *it* is the note that is playing, and reset when the
+/// player moves on.
+class _VoiceNote extends StatefulWidget {
+  const _VoiceNote({
+    required this.url,
+    required this.onSurface,
+    this.duration,
+  });
+
+  final String url;
+  final bool onSurface;
+  final Duration? duration;
+
+  @override
+  State<_VoiceNote> createState() => _VoiceNoteState();
+}
+
+class _VoiceNoteState extends State<_VoiceNote> {
+  bool _playing = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    // Leaving the thread while a note plays would otherwise keep the audio
+    // going with no visible control anywhere on screen.
+    if (_playing) {
+      unawaited(VoicePlayer.instance.stop());
+    }
+    super.dispose();
+  }
+
+  Future<void> _toggle() async {
+    final player = VoicePlayer.instance;
+    if (!VoicePlayer.supported) {
+      return;
+    }
+    if (_playing) {
+      setState(() => _playing = false);
+      await player.stop();
+      return;
+    }
+    setState(() {
+      _playing = true;
+      _error = null;
+    });
+    try {
+      await player.toggle(
+        widget.url,
+        onStopped: () {
+          if (mounted) {
+            setState(() => _playing = false);
+          }
+        },
+      );
+    } on Exception catch (failure) {
+      if (mounted) {
+        setState(() {
+          _playing = false;
+          _error = '$failure';
+        });
+      }
+    }
+  }
+
+  /// How wide to draw the pill, so a long note reads as longer than a short one.
+  double get _width {
+    final seconds = widget.duration?.inSeconds ?? 1;
+    return (72 + seconds.clamp(1, 30) * 4.0).clamp(72.0, 200.0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = widget.onSurface
+        ? theme.colorScheme.onPrimaryContainer
+        : theme.colorScheme.onSurface;
+    final canPlay = VoicePlayer.supported;
+    final label = widget.duration == null
+        ? '语音'
+        : '${widget.duration!.inSeconds.clamp(1, 999)}″';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Tooltip(
+          message: canPlay ? '' : '此平台不支持在客户端播放，请下载收听',
+          child: InkWell(
+            onTap: canPlay ? _toggle : null,
+            borderRadius: BorderRadius.circular(14),
+            child: Container(
+              width: _width,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: color.withAlpha(28),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: color.withAlpha(70)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Icon(
+                    !canPlay
+                        ? Icons.download_outlined
+                        : (_playing ? Icons.stop_circle_outlined : Icons.play_circle_outline),
+                    size: 18,
+                    color: color,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _playing
+                        ? LinearProgressIndicator(
+                            minHeight: 3,
+                            backgroundColor: color.withAlpha(40),
+                            color: color,
+                          )
+                        : Text(
+                            label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelSmall?.copyWith(color: color),
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              '播放失败，可下载后收听',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.error,
+              ),
             ),
           ),
       ],
@@ -1050,9 +2147,11 @@ class _Composer extends StatelessWidget {
     required this.visitorTyping,
     required this.canned,
     required this.supportsFiles,
+    required this.quote,
     required this.onChanged,
     required this.onToggleNote,
     required this.onPickImage,
+    required this.onClearQuote,
     required this.onRemovePending,
     required this.onSend,
   });
@@ -1067,9 +2166,14 @@ class _Composer extends StatelessWidget {
   final bool visitorTyping;
   final List<CannedResponse> canned;
   final bool supportsFiles;
+
+  /// The message the next reply will quote, if the agent picked one.
+  final ChatMessage? quote;
+
   final ValueChanged<String> onChanged;
   final ValueChanged<bool> onToggleNote;
   final Future<void> Function() onPickImage;
+  final VoidCallback onClearQuote;
   final ValueChanged<String> onRemovePending;
   final Future<void> Function() onSend;
 
@@ -1089,6 +2193,55 @@ class _Composer extends StatelessWidget {
                 uploadError!,
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: theme.colorScheme.error,
+                ),
+              ),
+            ),
+          if (quote != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(10, 6, 4, 6),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border(
+                    left: BorderSide(color: theme.colorScheme.primary, width: 3),
+                  ),
+                ),
+                child: Row(
+                  children: <Widget>[
+                    Icon(Icons.reply, size: 15, color: theme.colorScheme.primary),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          Text(
+                            '回复 ${quote!.senderName.isEmpty ? (quote!.isFromVisitor ? '访客' : '客服') : quote!.senderName}',
+                            style: theme.textTheme.labelSmall,
+                          ),
+                          Text(
+                            quote!.content.isEmpty
+                                ? '[${messageTypeLabel(quote!.messageType)}]'
+                                : quote!.content,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: '取消引用',
+                      onPressed: onClearQuote,
+                      visualDensity: VisualDensity.compact,
+                      iconSize: 16,
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
                 ),
               ),
             ),
