@@ -30,6 +30,17 @@ abstract class CredentialStore {
 
   Future<void> saveThemeMode(String mode);
 
+  /// The platform administrator's bearer token.
+  ///
+  /// It lives beside the agent session rather than inside it because the two are
+  /// different principals that may both be used from one machine, and signing out
+  /// of one must not drop the other.
+  Future<String?> loadPlatformToken();
+
+  Future<void> savePlatformToken(String token);
+
+  Future<void> clearPlatformToken();
+
   Future<void> clear();
 }
 
@@ -44,6 +55,7 @@ class PreferencesCredentialStore implements CredentialStore {
   static const _inboxesKey = 'relaydesk.inboxes';
   static const _expiresKey = 'relaydesk.expiresAt';
   static const _themeKey = 'relaydesk.themeMode';
+  static const _platformKey = 'relaydesk.platformToken';
 
   @override
   Future<StoredSession?> load() async {
@@ -121,6 +133,24 @@ class PreferencesCredentialStore implements CredentialStore {
   }
 
   @override
+  Future<String?> loadPlatformToken() async {
+    final preferences = await SharedPreferences.getInstance();
+    return preferences.getString(_platformKey);
+  }
+
+  @override
+  Future<void> savePlatformToken(String token) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(_platformKey, token);
+  }
+
+  @override
+  Future<void> clearPlatformToken() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.remove(_platformKey);
+  }
+
+  @override
   Future<void> clear() async {
     final preferences = await SharedPreferences.getInstance();
     await preferences.remove(_tokenKey);
@@ -128,7 +158,9 @@ class PreferencesCredentialStore implements CredentialStore {
     await preferences.remove(_tenantKey);
     await preferences.remove(_inboxesKey);
     await preferences.remove(_expiresKey);
-    // The theme choice and the server address deliberately survive a sign-out.
+    // The theme choice, the server address and the platform token deliberately
+    // survive a sign-out: an operator fixes a customer's account and then signs
+    // back in as themselves.
   }
 }
 
@@ -139,6 +171,7 @@ class MemoryCredentialStore implements CredentialStore {
   int _expiresAt = 0;
   String _server = '';
   String _theme = '';
+  String _platformToken = '';
 
   @override
   Future<StoredSession?> load() async {
@@ -171,6 +204,16 @@ class MemoryCredentialStore implements CredentialStore {
 
   @override
   Future<void> saveThemeMode(String mode) async => _theme = mode;
+
+  @override
+  Future<String?> loadPlatformToken() async =>
+      _platformToken.isEmpty ? null : _platformToken;
+
+  @override
+  Future<void> savePlatformToken(String token) async => _platformToken = token;
+
+  @override
+  Future<void> clearPlatformToken() async => _platformToken = '';
 
   @override
   Future<void> clear() async {

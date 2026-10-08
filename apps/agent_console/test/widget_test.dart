@@ -46,4 +46,36 @@ void main() {
     final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
     expect(app.themeMode, ThemeMode.dark);
   });
+
+  testWidgets('the operations console is reachable and comes back',
+      (tester) async {
+    await boot(tester, MemoryCredentialStore());
+
+    await tester.tap(find.text('平台管理员登录'));
+    await tester.pumpAndSettle();
+
+    // The operator's surface, which asks for the deployment secret rather than
+    // an agent's email and password.
+    expect(find.text('RelayDesk 运营后台'), findsOneWidget);
+    expect(find.text('进入运营后台'), findsOneWidget);
+    expect(find.widgetWithText(TextFormField, '平台管理令牌'), findsOneWidget);
+
+    await tester.tap(find.text('返回客服工作台登录'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('RelayDesk 客服工作台'), findsOneWidget);
+    expect(find.widgetWithText(TextFormField, '企业标识'), findsOneWidget);
+  });
+
+  testWidgets('an empty operator form reports both fields', (tester) async {
+    await boot(tester, MemoryCredentialStore());
+    await tester.tap(find.text('平台管理员登录'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('进入运营后台'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('请填写服务器地址'), findsOneWidget);
+    expect(find.text('请填写平台管理令牌'), findsOneWidget);
+  });
 }

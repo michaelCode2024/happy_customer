@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import 'package:relaydesk_agent_console/src/state/session_controller.dart';
+import 'package:relaydesk_agent_console/src/ui/error_banner.dart';
 
 /// The sign-in screen.
 ///
@@ -11,10 +11,18 @@ import 'package:relaydesk_agent_console/src/state/session_controller.dart';
 /// rather than a build-time constant: the same build talks to a self-hosted
 /// instance or to a hosted one, and getting that wrong is the most common
 /// reason a working install appears broken.
+///
+/// It is also the entry point to the operations console: the two surfaces ship
+/// in one binary because they answer the same question from opposite ends, and
+/// the provider of one usually operates the other.
 class LoginPage extends StatefulWidget {
-  const LoginPage({super.key, required this.session});
+  const LoginPage({super.key, required this.session, this.onPlatformLogin});
 
   final SessionController session;
+
+  /// Opens the operations console. Absent in tests that only drive the agent
+  /// form, in which case the link is not rendered.
+  final VoidCallback? onPlatformLogin;
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -192,7 +200,7 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       if (widget.session.error != null) ...<Widget>[
                         const SizedBox(height: 16),
-                        _ErrorBanner(
+                        ErrorBanner(
                           message: widget.session.error!,
                           onDismiss: widget.session.clearError,
                         ),
@@ -219,6 +227,13 @@ class _LoginPageState extends State<LoginPage> {
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
+                      if (widget.onPlatformLogin != null) ...<Widget>[
+                        const SizedBox(height: 8),
+                        TextButton(
+                          onPressed: busy ? null : widget.onPlatformLogin,
+                          child: const Text('平台管理员登录'),
+                        ),
+                      ],
                     ],
                   ),
                 );
@@ -229,63 +244,4 @@ class _LoginPageState extends State<LoginPage> {
       ),
     );
   }
-}
-
-/// An inline failure notice. It carries the server's own wording, which is
-/// written for an operator ("企业已停用", "密码错误"), so it is shown verbatim.
-class _ErrorBanner extends StatelessWidget {
-  const _ErrorBanner({required this.message, required this.onDismiss});
-
-  final String message;
-  final VoidCallback onDismiss;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.errorContainer,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Icon(
-            Icons.error_outline,
-            size: 18,
-            color: theme.colorScheme.onErrorContainer,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: SelectableText(
-              message,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onErrorContainer,
-              ),
-            ),
-          ),
-          IconButton(
-            tooltip: '关闭',
-            iconSize: 18,
-            visualDensity: VisualDensity.compact,
-            icon: Icon(Icons.close, color: theme.colorScheme.onErrorContainer),
-            onPressed: onDismiss,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Copies a value to the clipboard and confirms it. Used for the ids an agent
-/// occasionally needs to paste into a ticket.
-Future<void> copyToClipboard(BuildContext context, String value, String label) async {
-  await Clipboard.setData(ClipboardData(text: value));
-  if (!context.mounted) {
-    return;
-  }
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text('$label已复制'), duration: const Duration(seconds: 2)),
-  );
 }
