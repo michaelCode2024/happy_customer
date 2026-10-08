@@ -210,7 +210,13 @@ func (a *API) requirePlatform(next func(http.ResponseWriter, *http.Request, auth
 			next(w, r, principal)
 			return
 		}
-		if a.cfg.PlatformAdminToken != "" && subtleEqual(r.Header.Get("X-RelayDesk-Key"), a.cfg.PlatformAdminToken) {
+		// The static token is also accepted straight from the Authorization
+		// header so deploy scripts and break-glass debugging work without first
+		// exchanging it. The X-RelayDesk-Key spelling is kept for callers that
+		// already send it.
+		if a.cfg.PlatformAdminToken != "" &&
+			(subtleEqual(bearer(r), a.cfg.PlatformAdminToken) ||
+				subtleEqual(r.Header.Get("X-RelayDesk-Key"), a.cfg.PlatformAdminToken)) {
 			next(w, r, auth.Principal{Kind: auth.KindPlatform, Name: "static-token"})
 			return
 		}

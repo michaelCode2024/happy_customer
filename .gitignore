@@ -39,3 +39,7 @@ relaydesk
 pubspec.lock
 **/ios/Pods/
 **/macos/Pods/
+
+# Locally built binaries (the image build produces these outside Docker)
+.relaydesk-server
+.relaydesk-entrypoint

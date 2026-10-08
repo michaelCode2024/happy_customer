@@ -1,11 +1,13 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/relaydesk/relaydesk/internal/auth"
 	"github.com/relaydesk/relaydesk/internal/realtime"
@@ -211,14 +213,24 @@ func (a *API) platformCreateTenant(w http.ResponseWriter, r *http.Request, _ aut
 		return
 	}
 	plan := strings.ToUpper(strings.TrimSpace(in.Plan))
+	if plan == "" {
+		plan = "TRIAL"
+	}
 	switch plan {
 	case "TRIAL", "STARTER", "GROWTH", "ENTERPRISE":
 	default:
-		plan = "TRIAL"
+		// Refusing beats quietly provisioning a trial: the operator would walk
+		// away believing the customer is on the plan they asked for.
+		fail(w, 400, "plan 只能是 TRIAL、STARTER、GROWTH 或 ENTERPRISE")
+		return
 	}
 	trialDays := in.TrialDays
-	if trialDays <= 0 || trialDays > 90 {
+	if trialDays == 0 {
 		trialDays = 14
+	}
+	if trialDays < 1 || trialDays > 90 {
+		fail(w, 400, "trialDays 必须在 1 到 90 之间")
+		return
 	}
 	seatLimit, messageLimit := planLimits(plan)
 	inboxName := strings.TrimSpace(in.InboxName)
@@ -251,9 +263,14 @@ func (a *API) platformCreateTenant(w http.ResponseWriter, r *http.Request, _ aut
 		fail(w, 500, "创建租户失败")
 		return
 	}
+	// The plan is bound twice ($2 as the column, $5 in the trial predicate) and
+	// so is trialDays' text form. One placeholder used in two type contexts
+	// makes Postgres deduce two types for it and reject the statement outright
+	// (SQLSTATE 42P08), which is how tenant provisioning broke.
 	if _, err := tx.Exec(r.Context(), `insert into tenant_subscription(tenant_id, plan, status, seat_limit, monthly_message_limit, trial_ends_at)
-		values($1,$2,'ACTIVE',$3,$4, case when $2 = 'TRIAL' then now() + ($5 || ' days')::interval else null end)`,
-		tenantID, plan, seatLimit, messageLimit, itoa(trialDays)); err != nil {
+		values($1,$2,'ACTIVE',$3,$4, case when $5::text = 'TRIAL' then now() + ($6 || ' days')::interval else null end)`,
+		tenantID, plan, seatLimit, messageLimit, plan, itoa(trialDays)); err != nil {
+		a.logger.Error("create subscription failed", "error", err, "tenant", tenantID, "plan", plan)
 		fail(w, 500, "创建套餐失败")
 		return
 	}
@@ -433,22 +450,70 @@ func (a *API) platformUpdateTenant(w http.ResponseWriter, r *http.Request, _ aut
 			fail(w, 400, "plan 只能是 TRIAL、STARTER、GROWTH 或 ENTERPRISE")
 			return
 		}
-		seatLimit, messageLimit := planLimits(plan)
-		if in.SeatLimit != nil && *in.SeatLimit > 0 {
+	}
+	planStatus := strings.ToUpper(strings.TrimSpace(in.PlanStatus))
+	if planStatus != "" && planStatus != "ACTIVE" && planStatus != "PAST_DUE" && planStatus != "CANCELED" {
+		fail(w, 400, "planStatus 只能是 ACTIVE、PAST_DUE 或 CANCELED")
+		return
+	}
+	// Limits may arrive on their own: an account manager topping up one customer
+	// without touching the plan. The current subscription is therefore loaded and
+	// only the named fields are replaced, so a limits-only PATCH is not a no-op
+	// and a plan-only PATCH still recomputes the plan's default limits.
+	if plan != "" || planStatus != "" || in.SeatLimit != nil || in.MessageLimit != nil {
+		var curPlan, curStatus string
+		var curSeat, curMessage int
+		hasSubscription := true
+		if err := a.db.QueryRow(r.Context(), `select plan, status, seat_limit, monthly_message_limit
+			from tenant_subscription where tenant_id=$1`, id).
+			Scan(&curPlan, &curStatus, &curSeat, &curMessage); err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				a.logger.Error("read subscription failed", "error", err, "tenant", id)
+				fail(w, 500, "读取套餐失败")
+				return
+			}
+			hasSubscription = false
+			curPlan, curStatus = "TRIAL", "ACTIVE"
+			curSeat, curMessage = planLimits(curPlan)
+		}
+		nextPlan := curPlan
+		if plan != "" {
+			nextPlan = plan
+		}
+		// A new plan carries its own limits unless the caller overrides them.
+		seatLimit, messageLimit := curSeat, curMessage
+		if plan != "" {
+			seatLimit, messageLimit = planLimits(nextPlan)
+		}
+		if in.SeatLimit != nil {
+			if *in.SeatLimit <= 0 {
+				fail(w, 400, "seatLimit 必须大于 0")
+				return
+			}
 			seatLimit = *in.SeatLimit
 		}
-		if in.MessageLimit != nil && *in.MessageLimit > 0 {
+		if in.MessageLimit != nil {
+			if *in.MessageLimit <= 0 {
+				fail(w, 400, "monthlyMessageLimit 必须大于 0")
+				return
+			}
 			messageLimit = *in.MessageLimit
 		}
-		planStatus := strings.ToUpper(strings.TrimSpace(in.PlanStatus))
-		if planStatus != "ACTIVE" && planStatus != "PAST_DUE" && planStatus != "CANCELED" {
-			planStatus = "ACTIVE"
+		nextStatus := curStatus
+		if planStatus != "" {
+			nextStatus = planStatus
 		}
-		if _, err := a.db.Exec(r.Context(), `
-			insert into tenant_subscription(tenant_id, plan, status, seat_limit, monthly_message_limit)
-			values($1,$2,$3,$4,$5)
-			on conflict (tenant_id) do update set plan=$2, status=$3, seat_limit=$4, monthly_message_limit=$5, updated_at=now()`,
-			id, plan, planStatus, seatLimit, messageLimit); err != nil {
+		if !hasSubscription {
+			if _, err := a.db.Exec(r.Context(), `insert into tenant_subscription(tenant_id, plan, status, seat_limit, monthly_message_limit)
+				values($1,$2,$3,$4,$5)`, id, nextPlan, nextStatus, seatLimit, messageLimit); err != nil {
+				a.logger.Error("create subscription failed", "error", err, "tenant", id)
+				fail(w, 500, "更新套餐失败")
+				return
+			}
+		} else if _, err := a.db.Exec(r.Context(), `update tenant_subscription
+			set plan=$2, status=$3, seat_limit=$4, monthly_message_limit=$5, updated_at=now()
+			where tenant_id=$1`, id, nextPlan, nextStatus, seatLimit, messageLimit); err != nil {
+			a.logger.Error("update subscription failed", "error", err, "tenant", id, "plan", nextPlan)
 			fail(w, 500, "更新套餐失败")
 			return
 		}
@@ -526,22 +591,47 @@ func (a *API) platformResetOwner(w http.ResponseWriter, r *http.Request, _ auth.
 		fail(w, 400, err.Error())
 		return
 	}
-	// Demote the previous owner rather than deleting the row, so transcripts keep
-	// their author.
-	if _, err := a.db.Exec(r.Context(), `update agent set role='ADMIN', updated_at=now()
-		where tenant_id=$1 and role='OWNER' and lower(email) <> $2`, id, email); err != nil {
+	// Demote-and-promote in one transaction. Demoting first and discovering the
+	// new address does not exist afterwards would leave the company with no owner
+	// at all — nobody able to manage billing, seats or SSO.
+	tx, err := a.db.Begin(r.Context())
+	if err != nil {
 		fail(w, 500, "重置所有者失败")
 		return
 	}
-	tag, err := a.db.Exec(r.Context(), `update agent
-		set password_hash=$3, role='OWNER', status='ACTIVE', updated_at=now()
-		where tenant_id=$1 and lower(email)=$2`, id, email, hash)
-	if err != nil || tag.RowsAffected() == 0 {
-		fail(w, 404, "该企业下没有这个邮箱的坐席")
+	defer tx.Rollback(r.Context()) //nolint:errcheck
+
+	var ownerID uuid.UUID
+	if err := tx.QueryRow(r.Context(), `select id from agent
+		where tenant_id=$1 and lower(email)=$2 for update`, id, email).Scan(&ownerID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			failCode(w, 404, "AGENT_NOT_FOUND", "该企业下没有这个邮箱的坐席")
+			return
+		}
+		a.logger.Error("reset owner lookup failed", "error", err, "tenant", id)
+		fail(w, 500, "重置所有者失败")
 		return
 	}
-	var ownerID uuid.UUID
-	_ = a.db.QueryRow(r.Context(), `select id from agent where tenant_id=$1 and lower(email)=$2`, id, email).Scan(&ownerID)
+	// The previous owner is demoted rather than deleted, so transcripts keep their
+	// author and the person keeps working as an admin.
+	if _, err := tx.Exec(r.Context(), `update agent set role='ADMIN', updated_at=now()
+		where tenant_id=$1 and role='OWNER' and id <> $2`, id, ownerID); err != nil {
+		a.logger.Error("demote owner failed", "error", err, "tenant", id)
+		fail(w, 500, "重置所有者失败")
+		return
+	}
+	if _, err := tx.Exec(r.Context(), `update agent
+		set password_hash=$3, role='OWNER', status='ACTIVE', updated_at=now()
+		where tenant_id=$1 and id=$2`, id, ownerID, hash); err != nil {
+		a.logger.Error("reset owner failed", "error", err, "tenant", id, "agent", ownerID)
+		fail(w, 500, "重置所有者失败")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		a.logger.Error("reset owner commit failed", "error", err, "tenant", id)
+		fail(w, 500, "重置所有者失败")
+		return
+	}
 	_ = a.authn.RevokeAllSessions(r.Context(), ownerID)
 	a.recordAudit(r.Context(), id, "PLATFORM", uuid.Nil, "tenant.owner_reset", "agent", ownerID, map[string]any{"email": email})
 	respond(w, 200, map[string]any{"status": "OK", "agentId": ownerID, "password": password})
