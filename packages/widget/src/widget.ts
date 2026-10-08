@@ -40,6 +40,12 @@ export class RelayDeskWidgetElement extends HTMLElement {
       onBack: () => this.#backToList(),
       onRate: (score) => void this.#store?.rate(score),
       onTyping: () => this.#store?.notifyTyping(),
+      onQuote: (messageId) => this.#quote(messageId),
+      onClearQuote: () => this.#store?.clearQuote(),
+      onSearch: (query) => void this.#store?.search(query),
+      onClearSearch: () => this.#store?.clearSearch(),
+      onVoice: (blob, durationMs) => void this.#store?.sendVoice(blob, durationMs),
+      onLoadOlder: () => void this.#store?.loadOlder(),
     });
     this.#unsubscribe = this.#store.subscribe((snapshot) => this.#view?.render(snapshot));
     this.#bridge();
@@ -107,6 +113,20 @@ export class RelayDeskWidgetElement extends HTMLElement {
 
   get state(): Snapshot | undefined {
     return this.#store?.snapshot;
+  }
+
+  /** Quotes a message in this thread, so the next send is a reply to it. */
+  #quote(messageId: string): void {
+    const store = this.#store;
+    if (!store) {
+      return;
+    }
+    const target = store.snapshot.messages.find((message) => message.id === messageId);
+    if (!target || target.deletedAt) {
+      return;
+    }
+    store.quote(target);
+    this.#view?.focusInput();
   }
 
   #backToList(): void {

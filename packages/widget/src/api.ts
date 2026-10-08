@@ -9,6 +9,7 @@ import type {
   Message,
   MessagePage,
   MessageType,
+  SearchHit,
 } from './types.js';
 
 export class ApiError extends Error {
@@ -44,6 +45,9 @@ export interface SendInput {
   clientMessageId: string;
   messageType: MessageType;
   attachmentIds?: string[];
+  /** Quotes an earlier message in this conversation. */
+  replyToId?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export class VisitorApi {
@@ -98,12 +102,44 @@ export class VisitorApi {
     return this.#json('GET', `/api/v1/widget/conversations/${id}/messages?after=${after}&limit=${limit}`);
   }
 
+  /**
+   * Reads one page in a given direction. `before` walks back through history;
+   * `after` walks forward, either to catch up after a dropped socket or to pull
+   * the tail on first load.
+   */
+  pageMessages(id: string, options: { after?: number; before?: number; limit?: number }): Promise<MessagePage> {
+    const params = new URLSearchParams();
+    if (options.after) {
+      params.set('after', String(options.after));
+    }
+    if (options.before) {
+      params.set('before', String(options.before));
+    }
+    params.set('limit', String(options.limit ?? 50));
+    return this.#json('GET', `/api/v1/widget/conversations/${id}/messages?${params.toString()}`);
+  }
+
+  search(id: string, query: string, limit = 20): Promise<{ items: SearchHit[] | null }> {
+    const params = new URLSearchParams({ q: query, limit: String(limit) });
+    return this.#json('GET', `/api/v1/widget/conversations/${id}/search?${params.toString()}`);
+  }
+
   sendMessage(id: string, input: SendInput): Promise<Message> {
     return this.#json('POST', `/api/v1/widget/conversations/${id}/messages`, input);
   }
 
   markRead(id: string, sequence: number): Promise<unknown> {
     return this.#json('POST', `/api/v1/widget/conversations/${id}/read`, { sequence });
+  }
+
+  /**
+   * Reports the highest server sequence the visitor's device has actually
+   * received. This is not the same as read: a chat window can be open on a
+   * background tab, so the receipt lets the agent see "delivered" before the
+   * visitor has looked at it.
+   */
+  markDelivered(id: string, sequence: number): Promise<unknown> {
+    return this.#json('POST', `/api/v1/widget/conversations/${id}/delivered`, { sequence });
   }
 
   typing(id: string): Promise<unknown> {

@@ -18,6 +18,15 @@ export interface Attachment {
   url: string;
 }
 
+// One aggregated reaction. The server groups by emoji and lists the actors, so a
+// client can render a count without fetching every reaction row.
+export interface Reaction {
+  emoji: string;
+  count: number;
+  actors: string[];
+  mine?: boolean;
+}
+
 export interface Message {
   id: string;
   conversationId: string;
@@ -31,6 +40,35 @@ export interface Message {
   metadata?: Record<string, unknown>;
   attachments?: Attachment[];
   createdAt: string;
+  // Set when the message quotes an earlier one. The quoted body travels with
+  // the message so the widget can render the quote without holding the whole
+  // thread in memory.
+  replyToId?: string;
+  replyTo?: QuotedMessage;
+  editedAt?: string;
+  // A recalled message keeps its row so sequence numbers stay gapless, but its
+  // content is stripped before it leaves the server. The client renders a
+  // tombstone from this timestamp alone.
+  deletedAt?: string;
+  pinnedAt?: string;
+  forwardedFromId?: string;
+  reactions?: Reaction[] | null;
+  // Internal notes are never sent to a visitor socket; the field exists here so
+  // the same shape can describe an agent's view in tests and tooling.
+  private?: boolean;
+}
+
+// The quoted excerpt attached to a reply. It is a snapshot rather than a
+// reference, because the original may be edited or recalled after the reply was
+// written and the quote should keep showing what was actually answered.
+export interface QuotedMessage {
+  id: string;
+  sequence: number;
+  senderType: SenderType;
+  senderName?: string;
+  messageType: MessageType;
+  content: string;
+  deletedAt?: string;
 }
 
 export interface Conversation {
@@ -74,10 +112,36 @@ export interface BootstrapResult {
   serverTime: string;
 }
 
+// A page of history. Reading upward and reading downward are different
+// questions, so the server answers both with the same shape: hasMore says there
+// is more in the direction asked for, hasOlder says the top of the thread is
+// still above what was returned. A client can therefore offer "load earlier"
+// without guessing whether it just reached the beginning of the conversation.
 export interface MessagePage {
   items: Message[] | null;
-  lastSequence: number;
   hasMore: boolean;
+  hasOlder: boolean;
+  firstSequence: number;
+  lastSequence: number;
+  // Only the widget's page carries these: a visitor sees one thread, so its
+  // unread count is a property of the page rather than of a conversation list.
+  visitorUnread?: number;
+}
+
+// A search hit. The excerpt carries << >> around the matched terms, which the
+// widget renders as a highlight; the server builds it because the database's
+// ts_headline cannot segment Chinese.
+export interface SearchHit {
+  messageId: string;
+  conversationId: string;
+  sequence: number;
+  content: string;
+  excerpt: string;
+  rank: number;
+  createdAt: string;
+  messageType: MessageType;
+  senderType: SenderType;
+  senderName?: string;
 }
 
 export interface ConversationPage {
@@ -110,6 +174,18 @@ export interface ChatMessage {
   createdAt: string;
   delivery: DeliveryState;
   error?: string;
+  // Present once the server has accepted the message, so a retry can be
+  // correlated with the original send rather than creating a duplicate.
+  clientMessageId?: string;
+  replyTo?: QuotedMessage;
+  editedAt?: string;
+  deletedAt?: string;
+  pinnedAt?: string;
+  forwardedFromId?: string;
+  reactions: Reaction[];
+  // Round-tripped so a retry can re-send a voice note's duration, which the
+  // player needs before the audio element has loaded enough to report it.
+  metadata?: Record<string, unknown>;
 }
 
 export interface TypingState {
@@ -131,5 +207,13 @@ export function toChatMessage(message: Message): ChatMessage {
     attachments: message.attachments ?? [],
     createdAt: message.createdAt,
     delivery: 'SENT',
+    clientMessageId: message.clientMessageId,
+    replyTo: message.replyTo,
+    editedAt: message.editedAt,
+    deletedAt: message.deletedAt,
+    pinnedAt: message.pinnedAt,
+    forwardedFromId: message.forwardedFromId,
+    reactions: message.reactions ?? [],
+    metadata: message.metadata,
   };
 }

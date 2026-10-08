@@ -11,11 +11,14 @@ import {
   type ChatMessage,
   type Conversation,
   type Message,
+  type QuotedMessage,
   type RealtimeEvent,
+  type SearchHit,
 } from './types.js';
 
 const MAX_CACHED_MESSAGES = 300;
 const TYPING_TTL_MS = 4_000;
+const PAGE_SIZE = 50;
 
 export interface Snapshot {
   status: 'IDLE' | 'BOOTSTRAPPING' | 'READY' | 'FAILED';
@@ -35,6 +38,17 @@ export interface Snapshot {
   welcomeMessage: string;
   offlineMessage: string;
   rated?: number;
+  /** The message being quoted, set while the visitor composes a reply to it. */
+  replyTo?: QuotedMessage;
+  /** Highest sequence in the open thread at the moment it was last read. */
+  readBoundary: number;
+  loadingOlder: boolean;
+  search: {
+    query: string;
+    running: boolean;
+    hits: SearchHit[];
+    error?: string;
+  };
 }
 
 interface StoredSession {
@@ -50,20 +64,30 @@ function localId(): string {
   return 'local-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
 }
 
+/**
+ * Merges a reaction update into a thread. The server publishes one event per
+ * toggle carrying the full aggregate for that message, so an event replaces the
+ * reactions of the message it names and leaves the rest alone. Matching on the
+ * message id rather than on the event's position matters when a reaction lands
+ * out of order, which the socket does not promise.
+ */
+function mergeReactions(messages: ChatMessage[], messageId: string, reactions: ChatMessage['reactions']): ChatMessage[] {
+  return messages.map((message) => (message.id === messageId ? { ...message, reactions } : message));
+}
+
 function mergeMessages(existing: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
   const byId = new Map<string, ChatMessage>();
+  // The optimistic row a send created is keyed by its local id, and the server
+  // echoes that id back as clientMessageId. Indexing on both is what stops a
+  // sent message from appearing twice: once greyed out and once delivered.
   const byClientId = new Map<string, ChatMessage>();
   for (const message of existing) {
     byId.set(message.id, message);
-    if (message.localId) {
-      byClientId.set(message.localId, message);
-    }
+    byClientId.set(message.clientMessageId ?? message.localId, message);
   }
   for (const message of incoming) {
-    // A message the server echoes back is the same one we sent optimistically;
-    // matching on the local id keeps the row from appearing twice.
-    const twin = byClientId.get(message.id);
-    if (twin && twin.delivery !== 'SENT') {
+    const twin = byClientId.get(message.clientMessageId ?? message.localId);
+    if (twin && twin.id !== message.id) {
       byId.delete(twin.id);
     }
     byId.set(message.id, message);
@@ -94,6 +118,8 @@ export class ChatStore {
   #typingTimer?: ReturnType<typeof setTimeout>;
   #typingSentAt = 0;
   #pollTimer?: ReturnType<typeof setInterval>;
+  #deliveredSequence = 0;
+  #deliveredTimer?: ReturnType<typeof setTimeout>;
 
   constructor(options: ResolvedOptions) {
     this.#options = options;
@@ -113,6 +139,9 @@ export class ChatStore {
       offline: false,
       welcomeMessage: options.welcomeMessage,
       offlineMessage: options.offlineMessage,
+      readBoundary: 0,
+      loadingOlder: false,
+      search: { query: '', running: false, hits: [] },
     };
     this.#socket = new VisitorSocket(options.endpoint, {
       getToken: () => this.#api.token,
@@ -238,6 +267,10 @@ export class ChatStore {
       clearTimeout(this.#typingTimer);
       this.#typingTimer = undefined;
     }
+    if (this.#deliveredTimer) {
+      clearTimeout(this.#deliveredTimer);
+      this.#deliveredTimer = undefined;
+    }
     this.#listeners.clear();
   }
 
@@ -274,7 +307,15 @@ export class ChatStore {
     if (previous) {
       this.#socket.unsubscribe(previous);
     }
-    this.#patch({ activeId: id, messages: [], hasMore: false, rated: undefined });
+    this.#patch({
+      activeId: id,
+      messages: [],
+      hasMore: false,
+      rated: undefined,
+      replyTo: undefined,
+      readBoundary: 0,
+      search: { query: '', running: false, hits: [] },
+    });
     this.#socket.subscribe(id);
     await this.#loadMessages(id);
   }
@@ -286,7 +327,39 @@ export class ChatStore {
       return;
     }
     this.#socket.unsubscribe(previous);
-    this.#patch({ activeId: undefined, messages: [], hasMore: false, rated: undefined, agentTyping: false });
+    this.#patch({
+      activeId: undefined,
+      messages: [],
+      hasMore: false,
+      rated: undefined,
+      agentTyping: false,
+      replyTo: undefined,
+      readBoundary: 0,
+      search: { query: '', running: false, hits: [] },
+    });
+  }
+
+  /**
+   * Quotes a message in the composer. The quote is a snapshot taken now: if the
+   * original is edited or recalled later, the visitor's reply still shows what
+   * they were answering.
+   */
+  quote(message: ChatMessage): void {
+    this.#patch({
+      replyTo: {
+        id: message.id,
+        sequence: message.sequence,
+        senderType: message.senderType,
+        senderName: message.senderName,
+        messageType: message.messageType,
+        content: message.content,
+        deletedAt: message.deletedAt,
+      },
+    });
+  }
+
+  clearQuote(): void {
+    this.#patch({ replyTo: undefined });
   }
 
   /** Starts a new conversation, optionally with the first message included. */
@@ -303,6 +376,7 @@ export class ChatStore {
           attachments: [],
           createdAt: new Date().toISOString(),
           delivery: 'SENDING',
+          reactions: [],
         }
       : undefined;
     if (optimistic) {
@@ -325,33 +399,95 @@ export class ChatStore {
     }
   }
 
-  async loadMore(): Promise<void> {
+  /**
+   * Reads one page further back in history. `before` is the sequence of the
+   * oldest message currently rendered, so the server returns what precedes it
+   * without re-sending what is already on screen.
+   */
+  async loadOlder(): Promise<void> {
     const id = this.#state.activeId;
+    if (!id || this.#state.loadingOlder) {
+      return;
+    }
+    const oldest = this.#state.messages.find((message) => message.sequence > 0);
+    if (!oldest) {
+      return;
+    }
+    this.#patch({ loadingOlder: true });
+    try {
+      const page = await this.#api.pageMessages(id, { before: oldest.sequence, limit: PAGE_SIZE });
+      const older = (page.items ?? []).map(toChatMessage);
+      this.#patch({
+        messages: mergeMessages([...older, ...this.#state.messages], []),
+        hasMore: page.hasOlder,
+      });
+    } catch {
+      // A failed page leaves the scroll position alone; the visitor can retry
+      // by scrolling again.
+    } finally {
+      this.#patch({ loadingOlder: false });
+    }
+  }
+
+  /** Kept as an alias so existing call sites keep working. */
+  async loadMore(): Promise<void> {
+    return this.loadOlder();
+  }
+
+  /**
+   * Searches the open thread. The server returns excerpts with the matched
+   * terms already wrapped in << >>, so the UI highlights what the database
+   * actually matched rather than re-implementing the tokenizer in the browser.
+   */
+  async search(query: string): Promise<void> {
+    const id = this.#state.activeId;
+    const trimmed = query.trim();
     if (!id) {
       return;
     }
-    const first = this.#state.messages.find((message) => message.sequence > 0);
-    const before = first?.sequence ?? 0;
-    if (before <= 1) {
-      this.#patch({ hasMore: false });
+    if (!trimmed) {
+      this.#patch({ search: { query: '', running: false, hits: [] } });
       return;
     }
-    const page = await this.#api.listMessages(id, 0, 200).catch(() => undefined);
-    if (!page?.items) {
-      return;
+    this.#patch({ search: { query: trimmed, running: true, hits: this.#state.search.hits } });
+    try {
+      const result = await this.#api.search(id, trimmed);
+      // A slow response must not overwrite a newer query's results.
+      if (this.#state.search.query !== trimmed) {
+        return;
+      }
+      this.#patch({ search: { query: trimmed, running: false, hits: result.items ?? [] } });
+    } catch (error) {
+      if (this.#state.search.query !== trimmed) {
+        return;
+      }
+      this.#patch({
+        search: {
+          query: trimmed,
+          running: false,
+          hits: [],
+          error: error instanceof Error ? error.message : '搜索失败',
+        },
+      });
     }
-    // The endpoint pages forward only, so "load more" moves the window back by
-    // asking for the oldest slice and keeping the newest cached messages.
-    const older = page.items.filter((message) => message.sequence < before).map(toChatMessage);
-    this.#patch({ messages: mergeMessages([...older, ...this.#state.messages], []), hasMore: older.length >= 200 });
   }
 
-  async send(content: string, attachmentIds: string[] = [], messageType: ChatMessage['messageType'] = 'TEXT'): Promise<void> {
+  clearSearch(): void {
+    this.#patch({ search: { query: '', running: false, hits: [] } });
+  }
+
+  async send(
+    content: string,
+    attachmentIds: string[] = [],
+    messageType: ChatMessage['messageType'] = 'TEXT',
+    replyToId?: string,
+  ): Promise<void> {
     let id = this.#state.activeId;
     const text = content.trim();
     if (!text && attachmentIds.length === 0) {
       return;
     }
+    const quote = this.#state.replyTo;
     const optimistic: ChatMessage = {
       id: localId(),
       localId: '',
@@ -363,9 +499,11 @@ export class ChatStore {
       attachments: [],
       createdAt: new Date().toISOString(),
       delivery: 'SENDING',
+      replyTo: quote,
+      reactions: [],
     };
     optimistic.localId = optimistic.id;
-    this.#patch({ messages: [...this.#state.messages, optimistic] });
+    this.#patch({ messages: [...this.#state.messages, optimistic], replyTo: undefined });
 
     if (!id) {
       await this.startConversation(text);
@@ -377,6 +515,7 @@ export class ChatStore {
         clientMessageId: optimistic.localId,
         messageType,
         attachmentIds,
+        replyToId: replyToId ?? quote?.id,
       });
       saved.attachments = this.#resolveAttachments(saved, optimistic);
       this.#patch({ messages: mergeMessages(this.#state.messages, [toChatMessage(saved)]) });
@@ -388,6 +527,67 @@ export class ChatStore {
       }
       this.#failMessage(optimistic.localId, error);
       this.#emit({ type: 'failed', data: { localId: optimistic.localId, message: error instanceof Error ? error.message : '发送失败' } });
+    }
+  }
+
+  /**
+   * Sends a recorded voice note. The browser records to a Blob, the upload
+   * endpoint stores it as an attachment, and the message that references it is
+   * typed AUDIO so the transcript renders a player rather than a download link.
+   * Duration travels in metadata because the player needs it before the audio
+   * element has loaded enough to report it.
+   */
+  async sendVoice(blob: Blob, durationMs: number): Promise<void> {
+    const id = this.#state.activeId;
+    if (!id) {
+      this.#emit({ type: 'error', data: '请先发送一条消息以开始对话' });
+      return;
+    }
+    const extension = blob.type.includes('ogg') ? 'ogg' : blob.type.includes('mp4') ? 'm4a' : 'webm';
+    const file = new File([blob], `voice-${Date.now()}.${extension}`, {
+      type: blob.type || 'audio/webm',
+    });
+    const placeholder: ChatMessage = {
+      id: localId(),
+      localId: '',
+      conversationId: id,
+      senderType: 'VISITOR',
+      sequence: 0,
+      messageType: 'AUDIO',
+      content: '语音消息',
+      attachments: [
+        {
+          id: '',
+          fileName: file.name,
+          contentType: file.type,
+          sizeBytes: file.size,
+          url: URL.createObjectURL(blob),
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      delivery: 'SENDING',
+      reactions: [],
+    };
+    placeholder.localId = placeholder.id;
+    this.#patch({ messages: [...this.#state.messages, placeholder], uploading: this.#state.uploading + 1 });
+    try {
+      const uploaded = await this.#api.upload(id, file);
+      const saved = await this.#api.sendMessage(id, {
+        content: '语音消息',
+        clientMessageId: placeholder.localId,
+        messageType: 'AUDIO',
+        attachmentIds: [uploaded.id],
+        metadata: { durationMs: Math.round(durationMs) },
+      });
+      saved.attachments = saved.attachments?.length ? saved.attachments : [uploaded];
+      this.#patch({ messages: mergeMessages(this.#state.messages, [toChatMessage(saved)]) });
+      this.#emit({ type: 'sent', data: saved });
+      void this.#refreshActiveSummary(id);
+    } catch (error) {
+      this.#failMessage(placeholder.localId, error);
+      this.#emit({ type: 'failed', data: { localId: placeholder.localId, message: error instanceof Error ? error.message : '语音发送失败' } });
+    } finally {
+      this.#patch({ uploading: Math.max(this.#state.uploading - 1, 0) });
     }
   }
 
@@ -426,6 +626,7 @@ export class ChatStore {
       ],
       createdAt: new Date().toISOString(),
       delivery: 'SENDING',
+      reactions: [],
     };
     placeholder.localId = placeholder.id;
     this.#patch({ messages: [...this.#state.messages, placeholder], uploading: this.#state.uploading + 1 });
@@ -472,6 +673,8 @@ export class ChatStore {
         clientMessageId: target.localId,
         messageType: target.messageType,
         attachmentIds,
+        replyToId: target.replyTo?.id,
+        metadata: target.messageType === 'AUDIO' ? (target.metadata as Record<string, unknown>) : undefined,
       });
       this.#patch({ messages: mergeMessages(this.#state.messages, [toChatMessage(saved)]) });
     } catch (error) {
@@ -511,27 +714,76 @@ export class ChatStore {
     }
   }
 
+  /**
+   * Reports the highest server sequence this device holds, so the agent can see
+   * "delivered" before the visitor has actually read it. Delivery is separate
+   * from read: a chat window left open on a background tab has received the
+   * message without anyone having looked at it.
+   *
+   * The watermark only ever moves forward and the call is debounced, because a
+   * burst of incoming messages would otherwise send one request each. The socket
+   * carries no sequence on its read frame, so this must be REST.
+   */
+  #markDelivered(): void {
+    const id = this.#state.activeId;
+    if (!id || this.#state.status !== 'READY') {
+      return;
+    }
+    const last = this.#state.messages.filter((message) => message.sequence > 0).at(-1);
+    if (!last || last.sequence <= this.#deliveredSequence) {
+      return;
+    }
+    this.#deliveredSequence = last.sequence;
+    if (this.#deliveredTimer) {
+      return;
+    }
+    this.#deliveredTimer = setTimeout(() => {
+      this.#deliveredTimer = undefined;
+      const sequence = this.#deliveredSequence;
+      if (sequence > 0) {
+        void this.#api.markDelivered(id, sequence).catch(() => undefined);
+      }
+    }, 400);
+  }
+
+  /**
+   * Clears the unread badge and moves the divider. The boundary is captured
+   * before it is cleared so the UI can draw "以下为新消息" once and not again on
+   * the next render.
+   */
   async #markRead(): Promise<void> {
     const id = this.#state.activeId;
     if (!id || this.#state.status !== 'READY') {
       return;
     }
-    const last = this.#state.messages[this.#state.messages.length - 1];
+    const last = this.#state.messages.filter((message) => message.sequence > 0).at(-1);
+    const boundary = last?.sequence ?? 0;
     if (this.#socket.connected) {
       this.#socket.sendRead(id);
     } else {
-      await this.#api.markRead(id, last?.sequence ?? 0).catch(() => undefined);
+      await this.#api.markRead(id, boundary).catch(() => undefined);
     }
     this.#patch({
+      readBoundary: this.#state.unread > 0 || this.#state.readBoundary === 0 ? boundary : this.#state.readBoundary,
       conversations: this.#state.conversations.map((item) => (item.id === id ? { ...item, visitorUnread: 0 } : item)),
     });
   }
 
   async #loadMessages(id: string): Promise<void> {
     try {
-      const page = await this.#api.listMessages(id, 0, 100);
+      const page = await this.#api.pageMessages(id, { limit: PAGE_SIZE });
       const messages = (page.items ?? []).map(toChatMessage);
-      this.#patch({ messages: mergeMessages(this.#state.messages, messages), hasMore: page.hasMore });
+      // The server's unread count is what the visitor has not seen, so the
+      // boundary sits that many sequences below the tail.
+      const boundary =
+        (page.visitorUnread ?? 0) > 0 ? Math.max((page.lastSequence ?? 0) - (page.visitorUnread ?? 0), 0) : 0;
+      this.#patch({
+        messages: mergeMessages(messages, this.#state.messages),
+        hasMore: page.hasOlder,
+        readBoundary: boundary,
+        unread: this.#state.open ? 0 : this.#state.unread,
+      });
+      this.#markDelivered();
       if (this.#state.open) {
         void this.#markRead();
       }
@@ -558,9 +810,10 @@ export class ChatStore {
         return;
       }
       const last = this.#state.messages.filter((message) => message.sequence > 0).at(-1);
-      const page = await this.#api.listMessages(id, last?.sequence ?? 0, 100);
+      const page = await this.#api.pageMessages(id, { after: last?.sequence ?? 0, limit: PAGE_SIZE });
       if (page.items?.length) {
         this.#patch({ messages: mergeMessages(this.#state.messages, page.items.map(toChatMessage)) });
+        this.#markDelivered();
         if (this.#state.open) {
           void this.#markRead();
         }
@@ -596,8 +849,17 @@ export class ChatStore {
         if (!message?.id || !message.conversationId) {
           return;
         }
+        // A visitor's own message can arrive over the socket before the POST
+        // that sent it has returned. Merging on the server id and on the
+        // original local id keeps it from rendering twice.
+        if (message.clientMessageId) {
+          this.#patch({
+            messages: this.#state.messages.filter((item) => item.localId !== message.clientMessageId),
+          });
+        }
         if (message.conversationId === this.#state.activeId) {
           this.#patch({ messages: mergeMessages(this.#state.messages, [toChatMessage(message)]) });
+          this.#markDelivered();
           if (this.#state.open) {
             void this.#markRead();
           }
@@ -610,20 +872,60 @@ export class ChatStore {
         if (!known) {
           void this.#resync();
         } else {
+          // The preview follows the newest message only. A reply that arrives
+          // out of order must not rewind the list.
+          const isNewest = message.sequence >= known.lastSequence;
           this.#patch({
             conversations: this.#state.conversations.map((item) =>
               item.id === message.conversationId
                 ? {
                     ...item,
                     lastSequence: Math.max(item.lastSequence, message.sequence),
-                    lastMessagePreview: message.content.slice(0, 80),
-                    lastMessageAt: message.createdAt,
-                    status: item.status === 'RESOLVED' ? 'OPEN' : item.status,
+                    lastMessagePreview: isNewest ? message.content.slice(0, 80) : item.lastMessagePreview,
+                    lastMessageAt: isNewest ? message.createdAt : item.lastMessageAt,
+                    // A private note never reaches a visitor socket; the check
+                    // is defensive, because a note must not un-resolve a
+                    // conversation the visitor sees as closed either.
+                    status: item.status === 'RESOLVED' && !message.private ? 'OPEN' : item.status,
                   }
                 : item,
             ),
           });
         }
+        break;
+      }
+      case 'message.updated': {
+        // An edit or a recall. The server sends the whole message back with the
+        // content already stripped when it was recalled, so the client replaces
+        // the row rather than trying to reconstruct what happened.
+        const message = event.data as Message | undefined;
+        if (!message?.id || message.conversationId !== this.#state.activeId) {
+          return;
+        }
+        this.#patch({ messages: mergeMessages(this.#state.messages, [toChatMessage(message)]) });
+        this.#emit({ type: 'message-updated', data: message });
+        break;
+      }
+      case 'message.reaction': {
+        const data = event.data as
+          | { messageId?: string; reactions?: ChatMessage['reactions'] }
+          | undefined;
+        if (!data?.messageId || event.conversationId !== this.#state.activeId) {
+          return;
+        }
+        this.#patch({ messages: mergeReactions(this.#state.messages, data.messageId, data.reactions ?? []) });
+        break;
+      }
+      case 'message.pinned': {
+        const data = event.data as { messageId?: string; pinnedAt?: string | null } | undefined;
+        if (!data?.messageId || event.conversationId !== this.#state.activeId) {
+          return;
+        }
+        this.#patch({
+          messages: this.#state.messages.map((item) =>
+            item.id === data.messageId ? { ...item, pinnedAt: data.pinnedAt ?? undefined } : item,
+          ),
+        });
         break;
       }
       case 'conversation.created':

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -583,15 +584,59 @@ func (a *API) searchVisitorMessages(w http.ResponseWriter, r *http.Request, p au
 	respond(w, 200, map[string]any{"items": items, "query": query})
 }
 
-func (a *API) searchMessagesInConversation(ctx context.Context, conversationID uuid.UUID, query string, limit int, view visibility) ([]messageView, error) {
-	rows, err := a.db.Query(ctx, `select `+messageColumns+messageJoins+`
+// searchHit is one match inside a transcript. It carries an excerpt rather than
+// the whole message for the same reason the cross-conversation search does: a
+// hit exists to be scanned for the keyword, and the client already holds the
+// message itself in the open thread.
+//
+// Both audiences get this shape. A visitor and an agent searching the same
+// conversation must see the same rows, differing only in whether internal notes
+// are included, which is what visibility decides.
+type searchHit struct {
+	MessageID      uuid.UUID `json:"messageId"`
+	ConversationID uuid.UUID `json:"conversationId"`
+	Sequence       int64     `json:"sequence"`
+	Content        string    `json:"content"`
+	Excerpt        string    `json:"excerpt"`
+	Rank           float64   `json:"rank"`
+	CreatedAt      time.Time `json:"createdAt"`
+	MessageType    string    `json:"messageType"`
+	SenderType     string    `json:"senderType"`
+	SenderName     string    `json:"senderName,omitempty"`
+}
+
+func (a *API) searchMessagesInConversation(ctx context.Context, conversationID uuid.UUID, query string, limit int, view visibility) ([]searchHit, error) {
+	rows, err := a.db.Query(ctx, `select m.id, m.sequence, m.content, m.created_at, m.message_type, m.sender_type,
+		       coalesce(ag.display_name, v.display_name, m.metadata ->> 'senderName', ''),
+		       greatest(
+		           -- Same two signals the cross-conversation search uses, so an
+		           -- in-thread search and a global one never disagree about which
+		           -- match matters more.
+		           ts_rank_cd(m.search_vector, relaydesk_tsquery($2)) * 0.5,
+		           case when m.content ilike '%' || $2 || '%' then 0.5 else 0 end
+		       ) as rank
+		  from message m
+		  left join agent ag on ag.id = m.sender_id and m.sender_type = 'AGENT'
+		  left join visitor v on v.id = m.sender_id and m.sender_type = 'VISITOR'
 		 where m.conversation_id = $1
 		   and (m.search_vector @@ relaydesk_tsquery($2) or m.content % $2)`+view.filter("m")+`
-		 order by m.sequence desc limit $3`, conversationID, query, limit)
+		 order by rank desc, m.sequence desc limit $3`, conversationID, query, limit)
 	if err != nil {
 		return nil, err
 	}
-	return a.collectMessages(ctx, rows, limit)
+	defer rows.Close()
+	items := make([]searchHit, 0, limit)
+	for rows.Next() {
+		var item searchHit
+		if err := rows.Scan(&item.MessageID, &item.Sequence, &item.Content, &item.CreatedAt,
+			&item.MessageType, &item.SenderType, &item.SenderName, &item.Rank); err != nil {
+			return nil, err
+		}
+		item.ConversationID = conversationID
+		item.Excerpt = excerptAround(item.Content, query)
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
 
 // ---------------------------------------------------------------- console reads
