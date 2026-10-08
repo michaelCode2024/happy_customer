@@ -320,6 +320,27 @@ func (a *API) markRead(ctx context.Context, conversationID uuid.UUID, tenantID u
 	})
 }
 
+// markDelivered advances the delivery cursor. It is deliberately separate from
+// markRead: "the device received it" and "the person read it" are different
+// facts, and a chat product that merges them cannot render the single tick that
+// tells an agent the visitor's page is actually open. Delivery is recorded for
+// agents only — a visitor has nobody to reassure.
+func (a *API) markDelivered(ctx context.Context, conversationID uuid.UUID, tenantID uuid.UUID, readerType string, readerID uuid.UUID, sequence int64) {
+	if sequence == 0 {
+		return
+	}
+	_, _ = a.db.Exec(ctx, `
+		insert into conversation_read(conversation_id, reader_type, reader_id, last_delivered_sequence, updated_at)
+		values($1,$2,$3,$4, now())
+		on conflict (conversation_id, reader_type, reader_id)
+		do update set last_delivered_sequence = greatest(conversation_read.last_delivered_sequence, excluded.last_delivered_sequence),
+		              updated_at = now()`, conversationID, readerType, readerID, sequence)
+	a.publish(ctx, []string{realtime.ConversationChannel(conversationID.String())}, realtime.Event{
+		Type: "conversation.delivered", TenantID: tenantID.String(), ConversationID: conversationID.String(),
+		Data: map[string]any{"readerType": readerType, "readerId": readerID, "sequence": sequence},
+	})
+}
+
 // markReadRequest is the shared REST read-cursor endpoint body. Both the visitor
 // and agent consoles post the sequence they have rendered.
 type markReadRequest struct {

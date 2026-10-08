@@ -272,12 +272,12 @@ func (a *API) adminInbox(w http.ResponseWriter, r *http.Request, p auth.Principa
 
 func (a *API) adminCreateInbox(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 	var in struct {
-		Name            string   `json:"name"`
-		PublicKey       string   `json:"publicKey"`
-		AllowedDomains  []string `json:"allowedDomains"`
-		WelcomeMessage  string   `json:"welcomeMessage"`
-		OfflineMessage  string   `json:"offlineMessage"`
-		AutoAssign      *bool    `json:"autoAssign"`
+		Name           string   `json:"name"`
+		PublicKey      string   `json:"publicKey"`
+		AllowedDomains []string `json:"allowedDomains"`
+		WelcomeMessage string   `json:"welcomeMessage"`
+		OfflineMessage string   `json:"offlineMessage"`
+		AutoAssign     *bool    `json:"autoAssign"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -532,12 +532,12 @@ func (a *API) adminAgents(w http.ResponseWriter, r *http.Request, p auth.Princip
 
 func (a *API) adminCreateAgent(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 	var in struct {
-		Email        string   `json:"email"`
-		DisplayName  string   `json:"displayName"`
-		Password     string   `json:"password"`
-		Role         string   `json:"role"`
-		MaxConcurrent int     `json:"maxConcurrent"`
-		InboxIDs     []string `json:"inboxIds"`
+		Email         string   `json:"email"`
+		DisplayName   string   `json:"displayName"`
+		Password      string   `json:"password"`
+		Role          string   `json:"role"`
+		MaxConcurrent int      `json:"maxConcurrent"`
+		InboxIDs      []string `json:"inboxIds"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -952,10 +952,10 @@ func (a *API) adminUpdateWebhook(w http.ResponseWriter, r *http.Request, p auth.
 		return
 	}
 	var in struct {
-		URL     string   `json:"url"`
-		Status  string   `json:"status"`
-		Events  []string `json:"events"`
-		Rotate  bool     `json:"rotateSecret"`
+		URL    string   `json:"url"`
+		Status string   `json:"status"`
+		Events []string `json:"events"`
+		Rotate bool     `json:"rotateSecret"`
 	}
 	if !decode(w, r, &in) {
 		return

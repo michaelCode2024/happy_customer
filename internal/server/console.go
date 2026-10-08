@@ -31,9 +31,29 @@ func (a *API) registerConsole(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/console/conversations/{id}/transfer", a.requireAgent(a.consoleTransfer))
 	mux.HandleFunc("POST /api/v1/console/conversations/{id}/status", a.requireAgent(a.consoleStatus))
 	mux.HandleFunc("POST /api/v1/console/conversations/{id}/read", a.requireAgent(a.consoleRead))
+	mux.HandleFunc("POST /api/v1/console/conversations/{id}/delivered", a.requireAgent(a.consoleDelivered))
 	mux.HandleFunc("POST /api/v1/console/conversations/{id}/typing", a.requireAgent(a.consoleTyping))
 	mux.HandleFunc("POST /api/v1/console/conversations/{id}/tags", a.requireAgent(a.consoleSetTags))
 	mux.HandleFunc("POST /api/v1/console/conversations/{id}/priority", a.requireAgent(a.consolePriority))
+
+	// Message layer: quoting, editing, recall, reactions, pins, drafts, search.
+	mux.HandleFunc("GET /api/v1/console/conversations/{id}/pins", a.requireAgent(a.consolePinnedMessages))
+	mux.HandleFunc("GET /api/v1/console/conversations/{id}/search", a.requireAgent(a.consoleFindInConversation))
+	mux.HandleFunc("GET /api/v1/console/conversations/{id}/draft", a.requireAgent(a.consoleDraft))
+	mux.HandleFunc("PUT /api/v1/console/conversations/{id}/draft", a.requireAgent(a.consoleSaveDraft))
+	mux.HandleFunc("PATCH /api/v1/console/conversations/{id}/messages/{messageId}", a.requireAgent(a.consoleEditMessage))
+	mux.HandleFunc("DELETE /api/v1/console/conversations/{id}/messages/{messageId}", a.requireAgent(a.consoleDeleteMessage))
+	mux.HandleFunc("POST /api/v1/console/conversations/{id}/messages/{messageId}/reactions", a.requireAgent(a.consoleReactMessage))
+	mux.HandleFunc("POST /api/v1/console/conversations/{id}/messages/{messageId}/pin", a.requireAgent(a.consolePinMessage))
+	mux.HandleFunc("POST /api/v1/console/conversations/{id}/messages/{messageId}/forward", a.requireAgent(a.consoleForwardMessage))
+	mux.HandleFunc("GET /api/v1/console/search/messages", a.requireAgent(a.consoleSearchMessages))
+
+	// Assistant: drafts only, never sent automatically. These are limited
+	// separately from the rest of the console because each call costs the tenant
+	// money at a third-party model gateway.
+	mux.HandleFunc("POST /api/v1/console/assist", a.limit(a.aiAssistRate, a.requireAgent(a.consoleAssist)))
+	mux.HandleFunc("POST /api/v1/console/assist/stream", a.limit(a.aiAssistRate, a.requireAgent(a.consoleAssistStream)))
+	mux.HandleFunc("GET /api/v1/console/ai/usage", a.requireAgent(a.consoleAIUsage))
 
 	// Customer data
 	mux.HandleFunc("GET /api/v1/console/visitors/{id}", a.requireAgent(a.consoleVisitor))
@@ -379,20 +399,34 @@ func (a *API) consoleMessages(w http.ResponseWriter, r *http.Request, p auth.Pri
 	if !ok {
 		return
 	}
+	// The console needs both directions: after= while new messages arrive on a
+	// socket, before= when the agent scrolls back through the history.
 	after := queryInt64(r, "after", 0)
+	before := queryInt64(r, "before", 0)
 	limit := queryInt(r, "limit", 50)
-	if limit > 200 {
-		limit = 200
-	}
-	items, err := a.fetchMessages(r.Context(), id, after, limit)
+	page, err := a.pageMessages(r.Context(), id, after, before, limit, agentVisibility)
 	if err != nil {
 		fail(w, 500, "查询消息失败")
 		return
 	}
 	var lastSequence int64
 	var agentUnread int
-	_ = a.db.QueryRow(r.Context(), `select last_sequence, agent_unread from conversation where id=$1`, id).Scan(&lastSequence, &agentUnread)
-	respond(w, 200, map[string]any{"items": items, "lastSequence": lastSequence, "agentUnread": agentUnread})
+	var visitorUnread int
+	_ = a.db.QueryRow(r.Context(), `select last_sequence, agent_unread, visitor_unread from conversation where id=$1`, id).
+		Scan(&lastSequence, &agentUnread, &visitorUnread)
+	if page.LastSequence == 0 {
+		page.LastSequence = lastSequence
+	}
+	// The read cursor of the assigned agent is the "new messages" divider
+	// position: everything after it is what this agent has not seen yet.
+	var lastRead int64
+	_ = a.db.QueryRow(r.Context(), `select coalesce(last_read_sequence,0) from conversation_read
+		where conversation_id=$1 and reader_type='AGENT' and reader_id=$2`, id, p.AgentID).Scan(&lastRead)
+	respond(w, 200, map[string]any{
+		"items": page.Items, "hasMore": page.HasMore, "hasOlder": page.HasOlder,
+		"firstSequence": page.FirstSequence, "lastSequence": page.LastSequence,
+		"agentUnread": agentUnread, "visitorUnread": visitorUnread, "lastReadSequence": lastRead,
+	})
 }
 
 func (a *API) consoleSend(w http.ResponseWriter, r *http.Request, p auth.Principal) {
@@ -407,6 +441,7 @@ func (a *API) consoleSend(w http.ResponseWriter, r *http.Request, p auth.Princip
 		AttachmentIDs   []string       `json:"attachmentIds"`
 		Private         bool           `json:"private"`
 		Metadata        map[string]any `json:"metadata"`
+		ReplyToID       string         `json:"replyToId"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -415,23 +450,52 @@ func (a *API) consoleSend(w http.ResponseWriter, r *http.Request, p auth.Princip
 	if messageType == "" {
 		messageType = "TEXT"
 	}
+	switch messageType {
+	case "TEXT", "IMAGE", "FILE", "AUDIO", "VIDEO", "LOCATION", "CARD", "RICH":
+	default:
+		fail(w, 400, "不支持的消息类型")
+		return
+	}
+	var replyTo *uuid.UUID
+	if strings.TrimSpace(in.ReplyToID) != "" {
+		parsed, err := uuid.Parse(in.ReplyToID)
+		if err != nil {
+			fail(w, 400, "引用的消息不存在")
+			return
+		}
+		var exists bool
+		_ = a.db.QueryRow(r.Context(), `select exists(select 1 from message where id=$1 and conversation_id=$2)`,
+			parsed, id).Scan(&exists)
+		if !exists {
+			fail(w, 400, "引用的消息不存在")
+			return
+		}
+		replyTo = &parsed
+	}
 	if in.Private {
-		// Internal notes stay inside the console and are never sent to the visitor.
-		metadata := orEmpty(in.Metadata)
-		metadata["private"] = true
+		// An internal note is an EVENT carrying is_private, an agent-only object.
+		// It is stored with the flag as a real column rather than only in
+		// metadata, because the read paths filter on the column: a note that
+		// lived in metadata alone was one forgotten where-clause away from the
+		// visitor.
 		view, err := a.appendMessage(r.Context(), p.TenantID, id, messageInput{
 			SenderType: "AGENT", SenderID: &p.AgentID, MessageType: "EVENT",
-			Content: in.Content, Metadata: metadata,
+			Content: in.Content, Metadata: in.Metadata, Private: true, ReplyToID: replyTo,
 		})
 		if err != nil {
 			fail(w, 500, "发送内部备注失败")
 			return
 		}
+		view.SenderName = p.Name
 		respond(w, 201, view)
 		return
 	}
 	if messageType == "TEXT" && strings.TrimSpace(in.Content) == "" {
 		fail(w, 400, "消息内容不能为空")
+		return
+	}
+	if messageType != "TEXT" && messageType != "CARD" && messageType != "RICH" && len(in.AttachmentIDs) == 0 {
+		fail(w, 400, "该消息类型必须先上传附件")
 		return
 	}
 	view, err := a.appendMessage(r.Context(), p.TenantID, id, messageInput{
@@ -442,12 +506,16 @@ func (a *API) consoleSend(w http.ResponseWriter, r *http.Request, p auth.Princip
 		Content:         in.Content,
 		AttachmentIDs:   in.AttachmentIDs,
 		Metadata:        in.Metadata,
+		ReplyToID:       replyTo,
 	})
 	if err != nil {
 		a.logger.Error("agent message failed", "error", err)
 		fail(w, 500, "发送消息失败")
 		return
 	}
+	// Sending an answer clears the draft: keeping it would hand the agent a
+	// stale copy of text they already sent the next time they open the thread.
+	_, _ = a.db.Exec(r.Context(), `delete from message_draft where conversation_id=$1 and agent_id=$2`, id, p.AgentID)
 	view.SenderName = p.Name
 	respond(w, 201, view)
 }
@@ -514,8 +582,9 @@ func (a *API) consoleTransfer(w http.ResponseWriter, r *http.Request, p auth.Pri
 	if strings.TrimSpace(in.Note) != "" {
 		_, _ = a.appendMessage(r.Context(), p.TenantID, id, messageInput{
 			SenderType: "AGENT", SenderID: &p.AgentID, MessageType: "EVENT",
-			Content: "转接给 " + targetName + "：" + in.Note,
-			Metadata: map[string]any{"transfer": true, "to": target, "private": true},
+			Content:  "转接给 " + targetName + "：" + in.Note,
+			Metadata: map[string]any{"transfer": true, "to": target},
+			Private:  true,
 		})
 	}
 	a.publish(r.Context(), a.conversationChannels(r.Context(), id), realtime.Event{
@@ -583,6 +652,22 @@ func (a *API) consoleRead(w http.ResponseWriter, r *http.Request, p auth.Princip
 		return
 	}
 	a.markRead(r.Context(), id, p.TenantID, "AGENT", p.AgentID, in.Sequence)
+	respond(w, 200, map[string]any{"status": "OK"})
+}
+
+// consoleDelivered records that the console received a message. It is separate
+// from reading it so the visitor's client can render a delivered tick while the
+// agent still has the thread open in another tab.
+func (a *API) consoleDelivered(w http.ResponseWriter, r *http.Request, p auth.Principal) {
+	id, ok := a.consoleConversationScope(w, r, p)
+	if !ok {
+		return
+	}
+	var in markReadRequest
+	if !decode(w, r, &in) {
+		return
+	}
+	a.markDelivered(r.Context(), id, p.TenantID, "AGENT", p.AgentID, in.Sequence)
 	respond(w, 200, map[string]any{"status": "OK"})
 }
 

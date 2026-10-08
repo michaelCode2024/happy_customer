@@ -101,6 +101,38 @@ func (a *API) conversationChannels(ctx handlerContext, conversationID uuid.UUID)
 	return channels
 }
 
+// agentOnlyChannels is conversationChannels minus the visitor. Internal notes
+// travel down these and nothing else: the visitor channel is precisely the
+// stream a visitor socket subscribes to, so a note published there is a note
+// leaked.
+func (a *API) agentOnlyChannels(ctx handlerContext, conversationID uuid.UUID) []string {
+	channels := []string{realtime.ConversationChannel(conversationID.String())}
+	var tenantID uuid.UUID
+	var assignee *uuid.UUID
+	if a.db.QueryRow(ctx, `select tenant_id, assignee_id from conversation where id=$1`, conversationID).
+		Scan(&tenantID, &assignee) == nil {
+		channels = append(channels, realtime.TenantChannel(tenantID.String()))
+		if assignee != nil {
+			channels = append(channels, realtime.AgentChannel(assignee.String()))
+		}
+	}
+	// Every agent who has ever written in this conversation keeps receiving
+	// notes, because a colleague discussing a case with the visitor is a
+	// participant even before they own the thread.
+	rows, err := a.db.Query(ctx, `select distinct sender_id from message
+		where conversation_id = $1 and sender_type = 'AGENT' and sender_id is not null`, conversationID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var agentID uuid.UUID
+			if rows.Scan(&agentID) == nil {
+				channels = append(channels, realtime.AgentChannel(agentID.String()))
+			}
+		}
+	}
+	return channels
+}
+
 func (a *API) tenantActive(ctx handlerContext, tenantID uuid.UUID) bool {
 	var status string
 	if a.db.QueryRow(ctx, `select status from tenant where id=$1`, tenantID).Scan(&status) != nil {

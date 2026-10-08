@@ -392,13 +392,13 @@ func (a *API) platformUpdateTenant(w http.ResponseWriter, r *http.Request, _ aut
 		return
 	}
 	var in struct {
-		Name            string `json:"name"`
-		Status          string `json:"status"`
-		Plan            string `json:"plan"`
-		PlanStatus      string `json:"planStatus"`
-		SeatLimit       *int   `json:"seatLimit"`
-		MessageLimit    *int   `json:"monthlyMessageLimit"`
-		TrialDays       *int   `json:"trialDays"`
+		Name         string `json:"name"`
+		Status       string `json:"status"`
+		Plan         string `json:"plan"`
+		PlanStatus   string `json:"planStatus"`
+		SeatLimit    *int   `json:"seatLimit"`
+		MessageLimit *int   `json:"monthlyMessageLimit"`
+		TrialDays    *int   `json:"trialDays"`
 	}
 	if !decode(w, r, &in) {
 		return

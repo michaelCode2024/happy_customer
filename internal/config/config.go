@@ -45,13 +45,20 @@ type Webhook struct {
 // AI configures the optional large-model provider. Leaving AI_PROVIDER empty
 // disables automatic answers; the rest of the platform keeps working.
 type AI struct {
-	Provider            string
-	BaseURL             string
-	APIKey              string
-	Model               string
-	Temperature         float64
-	MaxTokens           int
-	TimeoutSeconds      int
+	Provider       string
+	BaseURL        string
+	APIKey         string
+	Model          string
+	Temperature    float64
+	MaxTokens      int
+	TimeoutSeconds int
+	// ConfidenceThreshold is a coverage floor, not a similarity floor: it is the
+	// share of the question's distinctive terms an article must match before the
+	// bot will answer from it. Measured on the demo knowledge base, an article
+	// asked about in its own words scores 1.0, a genuine paraphrase 0.47–0.76,
+	// and an unrelated question at most 0.24 — so 0.35 declines to answer rather
+	// than answer from the wrong article. Raising it makes the bot more willing
+	// to hand off to a person; lowering it makes it more willing to guess.
 	ConfidenceThreshold float64
 	AutoReplyEnabled    bool
 }
@@ -65,6 +72,8 @@ type RateLimit struct {
 	UploadBurst     int
 	OpenPerMinute   int
 	OpenBurst       int
+	AssistPerMinute int
+	AssistBurst     int
 }
 
 type Upload struct {
@@ -136,6 +145,13 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	// Assistant calls cost the tenant real money at a model gateway, so they get
+	// their own ceiling: an agent leaning on the suggest button all day is
+	// exactly the pattern this limit exists to make visible.
+	assistRate, err := integer("RATE_LIMIT_ASSIST_PER_MINUTE", 60)
+	if err != nil {
+		return Config{}, err
+	}
 
 	storage := Storage{
 		Driver:            env("STORAGE_DRIVER", "local"),
@@ -186,6 +202,8 @@ func Load() (Config, error) {
 			UploadBurst:     uploadRate,
 			OpenPerMinute:   openRate,
 			OpenBurst:       openRate,
+			AssistPerMinute: assistRate,
+			AssistBurst:     assistRate,
 		},
 		Upload: Upload{
 			MaxBytes: int64(maxUploadMB) << 20,

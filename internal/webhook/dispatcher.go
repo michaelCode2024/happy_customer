@@ -83,14 +83,14 @@ func (d *Dispatcher) Run(ctx context.Context) {
 }
 
 type delivery struct {
-	id           uuid.UUID
-	endpointID   uuid.UUID
-	tenantID     uuid.UUID
-	eventType    string
-	payload      []byte
-	attempts     int
-	url          string
-	secret       string
+	id         uuid.UUID
+	endpointID uuid.UUID
+	tenantID   uuid.UUID
+	eventType  string
+	payload    []byte
+	attempts   int
+	url        string
+	secret     string
 }
 
 func (d *Dispatcher) drain(ctx context.Context) error {
@@ -215,5 +215,26 @@ const (
 	EventConversationClosed  = "conversation.closed"
 	EventMessageCreated      = "message.created"
 	EventMessageFromAgent    = "message.agent"
-	EventVisitorCreated      = "visitor.created"
+	// Editing and recall are separate events rather than a second
+	// message.created, because a customer's integration needs to know that the
+	// record it stored earlier is no longer accurate.
+	EventMessageUpdated = "message.updated"
+	EventMessageDeleted = "message.deleted"
+	EventVisitorCreated = "visitor.created"
+	EventRatingCreated  = "conversation.rated"
 )
+
+// KnownEvents is the vocabulary a tenant may subscribe to. It is exported so the
+// console's endpoint editor and the documentation can offer exactly what the
+// platform emits instead of a hand-maintained list that drifts.
+var KnownEvents = []string{
+	EventConversationCreated,
+	EventConversationUpdated,
+	EventConversationClosed,
+	EventMessageCreated,
+	EventMessageFromAgent,
+	EventMessageUpdated,
+	EventMessageDeleted,
+	EventVisitorCreated,
+	EventRatingCreated,
+}

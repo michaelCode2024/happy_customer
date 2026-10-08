@@ -135,12 +135,12 @@ func (a *API) openMe(w http.ResponseWriter, r *http.Request, p apiKeyPrincipal) 
 		(select count(*)::int from conversation where tenant_id = $1 and status <> 'RESOLVED')`,
 		p.TenantID).Scan(&inboxes, &agents, &open)
 	respond(w, 200, map[string]any{
-		"tenantId":        p.TenantID,
-		"tenant":          p.Tenant,
-		"keyName":         p.Name,
-		"scopes":          p.Scopes,
-		"inboxes":         inboxes,
-		"agents":          agents,
+		"tenantId":          p.TenantID,
+		"tenant":            p.Tenant,
+		"keyName":           p.Name,
+		"scopes":            p.Scopes,
+		"inboxes":           inboxes,
+		"agents":            agents,
 		"openConversations": open,
 	})
 }
@@ -271,20 +271,28 @@ func (a *API) openListMessages(w http.ResponseWriter, r *http.Request, p apiKeyP
 		return
 	}
 	after := queryInt64(r, "after", 0)
+	before := queryInt64(r, "before", 0)
 	limit := queryInt(r, "limit", 50)
-	if limit > 200 {
-		limit = 200
+	// The tenant's own backend is the visitor's counterpart, not an agent, so an
+	// internal note is withheld by default. A tenant that genuinely needs its own
+	// notes back (to sync them into its CRM) asks for them explicitly.
+	view := visitorVisibility
+	if truthy(r.URL.Query().Get("includePrivate")) {
+		view = agentVisibility
 	}
-	items, err := a.fetchMessages(r.Context(), id, after, limit)
+	page, err := a.pageMessages(r.Context(), id, after, before, limit, view)
 	if err != nil {
 		fail(w, 500, "查询消息失败")
 		return
 	}
 	var lastSequence int64
 	_ = a.db.QueryRow(r.Context(), `select last_sequence from conversation where id = $1`, id).Scan(&lastSequence)
+	if page.LastSequence == 0 {
+		page.LastSequence = lastSequence
+	}
 	respond(w, 200, map[string]any{
-		"items": items, "lastSequence": lastSequence,
-		"hasMore": lastSequence > after && int64(len(items)) == int64(limit),
+		"items": page.Items, "hasMore": page.HasMore, "hasOlder": page.HasOlder,
+		"firstSequence": page.FirstSequence, "lastSequence": page.LastSequence,
 	})
 }
 
@@ -309,7 +317,9 @@ func (a *API) openPostMessage(w http.ResponseWriter, r *http.Request, p apiKeyPr
 	}
 	// A message injected by the tenant's own system is authored by AGENT: it is
 	// an outward-facing reply from a human or a bot the tenant controls, which is
-	// what triggers the visitor-facing realtime event.
+	// what triggers the visitor-facing realtime event. It is attributed to the
+	// tenant's integration agent rather than to nobody, so agent statistics and
+	// the reply-author display both have a real row to point at.
 	metadata := orEmpty(in.Metadata)
 	if in.SenderName != "" {
 		metadata["senderName"] = in.SenderName
@@ -317,6 +327,7 @@ func (a *API) openPostMessage(w http.ResponseWriter, r *http.Request, p apiKeyPr
 	metadata["source"] = "open_api"
 	view, err := a.appendMessage(r.Context(), p.TenantID, id, messageInput{
 		SenderType:      "AGENT",
+		SenderID:        a.integrationAgentID(r.Context(), p.TenantID),
 		ClientMessageID: in.ClientMessageID,
 		MessageType:     messageType,
 		Content:         in.Content,
@@ -530,12 +541,12 @@ func (a *API) openCreateConversation(w http.ResponseWriter, r *http.Request, p a
 		return
 	}
 	var in struct {
-		InboxKey  string         `json:"inboxKey"`
-		Subject   string         `json:"subject"`
-		Content   string         `json:"content"`
-		Priority  *int16         `json:"priority"`
-		Tags      []string       `json:"tags"`
-		Metadata  map[string]any `json:"metadata"`
+		InboxKey string         `json:"inboxKey"`
+		Subject  string         `json:"subject"`
+		Content  string         `json:"content"`
+		Priority *int16         `json:"priority"`
+		Tags     []string       `json:"tags"`
+		Metadata map[string]any `json:"metadata"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -582,7 +593,8 @@ func (a *API) openCreateConversation(w http.ResponseWriter, r *http.Request, p a
 		metadata := orEmpty(in.Metadata)
 		metadata["source"] = "open_api"
 		message, err := a.appendMessage(r.Context(), p.TenantID, conversationID, messageInput{
-			SenderType: "AGENT", MessageType: "TEXT", Content: in.Content, Metadata: metadata,
+			SenderType: "AGENT", SenderID: a.integrationAgentID(r.Context(), p.TenantID),
+			MessageType: "TEXT", Content: in.Content, Metadata: metadata,
 		})
 		if err != nil {
 			a.logger.Error("open api first message failed", "error", err, "conversation", conversationID)
@@ -672,7 +684,7 @@ func (a *API) openStats(w http.ResponseWriter, r *http.Request, p apiKeyPrincipa
 			return
 		}
 		series = append(series, map[string]any{
-			"date": statDate.Format("2006-01-02"),
+			"date":                 statDate.Format("2006-01-02"),
 			"conversationsStarted": sStarted, "conversationsClosed": sClosed,
 			"messagesIn": sIn, "messagesOut": sOut,
 			"aiAnswered": sAIAnswered, "aiHandoff": sAIHandoff,
@@ -711,9 +723,9 @@ func (a *API) openStats(w http.ResponseWriter, r *http.Request, p apiKeyPrincipa
 			"conversationsStarted": started, "conversationsClosed": closed,
 			"messagesIn": in, "messagesOut": out,
 			"aiAnswered": aiAnswered, "aiHandoff": aiHandoff,
-			"aiDeflectionRate": deflection,
+			"aiDeflectionRate":        deflection,
 			"avgFirstResponseSeconds": averageFirstResponse,
-			"avgRating": averageRating,
+			"avgRating":               averageRating,
 		},
 	})
 }

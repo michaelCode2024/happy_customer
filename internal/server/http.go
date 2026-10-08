@@ -261,3 +261,16 @@ func queryInt(r *http.Request, key string, fallback int) int {
 func queryInt64(r *http.Request, key string, fallback int64) int64 {
 	return int64(queryInt(r, key, int(fallback)))
 }
+
+// truthy reads a boolean query parameter. It accepts the spellings a browser
+// form and a hand-written integration realistically send, and treats anything
+// else as absent rather than erroring: a mistyped flag should fall back to the
+// safe default, not fail the request.
+func truthy(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}

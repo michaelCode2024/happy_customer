@@ -36,8 +36,11 @@ type API struct {
 	loginRate  *ratelimit.Limiter
 	uploadRate *ratelimit.Limiter
 	openRate   *ratelimit.Limiter
-	logger     *slog.Logger
-	startedAt  time.Time
+	// aiAssistRate guards the paid assistant endpoints. It is separate from the
+	// other buckets because its purpose is cost control, not abuse control.
+	aiAssistRate *ratelimit.Limiter
+	logger       *slog.Logger
+	startedAt    time.Time
 }
 
 func New(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) (*API, error) {
@@ -47,13 +50,13 @@ func New(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) (*API, error)
 	}
 	hub := realtime.NewHub(logger)
 	api := &API{
-		cfg:        cfg,
-		db:         db,
-		tokens:     auth.NewTokenService(cfg.WidgetTokenKey, cfg.WidgetTokenTTL, cfg.AgentSessionTTL),
-		authn:      auth.NewAuthenticator(db),
-		hub:        hub,
-		bus:        realtime.NewBus(db, hub, logger),
-		ai:         ai.NewService(db, ai.New(ai.Config{
+		cfg:    cfg,
+		db:     db,
+		tokens: auth.NewTokenService(cfg.WidgetTokenKey, cfg.WidgetTokenTTL, cfg.AgentSessionTTL),
+		authn:  auth.NewAuthenticator(db),
+		hub:    hub,
+		bus:    realtime.NewBus(db, hub, logger),
+		ai: ai.NewService(db, ai.New(ai.Config{
 			Provider:    cfg.AI.Provider,
 			BaseURL:     cfg.AI.BaseURL,
 			APIKey:      cfg.AI.APIKey,
@@ -62,14 +65,15 @@ func New(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) (*API, error)
 			MaxTokens:   cfg.AI.MaxTokens,
 			Timeout:     cfg.AI.TimeoutSeconds,
 		}), cfg.AI.ConfidenceThreshold),
-		store:      store,
-		webhooks:   webhook.NewDispatcher(db, cfg.Webhook.MaxAttempts, logger),
-		widgetRate: ratelimit.New(cfg.RateLimit.WidgetPerMinute, cfg.RateLimit.WidgetBurst),
-		loginRate:  ratelimit.New(cfg.RateLimit.LoginPerMinute, cfg.RateLimit.LoginBurst),
-		uploadRate: ratelimit.New(cfg.RateLimit.UploadPerMinute, cfg.RateLimit.UploadBurst),
-		openRate:   ratelimit.New(cfg.RateLimit.OpenPerMinute, cfg.RateLimit.OpenBurst),
-		logger:     logger,
-		startedAt:  time.Now(),
+		store:        store,
+		webhooks:     webhook.NewDispatcher(db, cfg.Webhook.MaxAttempts, logger),
+		widgetRate:   ratelimit.New(cfg.RateLimit.WidgetPerMinute, cfg.RateLimit.WidgetBurst),
+		loginRate:    ratelimit.New(cfg.RateLimit.LoginPerMinute, cfg.RateLimit.LoginBurst),
+		uploadRate:   ratelimit.New(cfg.RateLimit.UploadPerMinute, cfg.RateLimit.UploadBurst),
+		openRate:     ratelimit.New(cfg.RateLimit.OpenPerMinute, cfg.RateLimit.OpenBurst),
+		aiAssistRate: ratelimit.New(cfg.RateLimit.AssistPerMinute, cfg.RateLimit.AssistBurst),
+		logger:       logger,
+		startedAt:    time.Now(),
 	}
 	return api, nil
 }
