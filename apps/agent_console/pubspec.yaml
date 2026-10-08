@@ -3,18 +3,28 @@ description: RelayDesk cross-platform agent and operations console.
 publish_to: none
 version: 0.1.0+1
 
+# One codebase, four shapes: the desktop build is what an agent sits in all day,
+# the phone build is for on-call shifts, and the web build is a zero-install
+# fallback. No Flutter Web build is used for the visitor widget — that stays a
+# small Web Component so a customer site never pays for the framework.
 environment:
-  sdk: ">=3.13.1 <4.0.0"
-  flutter: ">=3.47.1"
+  sdk: ">=3.5.0 <4.0.0"
+  flutter: ">=3.24.0"
 
 dependencies:
   flutter:
     sdk: flutter
+  http: ^1.2.0
+  web_socket_channel: ^2.4.0
+  shared_preferences: ^2.2.3
+  # Pinned to the 0.8 line on purpose: the console must build against whatever
+  # Flutter a developer already has, and image_picker 1.x requires Dart 3.10+.
+  image_picker: ^0.8.9
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^6.0.0
+  flutter_lints: ^3.0.2
 
 flutter:
   uses-material-design: true
