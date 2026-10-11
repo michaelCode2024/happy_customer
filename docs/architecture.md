@@ -34,12 +34,14 @@ Flutter 适合功能复杂、需要跨桌面和移动端的坐席工作台，但
 1. Widget 使用公开 `inboxKey` 初始化访客并换取短期 HMAC Token。
 2. 所有资源查询同时校验 `tenantId + inboxId + visitorId`，避免跨租户越权。
 3. 发送消息时在数据库事务内原子递增会话序号并持久化消息。
-4. 事务提交后才发送 WebSocket 事件。
+4. 事务提交后才发送 WebSocket 事件；访客消息的 AI 自动回复在提交后异步执行，不阻塞发送接口。
 5. 断线重连使用 `after=<lastSequence>` 增量补拉；WebSocket 不作为消息存储。
 6. `clientMessageId` 提供客户端重试幂等性。
+7. 队列事件按 `inbox:` 扇出（坐席按入口订阅）；跨实例仍用 PostgreSQL `LISTEN/NOTIFY`。
+8. 单实例 WebSocket 与 DB 池可由环境变量设硬顶；`GET /metrics` 暴露基础计数。
 
 ## 部署演进
 
 - 开发期：Northflank Sandbox 或本机 Docker，PostgreSQL 可使用 Northflank 免费数据库或 Neon Free。
-- 静态端：Cloudflare Pages 托管 Flutter Web 和 Widget 产物。
-- 正式商用：迁移到付费常驻实例、托管 PostgreSQL、对象存储和 Redis；中国大陆业务需国内云、域名与备案方案。
+- 静态端：Cloudflare Pages 托管 Flutter Web 和 Widget 产物；也可由同一 Go 容器提供 `/widget.js`、`/h5/`、`/console/`。
+- 正式商用：迁移到付费常驻实例、托管 PostgreSQL、对象存储和 Redis（共享限流）；中国大陆业务需国内云、域名与备案方案。

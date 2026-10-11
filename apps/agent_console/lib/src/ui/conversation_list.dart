@@ -51,7 +51,8 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
     if (!_scroll.hasClients) {
       return;
     }
-    final remaining = _scroll.position.maxScrollExtent - _scroll.position.pixels;
+    final remaining =
+        _scroll.position.maxScrollExtent - _scroll.position.pixels;
     if (remaining < 320 && !widget.workbench.loadingList) {
       // The controller's fetch is already idempotent and de-duplicated; asking
       // again near the bottom is cheaper than tracking a page cursor here.
@@ -69,11 +70,12 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
         return Column(
           children: <Widget>[
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
               child: TextField(
                 controller: _search,
                 textInputAction: TextInputAction.search,
                 decoration: InputDecoration(
+                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
                   hintText: '搜索客户或消息内容',
                   prefixIcon: const Icon(Icons.search, size: 20),
                   suffixIcon: _search.text.isEmpty
@@ -96,57 +98,67 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
               child: Row(
                 children: <Widget>[
-                  Expanded(
-                    child: SegmentedButton<QueueFilter>(
-                      showSelectedIcon: false,
-                      segments: <ButtonSegment<QueueFilter>>[
-                        const ButtonSegment<QueueFilter>(
-                          value: QueueFilter.mine,
-                          label: Text('我的'),
-                        ),
-                        ButtonSegment<QueueFilter>(
-                          value: QueueFilter.unassigned,
-                          label: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: <Widget>[
-                              const Text('待分配'),
-                              if (workbench.queued > 0) ...<Widget>[
-                                const SizedBox(width: 6),
-                                _CountPill(count: workbench.queued),
-                              ],
-                            ],
-                          ),
-                        ),
-                        const ButtonSegment<QueueFilter>(
-                          value: QueueFilter.all,
-                          label: Text('全部'),
-                        ),
-                      ],
-                      selected: <QueueFilter>{workbench.filter},
-                      onSelectionChanged: (selection) =>
-                          workbench.setFilter(selection.first),
-                      style: ButtonStyle(
-                        visualDensity: VisualDensity.compact,
-                        textStyle: WidgetStatePropertyAll<TextStyle?>(
-                          theme.textTheme.labelMedium,
-                        ),
-                      ),
+                  Text('会话',
+                      style: theme.textTheme.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w600)),
+                  const Spacer(),
+                  if (workbench.queued > 0) ...<Widget>[
+                    Text('待分配',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant)),
+                    const SizedBox(width: 6),
+                    Tooltip(
+                      message: '待分配 ${workbench.queued} 个会话',
+                      child: _CountPill(count: workbench.queued),
                     ),
-                  ),
-                  const SizedBox(width: 6),
-                  Tooltip(
-                    message: '刷新',
-                    child: IconButton(
-                      iconSize: 20,
-                      visualDensity: VisualDensity.compact,
-                      onPressed: () => workbench.refreshConversations(),
-                      icon: const Icon(Icons.refresh),
-                    ),
+                    const SizedBox(width: 10),
+                  ],
+                  IconButton(
+                    tooltip: '刷新',
+                    iconSize: 20,
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => workbench.refreshConversations(),
+                    icon: const Icon(Icons.refresh),
                   ),
                 ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<QueueFilter>(
+                  showSelectedIcon: false,
+                  segments: const <ButtonSegment<QueueFilter>>[
+                    ButtonSegment<QueueFilter>(
+                      value: QueueFilter.mine,
+                      label: Text('我的'),
+                    ),
+                    ButtonSegment<QueueFilter>(
+                      value: QueueFilter.unassigned,
+                      label: Text('待分配'),
+                    ),
+                    ButtonSegment<QueueFilter>(
+                      value: QueueFilter.all,
+                      label: Text('全部'),
+                    ),
+                  ],
+                  selected: <QueueFilter>{workbench.filter},
+                  onSelectionChanged: (selection) =>
+                      workbench.setFilter(selection.first),
+                  style: ButtonStyle(
+                    visualDensity: VisualDensity.compact,
+                    padding: const WidgetStatePropertyAll(
+                      EdgeInsets.symmetric(horizontal: 4),
+                    ),
+                    textStyle: WidgetStatePropertyAll<TextStyle?>(
+                      theme.textTheme.labelMedium,
+                    ),
+                  ),
+                ),
               ),
             ),
             if (widget.session.inboxes.length > 1)
@@ -157,7 +169,8 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
                   isDense: true,
                   decoration: const InputDecoration(
                     prefixIcon: Icon(Icons.inbox_outlined, size: 18),
-                    contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                   ),
                   items: <DropdownMenuItem<String?>>[
                     const DropdownMenuItem<String?>(
@@ -232,7 +245,7 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
         controller: _scroll,
         physics: const AlwaysScrollableScrollPhysics(),
         itemCount: workbench.conversations.length,
-        separatorBuilder: (_, __) => const Divider(height: 1, indent: 68),
+        separatorBuilder: (_, __) => const Divider(height: 1, indent: 54),
         itemBuilder: (context, index) {
           final conversation = workbench.conversations[index];
           return _ConversationRow(
@@ -267,13 +280,15 @@ class _ConversationRow extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Container(
-        color: selected ? theme.colorScheme.primaryContainer.withAlpha(120) : null,
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        color:
+            selected ? theme.colorScheme.primaryContainer.withAlpha(120) : null,
+        padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            _Avatar(name: conversation.visitorName, seed: conversation.visitorId),
-            const SizedBox(width: 12),
+            _Avatar(
+                name: conversation.visitorName, seed: conversation.visitorId),
+            const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -296,13 +311,15 @@ class _ConversationRow extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.bodyMedium?.copyWith(
-                            fontWeight: unread ? FontWeight.w600 : FontWeight.w500,
+                            fontWeight:
+                                unread ? FontWeight.w600 : FontWeight.w500,
                           ),
                         ),
                       ),
                       const SizedBox(width: 6),
                       Text(
-                        relativeTime(conversation.lastMessageAt ?? conversation.updatedAt),
+                        relativeTime(conversation.lastMessageAt ??
+                            conversation.updatedAt),
                         style: theme.textTheme.labelSmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
@@ -330,7 +347,7 @@ class _ConversationRow extends StatelessWidget {
                       ],
                     ],
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
                   Wrap(
                     spacing: 6,
                     runSpacing: 4,
@@ -345,7 +362,8 @@ class _ConversationRow extends StatelessWidget {
                               ? '他人处理中'
                               : conversation.assigneeName,
                         ),
-                      for (final tag in conversation.tags.take(3))
+                      // 列表只露一个标签，避免 chip 堆叠把队列做成仪表盘。
+                      for (final tag in conversation.tags.take(1))
                         _MiniChip(label: tag, tinted: true),
                     ],
                   ),
@@ -367,12 +385,13 @@ class _Avatar extends StatelessWidget {
   final String name;
   final String seed;
 
-  static const double size = 40;
+  static const double size = 32;
 
   @override
   Widget build(BuildContext context) {
     final hue = avatarHue(seed);
-    final background = HSLColor.fromAHSL(1, hue.toDouble(), 0.42, 0.62).toColor();
+    final background =
+        HSLColor.fromAHSL(1, hue.toDouble(), 0.42, 0.62).toColor();
     return Container(
       width: size,
       height: size,
@@ -445,8 +464,9 @@ class _CountPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      constraints: const BoxConstraints(minWidth: 18),
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+      alignment: Alignment.center,
+      padding: const EdgeInsets.symmetric(horizontal: 5),
       decoration: BoxDecoration(
         color: theme.colorScheme.error,
         borderRadius: BorderRadius.circular(9),
@@ -510,4 +530,3 @@ class _Notice extends StatelessWidget {
     );
   }
 }
-

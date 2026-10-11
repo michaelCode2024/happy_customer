@@ -5,6 +5,7 @@ import 'package:relaydesk_agent_console/src/platform/tenant_detail.dart';
 import 'package:relaydesk_agent_console/src/platform/tenant_table.dart';
 import 'package:relaydesk_agent_console/src/ui/error_banner.dart';
 import 'package:relaydesk_agent_console/src/util/format.dart';
+import 'package:relaydesk_agent_console/src/util/labels.dart';
 
 /// The RelayDesk operations console.
 ///
@@ -44,7 +45,7 @@ class _PlatformPageState extends State<PlatformPage> {
               children: <Widget>[
                 const Icon(Icons.admin_panel_settings_outlined, size: 20),
                 const SizedBox(width: 10),
-                const Text('RelayDesk 运营后台'),
+                const Text('连语客服运营后台'),
                 if (controller.server.isNotEmpty) ...<Widget>[
                   const SizedBox(width: 12),
                   Text(
@@ -247,7 +248,7 @@ class _OverviewSection extends StatelessWidget {
                                   SizedBox(
                                     width: 96,
                                     child: Text(
-                                      plan.plan,
+                                       planLabel(plan.plan),
                                       style: theme.textTheme.bodyMedium,
                                     ),
                                   ),
@@ -757,23 +758,15 @@ class _AboutSection extends StatelessWidget {
         const SizedBox(height: 16),
         _Panel(
           title: '平台能力',
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 8,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               for (final feature in meta.platformFeatures)
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
                   child: Text(
-                    feature,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: theme.colorScheme.onPrimaryContainer,
-                    ),
+                    '· $feature',
+                    style: theme.textTheme.bodyMedium,
                   ),
                 ),
             ],
@@ -811,11 +804,11 @@ class _StatCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      width: 168,
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+      width: 148,
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withAlpha(80),
-        borderRadius: BorderRadius.circular(12),
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(6),
         border: Border.all(color: theme.dividerColor.withAlpha(80)),
       ),
       child: Column(

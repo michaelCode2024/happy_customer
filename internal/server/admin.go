@@ -2,7 +2,9 @@ package server
 
 import (
 	"errors"
+	"html"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -482,13 +484,24 @@ func (a *API) adminSnippet(w http.ResponseWriter, r *http.Request, p auth.Princi
 		return
 	}
 	base := a.cfg.PublicBaseURL
-	snippet := "<script>\n  window.RelayDesk = { inboxKey: \"" + publicKey + "\", apiBase: \"" + base + "\" };\n</script>\n" +
-		"<script async src=\"" + base + "/widget.js\"></script>"
+	h5URL := base + "/h5/" + url.PathEscape(publicKey)
+	snippet := "<script defer src=\"" + html.EscapeString(base) + "/widget.js\" data-endpoint=\"" +
+		html.EscapeString(base) + "\" data-inbox-key=\"" + html.EscapeString(publicKey) + "\"></script>"
+	// 宿主项目用 iframe 嵌 H5：宽高由父页控制；parentOrigin 限制 postMessage 目标。
+	iframeTag := `<iframe src="` + html.EscapeString(h5URL) + `?parentOrigin=*"` +
+		` title="连语客服" style="border:0;width:100%;height:100%;min-height:520px" allow="microphone;clipboard-write"></iframe>`
 	respond(w, 200, map[string]any{
-		"inboxKey": publicKey, "script": snippet,
-		"scriptUrl": base + "/widget.js",
-		"npm":       "npm i @relaydesk/widget",
-		"iframe":    base + "/h5/" + publicKey,
+		"inboxKey":   publicKey,
+		"script":     snippet,
+		"scriptUrl":  base + "/widget.js",
+		"iframe":     h5URL,
+		"iframeHtml": iframeTag,
+		"openApiBase": base + "/api/v1/open",
+		"hostNotes": []string{
+			"网站脚本：把 script 贴进页面即可",
+			"业务系统 iframe：用 iframeHtml，或自行指向 iframe URL 并监听 window.message（source=relaydesk）",
+			"服务端对接：创建 API Key 后以 X-RelayDesk-Key 调用 openApiBase",
+		},
 	})
 }
 

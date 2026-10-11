@@ -12,12 +12,18 @@ import (
 type Config struct {
 	ListenAddress      string
 	PublicBaseURL      string
+	StaticDir          string
 	DatabaseURL        string
+	DatabaseMaxConns   int32
 	WidgetTokenKey     string
 	WidgetTokenTTL     time.Duration
 	AgentSessionTTL    time.Duration
 	PlatformAdminToken string
 	AllowedOrigins     []string
+	// FrameAncestors drives Content-Security-Policy frame-ancestors on /h5.
+	// Empty / "*" means any parent may iframe the embed page (delivery default).
+	FrameAncestors     []string
+	MaxWSConnections   int
 	DemoEnabled        bool
 	Storage            Storage
 	Webhook            Webhook
@@ -152,6 +158,19 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	// 连接池默认按单实例中等负载留余量；LISTEN 会长期占用一条，别压得太紧。
+	dbMaxConns, err := integer("DATABASE_MAX_CONNS", 40)
+	if err != nil {
+		return Config{}, err
+	}
+	if dbMaxConns < 4 {
+		return Config{}, errors.New("DATABASE_MAX_CONNS must be at least 4")
+	}
+	// 0 = 不限制；生产建议按实例内存与 FD 上限设一个硬顶，避免慢客户端拖垮进程。
+	maxWS, err := integer("MAX_WS_CONNECTIONS", 10000)
+	if err != nil {
+		return Config{}, err
+	}
 
 	storage := Storage{
 		Driver:            env("STORAGE_DRIVER", "local"),
@@ -173,12 +192,16 @@ func Load() (Config, error) {
 	cfg := Config{
 		ListenAddress:      env("LISTEN_ADDRESS", ":8080"),
 		PublicBaseURL:      strings.TrimSuffix(env("PUBLIC_BASE_URL", "http://localhost:8080"), "/"),
+		StaticDir:          env("STATIC_DIR", ""),
 		DatabaseURL:        env("DATABASE_URL", "postgres://relaydesk:relaydesk@localhost:5432/relaydesk?sslmode=disable"),
+		DatabaseMaxConns:   int32(dbMaxConns),
 		WidgetTokenKey:     env("WIDGET_TOKEN_SECRET", "local-only-change-this-secret-before-production"),
 		WidgetTokenTTL:     widgetTTL,
 		AgentSessionTTL:    sessionTTL,
 		PlatformAdminToken: env("PLATFORM_ADMIN_TOKEN", ""),
 		AllowedOrigins:     splitAndTrim(env("ALLOWED_ORIGINS", env("ALLOWED_ORIGIN", "*"))),
+		FrameAncestors:     splitAndTrim(env("FRAME_ANCESTORS", "*")),
+		MaxWSConnections:   maxWS,
 		DemoEnabled:        demo,
 		Storage:            storage,
 		Webhook:            Webhook{MaxAttempts: maxAttempts, Timeout: 10 * time.Second},

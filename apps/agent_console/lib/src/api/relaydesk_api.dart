@@ -141,8 +141,54 @@ class RelayDeskApi {
   /// token alone authorizes the upgrade.
   Uri socketUri() {
     final base = _server.replaceFirst(RegExp('^http'), 'ws');
-    return Uri.parse('$base/ws/console?token=${Uri.encodeQueryComponent(token)}');
+    return Uri.parse(
+        '$base/ws/console?token=${Uri.encodeQueryComponent(token)}');
   }
+
+  /// Tenant developer console. These endpoints require OWNER or ADMIN.
+  Future<List<Map<String, dynamic>>> integrationInboxes() async =>
+      asMapList((await _send('GET', '/api/v1/admin/inboxes'))['items']);
+
+  Future<Map<String, dynamic>> inboxSnippet(String id) =>
+      _send('GET', '/api/v1/admin/inboxes/${Uri.encodeComponent(id)}/snippet');
+
+  Future<List<Map<String, dynamic>>> integrationKeys() async =>
+      asMapList((await _send('GET', '/api/v1/admin/api-keys'))['items']);
+
+  Future<Map<String, dynamic>> createIntegrationKey(
+          String name, List<String> scopes) =>
+      _send('POST', '/api/v1/admin/api-keys', body: <String, dynamic>{
+        'name': name,
+        'scopes': scopes,
+      });
+
+  Future<void> revokeIntegrationKey(String id) async {
+    await _send('DELETE', '/api/v1/admin/api-keys/${Uri.encodeComponent(id)}');
+  }
+
+  Future<Map<String, dynamic>> integrationWebhooks() =>
+      _send('GET', '/api/v1/admin/webhooks');
+
+  Future<Map<String, dynamic>> createIntegrationWebhook(
+          String url, List<String> events) =>
+      _send('POST', '/api/v1/admin/webhooks', body: <String, dynamic>{
+        'url': url,
+        'events': events,
+      });
+
+  Future<void> deleteIntegrationWebhook(String id) async {
+    await _send('DELETE', '/api/v1/admin/webhooks/${Uri.encodeComponent(id)}');
+  }
+
+  Future<void> testIntegrationWebhook(String id) async {
+    await _send(
+        'POST', '/api/v1/admin/webhooks/${Uri.encodeComponent(id)}/test');
+  }
+
+  Future<List<Map<String, dynamic>>> webhookDeliveries(String id) async =>
+      asMapList((await _send('GET',
+              '/api/v1/admin/webhooks/${Uri.encodeComponent(id)}/deliveries'))[
+          'items']);
 
   /// ------------------------------------------------------------------ session
 
@@ -175,7 +221,8 @@ class RelayDeskApi {
   }
 
   Future<void> logout() async {
-    await _send('POST', '/api/v1/console/logout', body: const <String, dynamic>{});
+    await _send('POST', '/api/v1/console/logout',
+        body: const <String, dynamic>{});
   }
 
   Future<AgentProfile> me() async {
@@ -582,7 +629,8 @@ class RelayDeskApi {
   }
 
   Future<List<Conversation>> visitorConversations(String id) async {
-    final body = await _send('GET', '/api/v1/console/visitors/$id/conversations');
+    final body =
+        await _send('GET', '/api/v1/console/visitors/$id/conversations');
     return asMapList(body['items']).map(Conversation.fromJson).toList();
   }
 
@@ -596,7 +644,8 @@ class RelayDeskApi {
   }
 
   Future<List<VisitorNote>> notes(String visitorId) async {
-    final body = await _send('GET', '/api/v1/console/visitors/$visitorId/notes');
+    final body =
+        await _send('GET', '/api/v1/console/visitors/$visitorId/notes');
     return asMapList(body['items']).map(VisitorNote.fromJson).toList();
   }
 

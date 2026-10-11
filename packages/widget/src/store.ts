@@ -1015,8 +1015,22 @@ export class ChatStore {
   }
 
   #emit(event: { type: string; data?: unknown }): void {
+    this.emitHost(event);
+  }
+
+  /** Publishes an event to onEvent, native bridge, and iframe parent. */
+  emitHost(event: { type: string; data?: unknown }): void {
+    const envelope = { source: 'relaydesk', ...event };
     this.#options.onEvent?.(event as never);
-    this.#options.bridge?.postMessage?.(JSON.stringify(event));
+    this.#options.bridge?.postMessage?.(JSON.stringify(envelope));
+    if (typeof window !== 'undefined' && window.parent && window.parent !== window) {
+      const target = this.#options.parentOrigin || '*';
+      try {
+        window.parent.postMessage(envelope, target);
+      } catch {
+        // Cross-origin parentOrigin misconfiguration must not break chat.
+      }
+    }
   }
 
   #patch(partial: Partial<Snapshot>): void {

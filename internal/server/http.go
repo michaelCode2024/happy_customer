@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"runtime/debug"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/relaydesk/relaydesk/internal/auth"
@@ -113,22 +112,22 @@ func cors(next http.Handler, origins []string) http.Handler {
 	})
 }
 
-var requestCounter atomic.Uint64
-
 func (a *API) metrics(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
-		requestCounter.Add(1)
 		recorder := &statusRecorder{ResponseWriter: w, status: 200}
 		next.ServeHTTP(recorder, r)
-		if r.URL.Path == "/health" || r.URL.Path == "/ready" {
+		if r.URL.Path == "/health" || r.URL.Path == "/ready" || r.URL.Path == "/metrics" {
 			return
 		}
+		elapsed := time.Since(started).Milliseconds()
+		httpRequestsTotal.Add(1)
+		httpDurationMsTotal.Add(uint64(elapsed))
 		a.logger.Info("request",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", recorder.status,
-			"durationMs", time.Since(started).Milliseconds(),
+			"durationMs", elapsed,
 			"bytes", recorder.bytes)
 	})
 }

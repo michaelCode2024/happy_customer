@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:relaydesk_agent_console/src/platform/platform_models.dart';
 import 'package:relaydesk_agent_console/src/ui/error_banner.dart';
 import 'package:relaydesk_agent_console/src/util/format.dart';
+import 'package:relaydesk_agent_console/src/util/labels.dart';
 
 /// The tenant table.
 ///
@@ -203,7 +204,7 @@ class _TenantRow extends StatelessWidget {
                         )
                       else
                         _Chip(
-                          label: tenant.plan,
+                           label: planLabel(tenant.plan),
                           color: theme.colorScheme.primary,
                         ),
                     ],
@@ -414,7 +415,7 @@ class _CreateTenantDialogState extends State<CreateTenantDialog> {
                   controller: _publicKey,
                   autocorrect: false,
                   decoration: const InputDecoration(
-                    labelText: 'publicKey（可选）',
+                     labelText: '入口公钥（可选）',
                     hintText: '网站组件用它识别入口，留空则按标识生成',
                   ),
                 ),
@@ -425,19 +426,19 @@ class _CreateTenantDialogState extends State<CreateTenantDialog> {
                   items: const <DropdownMenuItem<String>>[
                     DropdownMenuItem<String>(
                       value: 'TRIAL',
-                      child: Text('TRIAL · 2 坐席 / 1000 条'),
+                       child: Text('试用版 · 2 坐席 / 1000 条'),
                     ),
                     DropdownMenuItem<String>(
                       value: 'STARTER',
-                      child: Text('STARTER · 3 坐席 / 5000 条'),
+                       child: Text('入门版 · 3 坐席 / 5000 条'),
                     ),
                     DropdownMenuItem<String>(
                       value: 'GROWTH',
-                      child: Text('GROWTH · 10 坐席 / 5 万条'),
+                       child: Text('成长版 · 10 坐席 / 5 万条'),
                     ),
                     DropdownMenuItem<String>(
                       value: 'ENTERPRISE',
-                      child: Text('ENTERPRISE · 100 坐席 / 100 万条'),
+                       child: Text('企业版 · 100 坐席 / 100 万条'),
                     ),
                   ],
                   onChanged: (value) {
@@ -508,7 +509,7 @@ Future<void> showCreatedTenant(
                   value: created.initialPassword,
                   emphasised: true,
                 ),
-              _DetailRow(label: 'publicKey', value: created.publicKey),
+               _DetailRow(label: '入口公钥', value: created.publicKey),
               _DetailRow(label: '组件地址', value: created.scriptUrl),
               const SizedBox(height: 12),
               Text(

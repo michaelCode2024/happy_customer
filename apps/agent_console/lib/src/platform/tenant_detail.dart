@@ -4,6 +4,7 @@ import 'package:relaydesk_agent_console/src/platform/platform_controller.dart';
 import 'package:relaydesk_agent_console/src/platform/platform_models.dart';
 import 'package:relaydesk_agent_console/src/ui/error_banner.dart';
 import 'package:relaydesk_agent_console/src/util/format.dart';
+import 'package:relaydesk_agent_console/src/util/labels.dart';
 
 /// The detail pane for one tenant: who is in it, what they bought, and what they
 /// have used.
@@ -101,15 +102,15 @@ class TenantDetailPane extends StatelessWidget {
             spacing: 24,
             runSpacing: 12,
             children: <Widget>[
-              _Metric(label: '套餐', value: tenant.subscription.plan),
+              _Metric(label: '套餐', value: planLabel(tenant.subscription.plan)),
               _Metric(
                 label: '计费状态',
-                value: tenant.subscription.status,
+                value: billingStatusLabel(tenant.subscription.status),
                 tone: tenant.subscription.status == 'ACTIVE'
                     ? null
                     : theme.colorScheme.error,
               ),
-              _Metric(label: '状态', value: tenant.status),
+              _Metric(label: '状态', value: tenantStatusLabel(tenant.status)),
               _Metric(
                 label: '坐席上限',
                 value: '${tenant.agents.where((a) => !a.isSystemAccount).length}'
@@ -175,7 +176,7 @@ class TenantDetailPane extends StatelessWidget {
                   title: Text(
                     agent.displayName.isEmpty ? agent.email : agent.displayName,
                   ),
-                  subtitle: Text('${agent.email} · ${agent.role}'),
+                   subtitle: Text('${agent.email} · ${agentRoleLabel(agent.role)}'),
                   trailing: _StatusDot(
                     label: agent.status == 'DISABLED'
                         ? '停用'
@@ -199,10 +200,10 @@ class TenantDetailPane extends StatelessWidget {
                   contentPadding: EdgeInsets.zero,
                   leading: const Icon(Icons.web_asset_outlined, size: 18),
                   title: Text(inbox.name),
-                  subtitle: Text('publicKey: ${inbox.publicKey}'),
+                   subtitle: Text('入口公钥：${inbox.publicKey}'),
                   trailing: TextButton(
                     onPressed: () =>
-                        copyToClipboard(context, inbox.publicKey, 'publicKey'),
+                         copyToClipboard(context, inbox.publicKey, '入口公钥'),
                     child: const Text('复制'),
                   ),
                 ),
@@ -630,15 +631,15 @@ class _PlanDialogState extends State<_PlanDialog> {
               value: _plan,
               decoration: const InputDecoration(labelText: '套餐'),
               items: const <DropdownMenuItem<String>>[
-                DropdownMenuItem<String>(value: 'TRIAL', child: Text('TRIAL')),
+                 DropdownMenuItem<String>(value: 'TRIAL', child: Text('试用版')),
                 DropdownMenuItem<String>(
                   value: 'STARTER',
-                  child: Text('STARTER'),
+                   child: Text('入门版'),
                 ),
-                DropdownMenuItem<String>(value: 'GROWTH', child: Text('GROWTH')),
+                 DropdownMenuItem<String>(value: 'GROWTH', child: Text('成长版')),
                 DropdownMenuItem<String>(
                   value: 'ENTERPRISE',
-                  child: Text('ENTERPRISE'),
+                   child: Text('企业版'),
                 ),
               ],
               onChanged: (value) {

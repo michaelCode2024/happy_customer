@@ -8,6 +8,7 @@ import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
 import 'package:relaydesk_agent_console/src/theme.dart';
 import 'package:relaydesk_agent_console/src/util/attachment_picker.dart';
 import 'package:relaydesk_agent_console/src/util/format.dart';
+import 'package:relaydesk_agent_console/src/util/labels.dart';
 import 'package:relaydesk_agent_console/src/util/voice_player.dart';
 
 /// The middle pane: the conversation itself.
@@ -660,7 +661,7 @@ class _ThreadHeader extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '会话 ${shortId(conversation.id)} · 来源 ${conversation.source} · '
+                   '会话 ${shortId(conversation.id)} · 来源 ${conversationSourceLabel(conversation.source)} · '
                   '开始于 ${fullTime(conversation.createdAt)}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,

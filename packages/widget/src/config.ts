@@ -36,12 +36,30 @@ export interface RelayDeskWidgetOptions {
   storage?: string;
   /** Skip the launcher and speak to the host page, for App WebView embeds. */
   embedded?: boolean;
+  /**
+   * Target origin for window.parent.postMessage when the widget runs inside an
+   * iframe. Defaults to '*' so a host product can listen without pre-sharing
+   * origins; tighten this in production (e.g. https://app.example.com).
+   */
+  parentOrigin?: string;
   onEvent?: (event: WidgetEvent) => void;
   bridge?: WidgetBridge;
 }
 
 export interface WidgetEvent {
-  type: 'ready' | 'open' | 'close' | 'message' | 'sent' | 'failed' | 'conversation' | 'rating' | 'unread' | 'error';
+  type:
+    | 'ready'
+    | 'open'
+    | 'close'
+    | 'message'
+    | 'sent'
+    | 'failed'
+    | 'conversation'
+    | 'rating'
+    | 'unread'
+    | 'error'
+    | 'resize'
+    | 'message-updated';
   data?: unknown;
 }
 
@@ -55,11 +73,12 @@ export interface WidgetBridge {
 
 export const DEFAULTS = {
   title: '在线客服',
-  subtitle: '通常几分钟内回复',
+  subtitle: '在线咨询',
   welcomeMessage: '',
   offlineMessage: '',
   placeholder: '请输入您的问题…',
-  primaryColor: '#356ae6',
+  // 与坐席控制台青绿种子色对齐，避免默认 SaaS 蓝。
+  primaryColor: '#087F72',
   position: 'right' as const,
   theme: 'light' as const,
   launcher: 'bubble' as const,
@@ -67,6 +86,7 @@ export const DEFAULTS = {
   storage: 'relaydesk.widget',
   autoOpen: false,
   embedded: false,
+  parentOrigin: '*',
 };
 
 export type ResolvedOptions = Omit<Required<RelayDeskWidgetOptions>, 'onEvent' | 'bridge' | 'attributes'> &

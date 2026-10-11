@@ -12,12 +12,15 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
-func Open(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+func Open(ctx context.Context, databaseURL string, maxConns int32) (*pgxpool.Pool, error) {
 	config, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse database URL: %w", err)
 	}
-	config.MaxConns = 20
+	if maxConns < 4 {
+		maxConns = 4
+	}
+	config.MaxConns = maxConns
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		return nil, fmt.Errorf("create pool: %w", err)

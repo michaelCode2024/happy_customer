@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -12,6 +13,10 @@ import (
 	"github.com/relaydesk/relaydesk/internal/auth"
 	"github.com/relaydesk/relaydesk/internal/realtime"
 )
+
+// errWSCapacity is returned when accept refuses a socket; callers only need a
+// non-nil error so they stop the handshake path.
+var errWSCapacity = errors.New("websocket capacity reached")
 
 // inbound is every frame a client may send over the socket. Sockets are a
 // convenience channel only: anything that must not be lost still travels over
@@ -176,6 +181,12 @@ func (a *API) platformSocket(w http.ResponseWriter, r *http.Request) {
 // embedded on arbitrary customer domains by design, so the token presented in
 // the handshake is the authorization boundary rather than the Origin header.
 func (a *API) accept(r *http.Request, w http.ResponseWriter) (*websocket.Conn, error) {
+	// 硬顶连接数：慢客户端会被踢，但没有准入时瞬间涌入仍会先吃光 FD/内存。
+	if a.cfg.MaxWSConnections > 0 && a.hub.Count() >= a.cfg.MaxWSConnections {
+		wsRejectedTotal.Add(1)
+		failCode(w, http.StatusServiceUnavailable, "WS_CAPACITY", "实时连接已满，请稍后重试")
+		return nil, errWSCapacity
+	}
 	options := &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled}
 	allowAll := len(a.cfg.AllowedOrigins) == 0
 	for _, origin := range a.cfg.AllowedOrigins {
@@ -273,7 +284,7 @@ func (a *API) inboxChannels(ctx context.Context, tenantID, agentID uuid.UUID) []
 	for rows.Next() {
 		var id uuid.UUID
 		if rows.Scan(&id) == nil {
-			channels = append(channels, "inbox:"+id.String())
+			channels = append(channels, realtime.InboxChannel(id.String()))
 		}
 	}
 	return channels

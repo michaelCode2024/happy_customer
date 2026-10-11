@@ -13,6 +13,8 @@ export class RelayDeskWidgetElement extends HTMLElement {
   #options?: ResolvedOptions;
   #unsubscribe?: () => void;
   #pending?: RelayDeskWidgetOptions;
+  #parentListener?: (event: MessageEvent) => void;
+  #resizeObserver?: ResizeObserver;
 
   static get observedAttributes(): string[] {
     return ['inbox-key', 'endpoint', 'auto-open'];
@@ -143,46 +145,87 @@ export class RelayDeskWidgetElement extends HTMLElement {
   }
 
   /**
-   * Bridges the widget to a native WebView: events go out as JSON strings and
-   * the host can push commands back in on window.RelayDesk.
+   * Bridges the widget to a native WebView and/or a parent iframe host.
+   * Outbound events are JSON with { source: 'relaydesk', type, data }.
    */
   #bridge(): void {
     const bridge = this.#options?.bridge;
     if (bridge?.onMessage) {
-      bridge.onMessage((payload) => {
-        let parsed: { type?: string; content?: string } = {};
-        try {
-          parsed = JSON.parse(payload) as { type?: string; content?: string };
-        } catch {
+      bridge.onMessage((payload) => this.#handleHostCommand(payload));
+    }
+    // iframe 宿主：默认走 parent.postMessage，方便业务系统嵌 /h5 而不注入 bridge。
+    if (typeof window !== 'undefined' && window.parent && window.parent !== window) {
+      this.#parentListener = (event: MessageEvent) => {
+        if (event.source !== window.parent) {
           return;
         }
-        switch (parsed.type) {
-          case 'open':
-            this.open();
-            break;
-          case 'close':
-            this.close();
-            break;
-          case 'say':
-            if (parsed.content) {
-              void this.say(parsed.content);
-            }
-            break;
-          case 'prefill':
-            if (parsed.content) {
-              this.prefill(parsed.content);
-            }
-            break;
-          default:
-            break;
+        const expected = this.#options?.parentOrigin ?? '*';
+        if (expected !== '*' && event.origin !== expected) {
+          return;
         }
-      });
+        if (typeof event.data === 'string') {
+          this.#handleHostCommand(event.data);
+          return;
+        }
+        if (event.data && typeof event.data === 'object') {
+          this.#handleHostCommand(JSON.stringify(event.data));
+        }
+      };
+      window.addEventListener('message', this.#parentListener);
+      if (typeof ResizeObserver !== 'undefined') {
+        this.#resizeObserver = new ResizeObserver(() => {
+          const height = Math.ceil(document.documentElement?.scrollHeight || document.body?.scrollHeight || 0);
+          this.#store?.emitHost({ type: 'resize', data: { height } });
+        });
+        this.#resizeObserver.observe(document.documentElement);
+      }
+    }
+  }
+
+  #handleHostCommand(payload: string): void {
+    let parsed: { type?: string; content?: string; source?: string } = {};
+    try {
+      parsed = typeof payload === 'string'
+        ? (JSON.parse(payload) as { type?: string; content?: string; source?: string })
+        : (payload as { type?: string; content?: string; source?: string });
+    } catch {
+      return;
+    }
+    // 只接受宿主指令；忽略我们自己 postMessage 出去的业务事件。
+    if (parsed.source === 'relaydesk' && !['open', 'close', 'say', 'prefill'].includes(parsed.type ?? '')) {
+      return;
+    }
+    switch (parsed.type) {
+      case 'open':
+        this.open();
+        break;
+      case 'close':
+        this.close();
+        break;
+      case 'say':
+        if (parsed.content) {
+          void this.say(parsed.content);
+        }
+        break;
+      case 'prefill':
+        if (parsed.content) {
+          this.prefill(parsed.content);
+        }
+        break;
+      default:
+        break;
     }
   }
 
   #teardown(): void {
     this.#unsubscribe?.();
     this.#unsubscribe = undefined;
+    if (this.#parentListener) {
+      window.removeEventListener('message', this.#parentListener);
+      this.#parentListener = undefined;
+    }
+    this.#resizeObserver?.disconnect();
+    this.#resizeObserver = undefined;
     this.#store?.destroy();
     this.#store = undefined;
     this.#view = undefined;

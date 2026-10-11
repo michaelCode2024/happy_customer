@@ -144,48 +144,32 @@ class _StatsPageState extends State<StatsPage> {
   }
 
   Widget _cardGrid(BuildContext context, StatsOverview overview) {
+    // 调度台只留核心 KPI；其余量在趋势表 / 排行里看，避免一排分析卡片。
     final cards = <_Metric>[
-      _Metric('进行中会话', '${overview.openConversations}', Icons.forum_outlined),
-      _Metric('待分配', '${overview.queued}', Icons.inbox_outlined),
-      _Metric('在线坐席', '${overview.onlineAgents}', Icons.people_outline),
+      _Metric('进行中', '${overview.openConversations}'),
+      _Metric('待分配', '${overview.queued}'),
+      _Metric('在线坐席', '${overview.onlineAgents}'),
+      _Metric('首响', durationText(overview.avgFirstResponseSeconds)),
+      _Metric('AI 解决率', percentText(overview.aiDeflectionRate)),
       _Metric(
-        'AI 解决率',
-        percentText(overview.aiDeflectionRate),
-        Icons.auto_awesome,
+        '评分',
+        overview.avgRating <= 0 ? '—' : overview.avgRating.toStringAsFixed(1),
       ),
-      _Metric(
-        '首响均值',
-        durationText(overview.avgFirstResponseSeconds),
-        Icons.timer_outlined,
-      ),
-      _Metric(
-        '平均评分',
-        overview.avgRating <= 0 ? '暂无' : overview.avgRating.toStringAsFixed(1),
-        Icons.star_outline,
-      ),
-      _Metric('新增会话', '${overview.conversationsStarted}', Icons.add_chart),
-      _Metric('已解决', '${overview.conversationsClosed}', Icons.check_circle_outline),
-      _Metric('收消息', '${overview.messagesIn}', Icons.south_west),
-      _Metric('发消息', '${overview.messagesOut}', Icons.north_east),
-      _Metric('AI 回复', '${overview.aiAnswered}', Icons.smart_toy_outlined),
-      _Metric('AI 转人工', '${overview.aiHandoff}', Icons.support_agent),
     ];
     return LayoutBuilder(
       builder: (context, constraints) {
-        final columns = constraints.maxWidth > 1180
+        final columns = constraints.maxWidth > 900
             ? 6
-            : constraints.maxWidth > 820
-                ? 4
-                : constraints.maxWidth > 520
-                    ? 3
-                    : 2;
+            : constraints.maxWidth > 600
+                ? 3
+                : 2;
         return GridView.count(
           crossAxisCount: columns,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-          childAspectRatio: 1.5,
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+          childAspectRatio: 2.2,
           children: <Widget>[
             for (final metric in cards) _MetricCard(metric: metric),
           ],
@@ -196,11 +180,10 @@ class _StatsPageState extends State<StatsPage> {
 }
 
 class _Metric {
-  const _Metric(this.label, this.value, this.icon);
+  const _Metric(this.label, this.value);
 
   final String label;
   final String value;
-  final IconData icon;
 }
 
 class _MetricCard extends StatelessWidget {
@@ -212,36 +195,30 @@ class _MetricCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(6),
         border: Border.all(color: theme.colorScheme.outlineVariant.withAlpha(120)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: <Widget>[
-          Row(
-            children: <Widget>[
-              Icon(metric.icon, size: 16, color: theme.colorScheme.primary),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  metric.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-            ],
+          Text(
+            metric.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
           ),
+          const SizedBox(height: 4),
           Text(
             metric.value,
-            style: theme.textTheme.headlineSmall?.copyWith(
+            style: theme.textTheme.titleLarge?.copyWith(
               fontWeight: FontWeight.w600,
+              fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
             ),
           ),
         ],

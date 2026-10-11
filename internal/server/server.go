@@ -89,6 +89,7 @@ func (a *API) Run(ctx context.Context) {
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
 	a.registerSystem(mux)
+	a.registerStatic(mux)
 	a.registerWidget(mux)
 	a.registerConsole(mux)
 	a.registerAdmin(mux)
@@ -129,6 +130,7 @@ func (a *API) registerSystem(mux *http.ServeMux) {
 	mux.HandleFunc("GET /health", a.health)
 	mux.HandleFunc("GET /ready", a.ready)
 	mux.HandleFunc("GET /api/v1/meta", a.meta)
+	a.registerMetrics(mux)
 }
 
 func (a *API) health(w http.ResponseWriter, r *http.Request) {
@@ -148,8 +150,15 @@ func (a *API) ready(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusServiceUnavailable, "database unavailable")
 		return
 	}
-	respond(w, 200, map[string]any{"status": "READY", "realtimeConnections": a.hub.Count(),
-		"storage": a.cfg.Storage.Driver, "ai": a.ai.ProviderName(), "instance": a.bus.InstanceID()})
+	respond(w, 200, map[string]any{
+		"status":              "READY",
+		"realtimeConnections": a.hub.Count(),
+		"maxWsConnections":    a.cfg.MaxWSConnections,
+		"dbMaxConns":          a.cfg.DatabaseMaxConns,
+		"storage":             a.cfg.Storage.Driver,
+		"ai":                  a.ai.ProviderName(),
+		"instance":            a.bus.InstanceID(),
+	})
 }
 
 // meta is public and lets the embed script discover features without an API key.
@@ -160,6 +169,11 @@ func (a *API) meta(w http.ResponseWriter, r *http.Request) {
 		"time":        time.Now().UTC(),
 		"aiEnabled":   a.ai.Available(),
 		"storageMode": a.cfg.Storage.Driver,
+		"embed": map[string]any{
+			"widgetJs": a.cfg.PublicBaseURL + "/widget.js",
+			"h5Prefix": a.cfg.PublicBaseURL + "/h5/",
+			"openApi":  a.cfg.PublicBaseURL + "/api/v1/open/",
+		},
 	})
 }
 

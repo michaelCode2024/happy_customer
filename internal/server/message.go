@@ -244,7 +244,18 @@ func (a *API) afterMessageCommitted(ctx context.Context, tenantID, conversationI
 	}
 
 	if senderType == "VISITOR" {
-		a.maybeAIReply(ctx, tenantID, conversationID, view)
+		// AI 不能堵在访客发送热路径上：模型网关可能拖到几十秒，会直接抬高 POST /messages 延迟。
+		// 用 WithoutCancel 保留租户/会话上下文，超时单独封顶，避免请求取消把回复掐掉。
+		aiAsyncStartedTotal.Add(1)
+		go func() {
+			timeout := time.Duration(a.cfg.AI.TimeoutSeconds+5) * time.Second
+			if timeout < 30*time.Second {
+				timeout = 30 * time.Second
+			}
+			aiCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+			defer cancel()
+			a.maybeAIReply(aiCtx, tenantID, conversationID, view)
+		}()
 	}
 }
 

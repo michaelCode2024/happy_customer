@@ -16,6 +16,13 @@ import (
 // page without reading it back from the database.
 var demoNamespace = uuid.MustParse("6f1b7c2e-8d3a-4f5b-9c0d-1a2b3c4d5e6f")
 
+const (
+	DemoTenantSlug    = "demo"
+	DemoOwnerEmail    = "owner@relaydesk.local"
+	DemoAgentEmail    = "agent@relaydesk.local"
+	DemoAgentPassword = "RelayDesk@2026"
+)
+
 func demoID(name string) uuid.UUID { return uuid.NewSHA1(demoNamespace, []byte(name)) }
 
 // EnsureDemoData creates a complete, self-contained demo tenant: an inbox with a
@@ -124,7 +131,7 @@ func EnsureDemoData(ctx context.Context, pool *pgxpool.Pool) error {
 
 	// Three seats, one per role, all sharing the demo password. The password is
 	// hashed with the same Argon2id parameters the login endpoint verifies.
-	password, err := auth.HashPassword("RelayDesk@2026")
+	password, err := auth.HashPassword(DemoAgentPassword)
 	if err != nil {
 		return fmt.Errorf("hash demo password: %w", err)
 	}
@@ -132,9 +139,9 @@ func EnsureDemoData(ctx context.Context, pool *pgxpool.Pool) error {
 		email, name, role string
 		inboxKeys         []string
 	}{
-		{"owner@relaydesk.local", "演示企业主", auth.RoleOwner, []string{"demo-web", "demo-app"}},
+		{DemoOwnerEmail, "演示企业主", auth.RoleOwner, []string{"demo-web", "demo-app"}},
 		{"supervisor@relaydesk.local", "客服主管", auth.RoleSupervisor, []string{"demo-web", "demo-app"}},
-		{"agent@relaydesk.local", "客服小林", auth.RoleAgent, []string{"demo-web"}},
+		{DemoAgentEmail, "客服小林", auth.RoleAgent, []string{"demo-web"}},
 	}
 	for _, seat := range seats {
 		agentID := demoID("agent/" + seat.email)

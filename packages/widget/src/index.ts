@@ -72,7 +72,7 @@ if (typeof window !== 'undefined') {
     // The script tag that loaded us is the usual source, but a tag manager may
     // inject us without currentScript, so any matching tag is accepted.
     const candidates: HTMLScriptElement[] = script
-      ? [script]
+      ? [script, ...document.querySelectorAll<HTMLScriptElement>('script[data-inbox-key]')]
       : Array.from(document.querySelectorAll<HTMLScriptElement>('script[data-inbox-key]'));
     for (const candidate of candidates) {
       const options = optionsFromScript(candidate);
@@ -112,6 +112,21 @@ function optionsFromScript(script: HTMLScriptElement): RelayDeskWidgetOptions | 
   }
   if (script.dataset.autoOpen === 'true') {
     options.autoOpen = true;
+  }
+  if (script.dataset.embedded === 'true') {
+    options.embedded = true;
+  }
+  if (script.dataset.theme === 'light' || script.dataset.theme === 'dark') {
+    options.theme = script.dataset.theme;
+  }
+  if (script.dataset.parentOrigin) {
+    options.parentOrigin = script.dataset.parentOrigin;
+  }
+  if (script.dataset.externalId) {
+    options.externalId = script.dataset.externalId;
+  }
+  if (script.dataset.displayName) {
+    options.displayName = script.dataset.displayName;
   }
   if (script.dataset.storage !== undefined) {
     options.storage = script.dataset.storage;

@@ -18,7 +18,8 @@ void main() {
   testWidgets('an empty store lands on the login form', (tester) async {
     await boot(tester, MemoryCredentialStore());
 
-    expect(find.text('RelayDesk 客服工作台'), findsOneWidget);
+    expect(find.text('连语客服'), findsOneWidget);
+    expect(find.text('登录工作台'), findsOneWidget);
     expect(find.text('登录'), findsOneWidget);
     expect(find.widgetWithText(TextFormField, '服务器地址'), findsOneWidget);
     expect(find.widgetWithText(TextFormField, '企业标识'), findsOneWidget);
@@ -56,14 +57,14 @@ void main() {
 
     // The operator's surface, which asks for the deployment secret rather than
     // an agent's email and password.
-    expect(find.text('RelayDesk 运营后台'), findsOneWidget);
+    expect(find.text('登录运营后台'), findsOneWidget);
     expect(find.text('进入运营后台'), findsOneWidget);
     expect(find.widgetWithText(TextFormField, '平台管理令牌'), findsOneWidget);
 
     await tester.tap(find.text('返回客服工作台登录'));
     await tester.pumpAndSettle();
 
-    expect(find.text('RelayDesk 客服工作台'), findsOneWidget);
+    expect(find.text('登录工作台'), findsOneWidget);
     expect(find.widgetWithText(TextFormField, '企业标识'), findsOneWidget);
   });
 
@@ -77,5 +78,22 @@ void main() {
 
     expect(find.text('请填写服务器地址'), findsOneWidget);
     expect(find.text('请填写平台管理令牌'), findsOneWidget);
+  });
+
+  testWidgets('both login surfaces fit a narrow phone', (tester) async {
+    tester.view.physicalSize = const Size(360, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    await boot(tester, MemoryCredentialStore());
+    expect(tester.takeException(), isNull);
+
+    await tester.ensureVisible(find.text('平台管理员登录'));
+    await tester.tap(find.text('平台管理员登录'));
+    await tester.pumpAndSettle();
+    expect(find.text('登录运营后台'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }

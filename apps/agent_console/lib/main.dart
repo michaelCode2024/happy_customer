@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'package:relaydesk_agent_console/src/platform/platform_controller.dart';
 import 'package:relaydesk_agent_console/src/state/credential_store.dart';
@@ -130,7 +131,14 @@ class _RelayDeskConsoleAppState extends State<RelayDeskConsoleApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'RelayDesk 客服工作台',
+      title: '连语客服工作台',
+      locale: const Locale('zh', 'CN'),
+      supportedLocales: const <Locale>[Locale('zh', 'CN')],
+      localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
+        GlobalMaterialLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+      ],
       theme: RelayTheme.light(),
       darkTheme: RelayTheme.dark(),
       themeMode: _themeMode,

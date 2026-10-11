@@ -8,6 +8,7 @@ import 'package:relaydesk_agent_console/src/state/session_controller.dart';
 import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
 import 'package:relaydesk_agent_console/src/ui/chat_panel.dart';
 import 'package:relaydesk_agent_console/src/ui/conversation_list.dart';
+import 'package:relaydesk_agent_console/src/ui/integration_page.dart';
 import 'package:relaydesk_agent_console/src/ui/knowledge_page.dart';
 import 'package:relaydesk_agent_console/src/ui/settings_page.dart';
 import 'package:relaydesk_agent_console/src/ui/stats_page.dart';
@@ -16,7 +17,13 @@ import 'package:relaydesk_agent_console/src/util/attachment_picker.dart';
 import 'package:relaydesk_agent_console/src/util/voice_player.dart';
 
 /// The console's top-level sections.
-enum WorkbenchSection { conversations, stats, knowledge, settings }
+enum WorkbenchSection {
+  conversations,
+  stats,
+  knowledge,
+  integrations,
+  settings
+}
 
 /// The signed-in shell: a rail of sections, the conversation queue, the open
 /// thread and the customer record.
@@ -107,6 +114,13 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
         icon: Icons.menu_book_outlined,
         selectedIcon: Icons.menu_book,
       ),
+      if (agent?.role == 'OWNER' || agent?.role == 'ADMIN')
+        const _SectionSpec(
+          section: WorkbenchSection.integrations,
+          label: '开发接入',
+          icon: Icons.integration_instructions_outlined,
+          selectedIcon: Icons.integration_instructions,
+        ),
       const _SectionSpec(
         section: WorkbenchSection.settings,
         label: '设置',
@@ -214,6 +228,8 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
           themeMode: widget.themeMode,
           onThemeModeChanged: widget.onThemeModeChanged,
         );
+      case WorkbenchSection.integrations:
+        return IntegrationPage(api: widget.session.api);
       case WorkbenchSection.conversations:
         return _conversations(width);
     }
@@ -304,6 +320,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
         WorkbenchSection.conversations => '会话',
         WorkbenchSection.stats => '统计',
         WorkbenchSection.knowledge => '知识库',
+        WorkbenchSection.integrations => '开发接入',
         WorkbenchSection.settings => '设置',
       };
 }
@@ -407,7 +424,11 @@ class _ConnectionBadge extends StatelessWidget {
         final (label, color, icon) = switch (state) {
           SocketState.open => ('已连接', Colors.green, Icons.bolt),
           SocketState.connecting => ('连接中', Colors.orange, Icons.sync),
-          SocketState.closed => ('离线', theme.colorScheme.error, Icons.cloud_off),
+          SocketState.closed => (
+              '离线',
+              theme.colorScheme.error,
+              Icons.cloud_off
+            ),
         };
         return Tooltip(
           message: state == SocketState.open

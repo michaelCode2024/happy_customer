@@ -85,15 +85,18 @@ func (a *API) recordAudit(ctx handlerContext, tenantID uuid.UUID, actorType stri
 }
 
 // conversationChannels lists every realtime channel that must receive events for
-// a conversation: the conversation stream itself, the visitor, the tenant
-// dashboard and the assigned agent.
+// a conversation. Queue updates go to inbox: (agents already subscribe per inbox)
+// rather than tenant-wide fan-out, so one busy inbox does not wake every seat.
 func (a *API) conversationChannels(ctx handlerContext, conversationID uuid.UUID) []string {
 	channels := []string{realtime.ConversationChannel(conversationID.String())}
-	var visitorID, tenantID uuid.UUID
+	var visitorID, inboxID uuid.UUID
 	var assignee *uuid.UUID
-	if a.db.QueryRow(ctx, `select visitor_id, tenant_id, assignee_id from conversation where id=$1`, conversationID).
-		Scan(&visitorID, &tenantID, &assignee) == nil {
-		channels = append(channels, realtime.VisitorChannel(visitorID.String()), realtime.TenantChannel(tenantID.String()))
+	if a.db.QueryRow(ctx, `select visitor_id, inbox_id, assignee_id from conversation where id=$1`, conversationID).
+		Scan(&visitorID, &inboxID, &assignee) == nil {
+		channels = append(channels,
+			realtime.VisitorChannel(visitorID.String()),
+			realtime.InboxChannel(inboxID.String()),
+		)
 		if assignee != nil {
 			channels = append(channels, realtime.AgentChannel(assignee.String()))
 		}
@@ -107,11 +110,11 @@ func (a *API) conversationChannels(ctx handlerContext, conversationID uuid.UUID)
 // leaked.
 func (a *API) agentOnlyChannels(ctx handlerContext, conversationID uuid.UUID) []string {
 	channels := []string{realtime.ConversationChannel(conversationID.String())}
-	var tenantID uuid.UUID
+	var inboxID uuid.UUID
 	var assignee *uuid.UUID
-	if a.db.QueryRow(ctx, `select tenant_id, assignee_id from conversation where id=$1`, conversationID).
-		Scan(&tenantID, &assignee) == nil {
-		channels = append(channels, realtime.TenantChannel(tenantID.String()))
+	if a.db.QueryRow(ctx, `select inbox_id, assignee_id from conversation where id=$1`, conversationID).
+		Scan(&inboxID, &assignee) == nil {
+		channels = append(channels, realtime.InboxChannel(inboxID.String()))
 		if assignee != nil {
 			channels = append(channels, realtime.AgentChannel(assignee.String()))
 		}

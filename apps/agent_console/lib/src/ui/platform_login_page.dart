@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
 import 'package:relaydesk_agent_console/src/platform/platform_controller.dart';
 import 'package:relaydesk_agent_console/src/ui/error_banner.dart';
+import 'package:relaydesk_agent_console/src/ui/login_shell.dart';
+import 'package:relaydesk_agent_console/src/util/server_hint.dart';
 
 /// Sign-in for the RelayDesk operations console.
 ///
@@ -36,7 +38,7 @@ class _PlatformLoginPageState extends State<PlatformLoginPage> {
   void initState() {
     super.initState();
     final hint = widget.controller.server;
-    _server = TextEditingController(text: hint);
+    _server = TextEditingController(text: initialServerHint(hint));
     // A stored server with no stored token is the normal return visit: the
     // bearer token expired overnight, and the address is still right.
     _token.text = '';
@@ -62,140 +64,89 @@ class _PlatformLoginPageState extends State<PlatformLoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Scaffold(
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: ListenableBuilder(
-              listenable: widget.controller,
-              builder: (context, _) {
-                final busy = widget.controller.busy;
-                return Form(
-                  key: _formKey,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: <Widget>[
-                      Row(
-                        children: <Widget>[
-                          Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.tertiary,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Icon(
-                              Icons.admin_panel_settings_outlined,
-                              color: theme.colorScheme.onTertiary,
-                              size: 26,
-                            ),
-                          ),
-                          const SizedBox(width: 14),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              Text(
-                                'RelayDesk 运营后台',
-                                style: theme.textTheme.titleLarge?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              Text(
-                                '平台管理员登录',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: theme.colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 28),
-                      TextFormField(
-                        controller: _server,
-                        enabled: !busy,
-                        keyboardType: TextInputType.url,
-                        autocorrect: false,
-                        decoration: const InputDecoration(
-                          labelText: '服务器地址',
-                          hintText: 'chat.example.com 或 http://localhost:8080',
-                          prefixIcon: Icon(Icons.dns_outlined),
-                        ),
-                        validator: (value) => (value ?? '').trim().isEmpty
-                            ? '请填写服务器地址'
-                            : null,
-                      ),
-                      const SizedBox(height: 14),
-                      TextFormField(
-                        controller: _token,
-                        enabled: !busy,
-                        obscureText: _obscure,
-                        autocorrect: false,
-                        enableSuggestions: false,
-                        textInputAction: TextInputAction.done,
-                        onFieldSubmitted: (_) => busy ? null : _submit(),
-                        decoration: InputDecoration(
-                          labelText: '平台管理令牌',
-                          hintText: '部署时配置的 PLATFORM_ADMIN_TOKEN',
-                          prefixIcon: const Icon(Icons.key_outlined),
-                          suffixIcon: IconButton(
-                            tooltip: _obscure ? '显示令牌' : '隐藏令牌',
-                            icon: Icon(
-                              _obscure
-                                  ? Icons.visibility_outlined
-                                  : Icons.visibility_off_outlined,
-                            ),
-                            onPressed: () => setState(() => _obscure = !_obscure),
-                          ),
-                        ),
-                        validator: (value) =>
-                            (value ?? '').trim().isEmpty ? '请填写平台管理令牌' : null,
-                      ),
-                      if (widget.controller.error != null) ...<Widget>[
-                        const SizedBox(height: 16),
-                        ErrorBanner(
-                          message: widget.controller.error!,
-                          onDismiss: widget.controller.clearError,
-                        ),
-                      ],
-                      const SizedBox(height: 22),
-                      FilledButton(
-                        onPressed: busy ? null : _submit,
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size.fromHeight(46),
-                        ),
-                        child: busy
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Text('进入运营后台'),
-                      ),
-                      const SizedBox(height: 18),
-                      Text(
-                        '令牌只用于换取 24 小时会话凭证，不会被保存。',
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextButton(
-                        onPressed: busy ? null : widget.onAgentLogin,
-                        child: const Text('返回客服工作台登录'),
-                      ),
-                    ],
+    return LoginShell(
+      icon: Icons.admin_panel_settings_outlined,
+      title: '登录运营后台',
+      subtitle: '管理企业、套餐与平台运行状态',
+      child: ListenableBuilder(
+        listenable: widget.controller,
+        builder: (context, _) {
+          final busy = widget.controller.busy;
+          return Form(
+            key: _formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                TextFormField(
+                  controller: _server,
+                  enabled: !busy,
+                  keyboardType: TextInputType.url,
+                  autocorrect: false,
+                  decoration: const InputDecoration(
+                    labelText: '服务器地址',
+                    hintText: 'chat.example.com 或 http://localhost:8080',
+                    prefixIcon: Icon(Icons.dns_outlined),
                   ),
-                );
-              },
+                  validator: (value) =>
+                      (value ?? '').trim().isEmpty ? '请填写服务器地址' : null,
+                ),
+                const SizedBox(height: 14),
+                TextFormField(
+                  controller: _token,
+                  enabled: !busy,
+                  obscureText: _obscure,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  textInputAction: TextInputAction.done,
+                  onFieldSubmitted: (_) => busy ? null : _submit(),
+                  decoration: InputDecoration(
+                    labelText: '平台管理令牌',
+                    hintText: '部署时配置的 PLATFORM_ADMIN_TOKEN',
+                    prefixIcon: const Icon(Icons.key_outlined),
+                    suffixIcon: IconButton(
+                      tooltip: _obscure ? '显示令牌' : '隐藏令牌',
+                      icon: Icon(
+                        _obscure
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                      ),
+                      onPressed: () => setState(() => _obscure = !_obscure),
+                    ),
+                  ),
+                  validator: (value) =>
+                      (value ?? '').trim().isEmpty ? '请填写平台管理令牌' : null,
+                ),
+                if (widget.controller.error != null) ...<Widget>[
+                  const SizedBox(height: 16),
+                  ErrorBanner(
+                    message: widget.controller.error!,
+                    onDismiss: widget.controller.clearError,
+                  ),
+                ],
+                const SizedBox(height: 22),
+                FilledButton(
+                  onPressed: busy ? null : _submit,
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(46),
+                  ),
+                  child: busy
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('进入运营后台'),
+                ),
+                const SizedBox(height: 12),
+                TextButton(
+                  onPressed: busy ? null : widget.onAgentLogin,
+                  child: const Text('返回客服工作台登录'),
+                ),
+              ],
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }

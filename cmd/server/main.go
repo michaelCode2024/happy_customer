@@ -25,7 +25,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	pool, err := database.Open(ctx, cfg.DatabaseURL)
+	pool, err := database.Open(ctx, cfg.DatabaseURL, cfg.DatabaseMaxConns)
 	if err != nil {
 		logger.Error("database unavailable", "error", err)
 		os.Exit(1)
@@ -58,6 +58,14 @@ func main() {
 
 	go func() {
 		logger.Info("relaydesk started", "address", cfg.ListenAddress)
+		if cfg.DemoEnabled {
+			logger.Info("demo login (development only)",
+				"console", cfg.PublicBaseURL+"/console/",
+				"tenant", database.DemoTenantSlug,
+				"ownerEmail", database.DemoOwnerEmail,
+				"agentEmail", database.DemoAgentEmail,
+				"password", database.DemoAgentPassword)
+		}
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("server stopped unexpectedly", "error", err)
 			stop()

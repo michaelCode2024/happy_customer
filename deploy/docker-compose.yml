@@ -22,6 +22,7 @@ services:
       dockerfile: Dockerfile
     environment:
       DATABASE_URL: postgres://relaydesk:relaydesk@postgres:5432/relaydesk?sslmode=disable
+      PUBLIC_BASE_URL: http://localhost:8080
       WIDGET_TOKEN_SECRET: local-only-change-this-secret-before-production
       WIDGET_TOKEN_TTL: 12h
       ALLOWED_ORIGIN: "*"

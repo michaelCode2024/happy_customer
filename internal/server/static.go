@@ -1,0 +1,130 @@
+package server
+
+import (
+	"encoding/json"
+	"html/template"
+	"io/fs"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+var h5Page = template.Must(template.New("h5").Parse(`<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>连语客服</title>
+  <style>html,body{margin:0;height:100%;background:#f5f7f6}</style>
+</head>
+<body>
+  <script>window.RelayDeskSettings={{.SettingsJSON}};</script>
+  <script src="/widget.js" defer></script>
+</body>
+</html>`))
+
+// registerStatic serves the same binaries whose URLs are returned by the
+// install-snippet and tenant-provisioning APIs. StaticDir is optional for API-
+// only deployments, but a configured directory must contain both build outputs.
+func (a *API) registerStatic(mux *http.ServeMux) {
+	if a.cfg.StaticDir == "" {
+		return
+	}
+	widget := filepath.Join(a.cfg.StaticDir, "widget.js")
+	console := filepath.Join(a.cfg.StaticDir, "console")
+	mux.HandleFunc("GET /widget.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		http.ServeFile(w, r, widget)
+	})
+	mux.HandleFunc("GET /h5/{inboxKey}", func(w http.ResponseWriter, r *http.Request) {
+		key := r.PathValue("inboxKey")
+		if key == "" || strings.ContainsAny(key, "/\\") {
+			http.NotFound(w, r)
+			return
+		}
+		settings := map[string]any{
+			"endpoint":  a.cfg.PublicBaseURL,
+			"inboxKey":  key,
+			"embedded":  true,
+			"launcher":  "none",
+			"autoOpen":  true,
+			"parentOrigin": firstNonEmpty(r.URL.Query().Get("parentOrigin"), "*"),
+		}
+		if theme := r.URL.Query().Get("theme"); theme == "light" || theme == "dark" {
+			settings["theme"] = theme
+		}
+		if color := r.URL.Query().Get("primaryColor"); color != "" {
+			settings["primaryColor"] = color
+		}
+		if title := r.URL.Query().Get("title"); title != "" {
+			settings["title"] = title
+		}
+		if externalID := r.URL.Query().Get("externalId"); externalID != "" {
+			settings["externalId"] = externalID
+		}
+		if name := r.URL.Query().Get("displayName"); name != "" {
+			settings["displayName"] = name
+		}
+		encoded, err := json.Marshal(settings)
+		if err != nil {
+			fail(w, 500, "渲染嵌入页失败")
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		a.setFrameAncestors(w)
+		if err := h5Page.Execute(w, map[string]any{
+			"SettingsJSON": template.JS(encoded),
+		}); err != nil {
+			a.logger.Error("render H5 page failed", "error", err)
+		}
+	})
+	mux.HandleFunc("GET /console/", func(w http.ResponseWriter, r *http.Request) {
+		// Flutter's asset URLs use /console/ as their base. Unknown paths are
+		// routed to the index only for browser navigation, not missing assets.
+		path := strings.TrimPrefix(r.URL.Path, "/console/")
+		if path == "" {
+			path = "index.html"
+		}
+		if !fs.ValidPath(path) || strings.Contains(path, "\\") {
+			http.NotFound(w, r)
+			return
+		}
+		file := filepath.Join(console, filepath.FromSlash(path))
+		if info, err := os.Stat(file); err != nil || info.IsDir() {
+			if strings.Contains(filepath.Base(path), ".") {
+				http.NotFound(w, r)
+				return
+			}
+			file = filepath.Join(console, "index.html")
+		}
+		if filepath.Base(file) == "index.html" {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
+		http.ServeFile(w, r, file)
+	})
+	mux.HandleFunc("GET /console", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/console/", http.StatusPermanentRedirect)
+	})
+}
+
+// setFrameAncestors lets the host product iframe /h5 while still allowing an
+// allowlist via FRAME_ANCESTORS (space-separated CSP sources).
+func (a *API) setFrameAncestors(w http.ResponseWriter) {
+	ancestors := a.cfg.FrameAncestors
+	if len(ancestors) == 0 {
+		ancestors = []string{"*"}
+	}
+	w.Header().Set("Content-Security-Policy", "frame-ancestors "+strings.Join(ancestors, " "))
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
