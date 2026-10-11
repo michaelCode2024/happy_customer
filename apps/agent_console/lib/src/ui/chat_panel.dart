@@ -1935,19 +1935,17 @@ class _MessageStatusRow extends StatelessWidget {
           ),
       ]);
     } else if (receipt != MessageReceipt.none) {
+      // 三态必须可辨：未读=单勾灰、已送达=双勾灰、已读=双勾主色 + 文案。
       final color =
           receipt == MessageReceipt.read ? theme.colorScheme.primary : mute;
+      final icon = switch (receipt) {
+        MessageReceipt.read => Icons.done_all,
+        MessageReceipt.delivered => Icons.done_all,
+        _ => Icons.done,
+      };
       children.addAll([
         const SizedBox(width: 6),
-        Icon(
-          receipt == MessageReceipt.read
-              ? Icons.done_all
-              : receipt == MessageReceipt.delivered
-                  ? Icons.done_all
-                  : Icons.done,
-          size: 14,
-          color: color,
-        ),
+        Icon(icon, size: 14, color: color),
         const SizedBox(width: 3),
         Text(
           receipt.label,

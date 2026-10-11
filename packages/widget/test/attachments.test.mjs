@@ -200,3 +200,67 @@ test('菜单首次发送和失败重试保留服务端校验用的菜单 ID', as
     assert.equal(f.sent.length, 2, '跳转链接不应伪造聊天消息');
   } finally { f.store.destroy(); }
 });
+
+
+test('隐藏页面不自动已读，重复推送不重复计数，失败回执保留未读', async () => {
+  const previousDocument = globalThis.document;
+  const previousWebSocket = globalThis.WebSocket;
+  let socket; let reads = 0; let delivers = 0; let rejectRead = true;
+  globalThis.document = {visibilityState:'hidden',hasFocus:()=>false,addEventListener(){},removeEventListener(){}};
+  globalThis.WebSocket = class {
+    static OPEN=1; readyState=1;
+    constructor(){socket=this;} send(){} close(){}
+  };
+  VisitorSocket.prototype.connect=realConnect;
+  VisitorSocket.prototype.close=realClose;
+  VisitorApi.prototype.bootstrap=async()=>({token:'test',visitorId:'v1',expiresIn:3600,inbox:{},agentsOnline:1});
+  VisitorApi.prototype.listConversations=async()=>({items:[{id:'c1',visitorUnread:0,lastSequence:0,status:'OPEN'}]});
+  VisitorApi.prototype.pageMessages=async()=>({items:[],hasOlder:false});
+  VisitorApi.prototype.markDelivered=async()=>{delivers++;return {};};
+  VisitorApi.prototype.markRead=async()=>{reads++;if(rejectRead)throw new Error('offline');return {};};
+  const store=new ChatStore(resolveOptions({endpoint:'http://localhost',inboxKey:'hidden-receipt',storage:''}));
+  try {
+    await store.init(); await store.selectConversation('c1');store.open();
+    const message={id:'m1',conversationId:'c1',sequence:1,senderType:'AGENT',messageType:'TEXT',content:'reply',createdAt:new Date().toISOString()};
+    const event={data:JSON.stringify({type:'message.created',conversationId:'c1',data:message})};
+    socket.onmessage(event);socket.onmessage(event);
+    // 隐藏页：应上报送达、不上报已读，未读角标保留。
+    await new Promise(resolve=>setTimeout(resolve, 450));
+    assert.equal(reads,0);assert.ok(delivers>=1,'隐藏页也应上报已送达');assert.equal(store.snapshot.unread,1);
+    globalThis.document.visibilityState='visible';globalThis.document.hasFocus=()=>true;
+    store.open();await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(reads,1);assert.equal(store.snapshot.unread,1);
+    rejectRead=false;store.open();await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(store.snapshot.unread,0);
+  } finally {store.destroy();globalThis.document=previousDocument;globalThis.WebSocket=previousWebSocket;}
+});
+
+test('面板收起时只送达不已读，打开聚焦后才已读', async () => {
+  const previousDocument = globalThis.document;
+  const previousWebSocket = globalThis.WebSocket;
+  let socket; let reads = 0; let delivers = 0;
+  globalThis.document = {visibilityState:'visible',hasFocus:()=>true,addEventListener(){},removeEventListener(){}};
+  globalThis.WebSocket = class {
+    static OPEN=1; readyState=1;
+    constructor(){socket=this;} send(){} close(){}
+  };
+  VisitorSocket.prototype.connect=realConnect;
+  VisitorSocket.prototype.close=realClose;
+  VisitorApi.prototype.bootstrap=async()=>({token:'test',visitorId:'v1',expiresIn:3600,inbox:{},agentsOnline:1});
+  VisitorApi.prototype.listConversations=async()=>({items:[{id:'c1',visitorUnread:0,lastSequence:0,status:'OPEN'}]});
+  VisitorApi.prototype.pageMessages=async()=>({items:[],hasOlder:false});
+  VisitorApi.prototype.markDelivered=async()=>{delivers++;return {};};
+  VisitorApi.prototype.markRead=async()=>{reads++;return {};};
+  const store=new ChatStore(resolveOptions({endpoint:'http://localhost',inboxKey:'closed-delivered',storage:''}));
+  try {
+    await store.init(); await store.selectConversation('c1');
+    // 面板保持收起：消息进列表后只应送达。
+    const message={id:'m2',conversationId:'c1',sequence:2,senderType:'AGENT',messageType:'TEXT',content:'hi',createdAt:new Date().toISOString()};
+    socket.onmessage({data:JSON.stringify({type:'message.created',conversationId:'c1',data:message})});
+    await new Promise(resolve=>setTimeout(resolve, 450));
+    assert.ok(delivers>=1);assert.equal(reads,0);assert.equal(store.snapshot.unread,1);
+    store.open();
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(reads,1);assert.equal(store.snapshot.unread,0);
+  } finally {store.destroy();globalThis.document=previousDocument;globalThis.WebSocket=previousWebSocket;}
+});

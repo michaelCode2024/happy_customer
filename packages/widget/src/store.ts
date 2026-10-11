@@ -124,6 +124,8 @@ export class ChatStore {
   #typingSentAt = 0;
   #pollTimer?: ReturnType<typeof setInterval>;
   #deliveredSequence = 0;
+  #receivedEvents = new Set<string>();
+  #readAcknowledged = new Map<string, number>();
   #deliveredTimer?: ReturnType<typeof setTimeout>;
 
   constructor(options: ResolvedOptions) {
@@ -254,7 +256,11 @@ export class ChatStore {
     this.#afterReady();
   }
 
+  #onVisible = (): void => { if (this.#state.open && document.visibilityState === 'visible') { void this.#resync(); } };
+
   #afterReady(): void {
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', this.#onVisible);
+    if (typeof window !== 'undefined') window.addEventListener('focus', this.#onVisible);
     this.#socket.connect();
     if (this.#state.activeId) {
       this.#socket.subscribe(this.#state.activeId);
@@ -271,6 +277,8 @@ export class ChatStore {
   }
 
   destroy(): void {
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', this.#onVisible);
+    if (typeof window !== 'undefined') window.removeEventListener('focus', this.#onVisible);
     this.#pendingFiles.clear();
     this.#socket.close();
     if (this.#pollTimer) {
@@ -289,7 +297,7 @@ export class ChatStore {
   }
 
   open(): void {
-    this.#patch({ open: true, unread: 0 });
+    this.#patch({ open: true });
     this.#emit({ type: 'open' });
     if (this.#state.status === 'IDLE') {
       void this.init();
@@ -769,17 +777,14 @@ export class ChatStore {
   }
 
   /**
-   * Reports the highest server sequence this device holds, so the agent can see
-   * "delivered" before the visitor has actually read it. Delivery is separate
-   * from read: a chat window left open on a background tab has received the
-   * message without anyone having looked at it.
-   *
-   * The watermark only ever moves forward and the call is debounced, because a
-   * burst of incoming messages would otherwise send one request each. The socket
-   * carries no sequence on its read frame, so this must be REST.
+   * 上报本机已持有的最高 sequence，让客服气泡出现「已送达」。
+   * 送达 ≠ 已读：面板收起、后台标签、页面失焦时只要消息已进本地列表就应送达；
+   * 只有访客真正打开并看见会话时才走 #markRead →「已读」。
+   * 水位只前进；突发消息用短防抖合并成一次 REST。
    */
   #markDelivered(): void {
     const id = this.#state.activeId;
+    // 故意不要求 open / visible / focus，否则已送达会被已读盖掉，三态只剩未读与已读。
     if (!id || this.#state.status !== 'READY') {
       return;
     }
@@ -807,19 +812,22 @@ export class ChatStore {
    */
   async #markRead(): Promise<void> {
     const id = this.#state.activeId;
-    if (!id || this.#state.status !== 'READY') {
+    // 已读必须面板打开且页面可见有焦点，才能与「已送达」区分开。
+    if (!id || this.#state.status !== 'READY' || !this.#state.open || (typeof document !== 'undefined' && (document.visibilityState === 'hidden' || (typeof document.hasFocus === 'function' && !document.hasFocus())))) {
       return;
     }
     const last = this.#state.messages.filter((message) => message.sequence > 0).at(-1);
     const boundary = last?.sequence ?? 0;
-    if (this.#socket.connected) {
-      this.#socket.sendRead(id);
-    } else {
-      await this.#api.markRead(id, boundary).catch(() => undefined);
-    }
+    if (boundary <= 0) return;
+    try { await this.#api.markRead(id, boundary); } catch { return; }
+    const acknowledged = Math.max(boundary, this.#readAcknowledged.get(id) ?? 0);
+    this.#readAcknowledged.set(id, acknowledged);
+    if (this.#state.activeId !== id) { void this.#resync(); return; }
+    const newerUnread = this.#state.messages.filter(m => m.sequence > acknowledged && m.senderType !== 'VISITOR').length;
     this.#patch({
+      unread: this.#state.conversations.filter(item => item.id !== id).reduce((total, item) => total + (item.visitorUnread ?? 0), newerUnread),
       readBoundary: this.#state.unread > 0 || this.#state.readBoundary === 0 ? boundary : this.#state.readBoundary,
-      conversations: this.#state.conversations.map((item) => (item.id === id ? { ...item, visitorUnread: 0 } : item)),
+      conversations: this.#state.conversations.map((item) => (item.id === id ? { ...item, visitorUnread: newerUnread } : item)),
     });
   }
 
@@ -835,7 +843,6 @@ export class ChatStore {
         messages: mergeMessages(messages, this.#state.messages),
         hasMore: page.hasOlder,
         readBoundary: boundary,
-        unread: this.#state.open ? 0 : this.#state.unread,
       });
       this.#markDelivered();
       if (this.#state.open) {
@@ -859,6 +866,7 @@ export class ChatStore {
     try {
       const conversations = await this.#api.listConversations();
       this.#patch({ conversations: conversations.items ?? [],
+        unread: (conversations.items ?? []).reduce((total, item) => total + (item.visitorUnread ?? 0), 0),
         agentsOnline: conversations.agentsOnline ?? this.#state.agentsOnline,
         aiEnabled: conversations.aiEnabled ?? this.#state.aiEnabled,
         automation: conversations.automation,
@@ -874,10 +882,9 @@ export class ChatStore {
       if (page.items?.length) {
         this.#patch({ messages: mergeMessages(this.#state.messages, page.items.map(toChatMessage)) });
         this.#markDelivered();
-        if (this.#state.open) {
-          void this.#markRead();
-        }
       }
+      // 已读仍要求面板打开；送达已在上方独立上报，避免两态粘成一步。
+      if (this.#state.open) void this.#markRead();
       const fresh = (conversations.items ?? []).find((item) => item.id === id);
       if (fresh) {
         this.#patch({ rated: fresh.status === 'RESOLVED' ? this.#state.rated : undefined });
@@ -913,6 +920,9 @@ export class ChatStore {
         // A visitor's own message can arrive over the socket before the POST
         // that sent it has returned. Merging on the server id and on the
         // original local id keeps it from rendering twice.
+        const freshEvent = !this.#receivedEvents.has(message.id);
+        this.#receivedEvents.add(message.id);
+        if(this.#receivedEvents.size > 500) this.#receivedEvents.delete(this.#receivedEvents.values().next().value!);
         if (message.clientMessageId) {
           this.#patch({
             messages: this.#state.messages.filter((item) => item.localId !== message.clientMessageId),
@@ -924,7 +934,8 @@ export class ChatStore {
           if (this.#state.open) {
             void this.#markRead();
           }
-        } else if (message.senderType !== 'VISITOR' && !this.#state.open) {
+        }
+        if (freshEvent && message.senderType !== 'VISITOR' && (message.conversationId !== this.#state.activeId || !this.#state.open || (typeof document !== 'undefined' && (document.visibilityState === 'hidden' || (typeof document.hasFocus === 'function' && !document.hasFocus()))))) {
           this.#patch({ unread: this.#state.unread + 1 });
           this.#emit({ type: 'unread', data: { count: this.#state.unread } });
         }
@@ -941,6 +952,7 @@ export class ChatStore {
               item.id === message.conversationId
                 ? {
                     ...item,
+                    visitorUnread: freshEvent && message.senderType !== 'VISITOR' ? (item.visitorUnread ?? 0) + 1 : item.visitorUnread,
                     lastSequence: Math.max(item.lastSequence, message.sequence),
                     lastMessagePreview: isNewest ? message.content.slice(0, 80) : item.lastMessagePreview,
                     lastMessageAt: isNewest ? message.createdAt : item.lastMessageAt,
@@ -1030,6 +1042,7 @@ export class ChatStore {
         break;
       }
       case 'conversation.read': {
+        void this.#resync();
         break;
       }
       default:
