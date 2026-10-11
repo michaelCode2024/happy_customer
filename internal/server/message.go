@@ -18,15 +18,17 @@ import (
 
 // messageInput is the common description of a message regardless of who sends it.
 type messageInput struct {
-	SenderType      string
-	SenderID        *uuid.UUID
-	ClientMessageID string
-	MessageType     string
-	Content         string
-	AttachmentIDs   []string
-	Metadata        map[string]any
-	ReplyToID       *uuid.UUID
-	ForwardedFromID *uuid.UUID
+	AutomationOnly         bool
+	AutomationRespectAgent bool
+	SenderType             string
+	SenderID               *uuid.UUID
+	ClientMessageID        string
+	MessageType            string
+	Content                string
+	AttachmentIDs          []string
+	Metadata               map[string]any
+	ReplyToID              *uuid.UUID
+	ForwardedFromID        *uuid.UUID
 	// Private marks an internal note. It is a first-class field rather than a
 	// metadata key because the database has to be able to filter on it: a note
 	// that only carries metadata.private is invisible to a where clause, and one
@@ -121,6 +123,18 @@ func (a *API) appendMessage(ctx context.Context, tenantID, conversationID uuid.U
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
+	if in.AutomationOnly {
+		// 回复真正落库前锁定会话并复核人工接管，避免异步匹配与客服领取之间抢答。
+		var allowed bool
+		err = tx.QueryRow(ctx, `select not bot_paused and status<>'RESOLVED' and (not $3::boolean or assignee_id is null) from conversation where id=$1 and tenant_id=$2 for update`, conversationID, tenantID, in.AutomationRespectAgent).Scan(&allowed)
+		if err != nil {
+			return messageView{}, err
+		}
+		if !allowed {
+			return messageView{}, errors.New("人工已接管或会话已经结束")
+		}
+	}
+
 	// Row lock on the conversation serialises sequence allocation, so two
 	// concurrent sends can never receive the same sequence.
 	var sequence int64
@@ -139,7 +153,7 @@ func (a *API) appendMessage(ctx context.Context, tenantID, conversationID uuid.U
 		       status = case when status = 'RESOLVED' and not $5 then 'OPEN' else status end
 		 where id = $1 and tenant_id = $2
 		 returning last_sequence, assignee_id`,
-		conversationID, tenantID, trimPreview(in.Content), in.SenderType, in.Private).Scan(&sequence, &assignee)
+		conversationID, tenantID, messagePreview(messageType, in.Content, metadata), in.SenderType, in.Private).Scan(&sequence, &assignee)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return messageView{}, pgx.ErrNoRows
 	}
@@ -209,6 +223,10 @@ func (a *API) appendMessage(ctx context.Context, tenantID, conversationID uuid.U
 	// the response and the realtime event both carry the download URLs. Without
 	// this the sender of an image would receive a message with no picture.
 	view.Attachments = a.messageAttachments(ctx, view.ID)
+	if in.SenderType == "AGENT" && in.SenderID != nil {
+		// 推送和历史使用同一个最新坐席名称，避免改名后仍显示旧会话身份。
+		_ = a.db.QueryRow(ctx, `select display_name from agent where id=$1 and tenant_id=$2`, *in.SenderID, tenantID).Scan(&view.SenderName)
+	}
 	if in.ReplyToID != nil {
 		view.ReplyTo = a.replyPreview(ctx, *in.ReplyToID)
 	}
@@ -254,7 +272,9 @@ func (a *API) afterMessageCommitted(ctx context.Context, tenantID, conversationI
 			}
 			aiCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 			defer cancel()
-			a.maybeAIReply(aiCtx, tenantID, conversationID, view)
+			if !a.maybeAutomationReply(aiCtx, tenantID, conversationID, view) {
+				a.maybeAIReply(aiCtx, tenantID, conversationID, view)
+			}
 		}()
 	}
 }
@@ -309,6 +329,18 @@ var errVisitorBlocked = errors.New("该访客已被拉黑")
 func (a *API) autoAssign(ctx context.Context, tx pgx.Tx, tenantID, conversationID uuid.UUID, current *uuid.UUID, senderType string) (*uuid.UUID, error) {
 	if current != nil || senderType != "VISITOR" {
 		return current, nil
+	}
+	// 启用自动回复或 AI 接待的入口先由机器人回答；转人工 / 客服主动接管后再按原有规则分配。
+	// 只看 automation 会漏掉「只开了 AI」的入口：坐席登录会标 ONLINE，访客一来就被分配，AI 立刻 AGENT_ALREADY_ASSIGNED。
+	var botFirst, botPaused bool
+	if tx.QueryRow(ctx, `
+		select coalesce((ia.config->>'enabled')::boolean,false) or coalesce(s.enabled,false),
+		       c.bot_paused
+		  from conversation c
+		  left join inbox_automation ia on ia.inbox_id = c.inbox_id
+		  left join ai_setting s on s.inbox_id = c.inbox_id
+		 where c.id = $1`, conversationID).Scan(&botFirst, &botPaused) == nil && botFirst && !botPaused {
+		return nil, nil
 	}
 	var inboxID uuid.UUID
 	var autoAssignEnabled bool
@@ -840,10 +872,14 @@ func (a *API) conversationTags(ctx context.Context, conversationID uuid.UUID) ([
 // a normal agent message so the transcript stays complete and the visitor can
 // continue with a human afterwards.
 func (a *API) maybeAIReply(ctx context.Context, tenantID, conversationID uuid.UUID, question messageView) {
+	if !a.tenantHasFeature(ctx, tenantID, "ai") {
+		return
+	}
 	if !a.cfg.AI.AutoReplyEnabled || !a.ai.Available() {
 		return
 	}
 	var aiEnabled bool
+	var botPaused bool
 	var botAgentID *uuid.UUID
 	var handoffMessage string
 	var assigned *uuid.UUID
@@ -854,11 +890,11 @@ func (a *API) maybeAIReply(ctx context.Context, tenantID, conversationID uuid.UU
 	// Ignoring the column made the setting screen decorative.
 	err := a.db.QueryRow(ctx, `
 		select coalesce(s.enabled,false), coalesce(s.handoff_message,'正在为你转接人工客服，请稍候。'),
-		       c.assignee_id, c.status, s.confidence_threshold::float8
+		       c.assignee_id, c.status, s.confidence_threshold::float8, c.bot_paused
 		  from conversation c
 		  left join ai_setting s on s.inbox_id = c.inbox_id
-		 where c.id = $1`, conversationID).Scan(&aiEnabled, &handoffMessage, &assigned, &status, &inboxThreshold)
-	if err != nil || !aiEnabled || status == "RESOLVED" {
+		 where c.id = $1`, conversationID).Scan(&aiEnabled, &handoffMessage, &assigned, &status, &inboxThreshold, &botPaused)
+	if err != nil || !aiEnabled || botPaused || status == "RESOLVED" {
 		return
 	}
 	if assigned != nil {
@@ -1099,4 +1135,19 @@ func truncateRunes(value string, limit int) string {
 		return value
 	}
 	return string(runes[:limit]) + "…"
+}
+
+// 非文本消息也应给收件箱提供可辨认的摘要，避免附件被显示为“暂无消息”。
+func messagePreview(kind, content string, metadata map[string]any) string {
+	if value := trimPreview(content); value != "" {
+		return value
+	}
+	labels := map[string]string{"IMAGE": "[图片]", "FILE": "[文件]", "AUDIO": "[语音]", "VIDEO": "[视频]", "LOCATION": "[位置]", "CARD": "[卡片]"}
+	label := labels[kind]
+	if kind == "FILE" {
+		if name, ok := metadata["name"].(string); ok && name != "" {
+			return trimPreview(label + " " + name)
+		}
+	}
+	return label
 }

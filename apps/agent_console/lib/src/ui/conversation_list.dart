@@ -39,6 +39,7 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _search.dispose();
     _scroll.dispose();
     super.dispose();
@@ -69,53 +70,31 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
         final workbench = widget.workbench;
         return Column(
           children: <Widget>[
+            // 定稿：标题「收件箱」+ 下划线 Tab（全部 / 待接待 / 我的），减少分段控件噪音。
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-              child: TextField(
-                controller: _search,
-                textInputAction: TextInputAction.search,
-                decoration: InputDecoration(
-                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                  hintText: '搜索客户或消息内容',
-                  prefixIcon: const Icon(Icons.search, size: 20),
-                  suffixIcon: _search.text.isEmpty
-                      ? null
-                      : IconButton(
-                          tooltip: '清除',
-                          iconSize: 18,
-                          icon: const Icon(Icons.close),
-                          onPressed: () {
-                            _search.clear();
-                            widget.workbench.setSearch('');
-                            setState(() {});
-                          },
-                        ),
-                ),
-                onChanged: (value) {
-                  setState(() {});
-                  _debouncedSearch(value);
-                },
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              padding: const EdgeInsets.fromLTRB(20, 18, 12, 4),
               child: Row(
-                children: <Widget>[
-                  Text('会话',
-                      style: theme.textTheme.titleSmall
-                          ?.copyWith(fontWeight: FontWeight.w600)),
-                  const Spacer(),
-                  if (workbench.queued > 0) ...<Widget>[
-                    Text('待分配',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant)),
-                    const SizedBox(width: 6),
-                    Tooltip(
-                      message: '待分配 ${workbench.queued} 个会话',
-                      child: _CountPill(count: workbench.queued),
+                children: [
+                  Text(
+                    '收件箱',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.2,
                     ),
-                    const SizedBox(width: 10),
-                  ],
+                  ),
+                  const Spacer(),
+                  if (workbench.queued > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: Tooltip(
+                        message: '待接待 ${workbench.queued} 个会话',
+                        child: InkWell(
+                          onTap: () =>
+                              workbench.setFilter(QueueFilter.unassigned),
+                          child: _CountPill(count: workbench.queued),
+                        ),
+                      ),
+                    ),
                   IconButton(
                     tooltip: '刷新',
                     iconSize: 20,
@@ -127,43 +106,87 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: SizedBox(
-                width: double.infinity,
-                child: SegmentedButton<QueueFilter>(
-                  showSelectedIcon: false,
-                  segments: const <ButtonSegment<QueueFilter>>[
-                    ButtonSegment<QueueFilter>(
-                      value: QueueFilter.mine,
-                      label: Text('我的'),
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+              child: Row(
+                children: [
+                  for (final entry in const [
+                    (QueueFilter.all, '全部'),
+                    (QueueFilter.unassigned, '待接待'),
+                    (QueueFilter.mine, '我的'),
+                  ])
+                    _InboxFilterTab(
+                      label: entry.$2,
+                      selected: workbench.filter == entry.$1,
+                      onTap: () => workbench.setFilter(entry.$1),
                     ),
-                    ButtonSegment<QueueFilter>(
-                      value: QueueFilter.unassigned,
-                      label: Text('待分配'),
-                    ),
-                    ButtonSegment<QueueFilter>(
-                      value: QueueFilter.all,
-                      label: Text('全部'),
-                    ),
-                  ],
-                  selected: <QueueFilter>{workbench.filter},
-                  onSelectionChanged: (selection) =>
-                      workbench.setFilter(selection.first),
-                  style: ButtonStyle(
-                    visualDensity: VisualDensity.compact,
-                    padding: const WidgetStatePropertyAll(
-                      EdgeInsets.symmetric(horizontal: 4),
-                    ),
-                    textStyle: WidgetStatePropertyAll<TextStyle?>(
-                      theme.textTheme.labelMedium,
+                  const Spacer(),
+                  Tooltip(
+                    message: workbench.includeResolved
+                        ? '隐藏已解决'
+                        : '显示已解决',
+                    child: IconButton(
+                      iconSize: 18,
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => workbench
+                          .setIncludeResolved(!workbench.includeResolved),
+                      icon: Icon(
+                        workbench.includeResolved
+                            ? Icons.check_circle
+                            : Icons.check_circle_outline,
+                        color: workbench.includeResolved
+                            ? theme.colorScheme.primary
+                            : theme.colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+              child: TextField(
+                controller: _search,
+                textInputAction: TextInputAction.search,
+                decoration: InputDecoration(
+                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                  hintText: '搜索客户或消息',
+                  prefixIcon: const Icon(Icons.search, size: 20),
+                  filled: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  suffixIcon: _search.text.isEmpty
+                      ? null
+                      : IconButton(
+                          tooltip: '清除',
+                          iconSize: 18,
+                          icon: const Icon(Icons.close),
+                          onPressed: () {
+                            _searchDebounce?.cancel();
+                            _search.clear();
+                            widget.workbench.setSearch('');
+                            setState(() {});
+                          },
+                        ),
                 ),
+                onSubmitted: (value) {
+                  _searchDebounce?.cancel();
+                  widget.workbench.setSearch(value.trim());
+                },
+                onChanged: (value) {
+                  setState(() {});
+                  _debouncedSearch(value);
+                },
               ),
             ),
             if (widget.session.inboxes.length > 1)
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                 child: DropdownButtonFormField<String?>(
                   value: workbench.inboxFilter,
                   isDense: true,
@@ -186,7 +209,6 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
                   onChanged: (value) => workbench.setInboxFilter(value),
                 ),
               ),
-            const SizedBox(height: 8),
             const Divider(height: 1),
             Expanded(child: _body(theme)),
           ],
@@ -229,14 +251,18 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
     if (workbench.conversations.isEmpty) {
       return _Notice(
         icon: Icons.inbox_outlined,
-        title: switch (workbench.filter) {
-          QueueFilter.mine => '暂时没有分配给你的会话',
-          QueueFilter.unassigned => '待分配队列是空的',
-          QueueFilter.all => '没有符合条件的会话',
-        },
-        message: workbench.filter == QueueFilter.mine
-            ? '切到「待分配」认领会话，或等待自动分配。'
-            : '有新会话时会实时出现在这里。',
+        title: workbench.search.isNotEmpty
+            ? '没有找到相关会话'
+            : switch (workbench.filter) {
+                QueueFilter.mine => '暂时没有分配给你的会话',
+                QueueFilter.unassigned => '待接待队列是空的',
+                QueueFilter.all => '没有符合条件的会话',
+              },
+        message: workbench.search.isNotEmpty
+            ? '搜索仅在当前筛选和客服入口内进行，可切换全部或显示已解决。'
+            : workbench.filter == QueueFilter.mine
+                ? '切到「待接待」认领会话，或等待自动分配。'
+                : '有新会话时会实时出现在这里。',
       );
     }
     return RefreshIndicator(
@@ -277,13 +303,19 @@ class _ConversationRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final unread = conversation.agentUnread > 0;
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        color:
-            selected ? theme.colorScheme.primaryContainer.withAlpha(120) : null,
-        padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
-        child: Row(
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      child: Material(
+        color: selected
+            ? theme.colorScheme.primaryContainer.withOpacity(0.85)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+            child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             _Avatar(
@@ -312,7 +344,7 @@ class _ConversationRow extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.bodyMedium?.copyWith(
                             fontWeight:
-                                unread ? FontWeight.w600 : FontWeight.w500,
+                                unread ? FontWeight.w700 : FontWeight.w500,
                           ),
                         ),
                       ),
@@ -354,6 +386,11 @@ class _ConversationRow extends StatelessWidget {
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: <Widget>[
                       _StatusChip(status: conversation.status),
+                      if (conversation.visitorUnread > 0)
+                        _MiniChip(
+                          label: '访客未读 ${conversation.visitorUnread}',
+                          tinted: true,
+                        ),
                       if (conversation.isUnassigned)
                         const _MiniChip(label: '未分配')
                       else if (conversation.assigneeId != agentId)
@@ -371,6 +408,8 @@ class _ConversationRow extends StatelessWidget {
               ),
             ),
           ],
+            ),
+          ),
         ),
       ),
     );
@@ -485,6 +524,54 @@ class _CountPill extends StatelessWidget {
 
 /// An empty or failed pane. Empty states in a support tool are read hundreds of
 /// times a day, so they say what to do next rather than only what is missing.
+/// 收件箱筛选：定稿用下划线 Tab，而不是分段按钮。
+class _InboxFilterTab extends StatelessWidget {
+  const _InboxFilterTab({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                color: selected ? scheme.primary : scheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 8),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              height: 2.5,
+              width: selected ? 22 : 0,
+              decoration: BoxDecoration(
+                color: scheme.primary,
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _Notice extends StatelessWidget {
   const _Notice({
     required this.icon,

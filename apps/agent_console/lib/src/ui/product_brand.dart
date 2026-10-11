@@ -11,4 +11,6 @@ class ProductBrand {
   static const String consoleTitle = '通语工作台';
   static const String platformTitle = '通语运营后台';
   static const String subtitle = '在线客服 · 团队协作 · 业务接入';
+  /// 平台登录英雄区定稿文案（与运营后台侧栏副标题一致）。
+  static const String platformSubtitle = '平台运营与企业管理';
 }

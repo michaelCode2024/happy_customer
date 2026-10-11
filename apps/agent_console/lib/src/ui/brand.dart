@@ -363,8 +363,34 @@ class ConsoleIconRail extends StatelessWidget {
         child: Column(
           children: [
             const SizedBox(height: 14),
-            const TongYuBrand(compact: true),
-            const SizedBox(height: 18),
+            // 侧轨宽度有限：Logo 下叠「通语 / TongYu」，对齐定稿横排标识的信息密度。
+            Column(
+              children: [
+                const TongYuLogoMark(size: 34),
+                const SizedBox(height: 6),
+                Text(
+                  ProductBrand.nameZh,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.2,
+                    color: scheme.onSurface,
+                    height: 1.1,
+                  ),
+                ),
+                Text(
+                  ProductBrand.nameEn,
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: 0.6,
+                    color: scheme.onSurfaceVariant,
+                    height: 1.2,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
             if (avatar != null) ...[
               avatar!,
               const SizedBox(height: 14),

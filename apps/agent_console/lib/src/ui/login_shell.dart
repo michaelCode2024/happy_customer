@@ -6,6 +6,9 @@ import 'package:relaydesk_agent_console/src/ui/product_brand.dart';
 ///
 /// 宽屏左侧做品牌主视觉，右侧收纳表单；窄屏只保留表单并置顶品牌，
 /// 避免小屏横向滚动。动画只做入场一次，便于 widget 测试 pumpAndSettle。
+/// 宽屏左侧英雄区变体：平台更克制，客服保留价值主张。
+enum LoginHeroKind { agent, platform }
+
 class LoginShell extends StatefulWidget {
   const LoginShell({
     super.key,
@@ -14,6 +17,7 @@ class LoginShell extends StatefulWidget {
     required this.subtitle,
     required this.child,
     this.badgeLabel,
+    this.heroKind = LoginHeroKind.agent,
   });
 
   final IconData icon;
@@ -23,6 +27,8 @@ class LoginShell extends StatefulWidget {
 
   /// 区分客服工作台与平台运营入口，避免两套表单长得一模一样。
   final String? badgeLabel;
+
+  final LoginHeroKind heroKind;
 
   @override
   State<LoginShell> createState() => _LoginShellState();
@@ -91,7 +97,7 @@ class _LoginShellState extends State<LoginShell>
                                     flex: 11,
                                     child: FadeTransition(
                                       opacity: _fade,
-                                      child: const _LoginHeroPanel(),
+                                      child: _LoginHeroPanel(kind: widget.heroKind),
                                     ),
                                   ),
                                   const SizedBox(width: 48),
@@ -264,14 +270,17 @@ class _GridPainter extends CustomPainter {
       oldDelegate.color != color;
 }
 
-/// 宽屏左侧：品牌是第一信号，再跟一句价值主张与对话示意。
+/// 宽屏左侧：品牌是第一信号；平台定稿只保留一句职责说明，客服再跟价值主张。
 class _LoginHeroPanel extends StatelessWidget {
-  const _LoginHeroPanel();
+  const _LoginHeroPanel({required this.kind});
+
+  final LoginHeroKind kind;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final isPlatform = kind == LoginHeroKind.platform;
 
     return Padding(
       padding: const EdgeInsets.only(right: 24),
@@ -279,164 +288,31 @@ class _LoginHeroPanel extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 定稿：Logo + 通语 / TongYu 占满第一视线，不再堆插画与功能胶囊。
+          // 定稿：Logo + 通语 / TongYu 占满第一视线。
           const TongYuBrand(size: TongYuBrandSize.hero),
           const SizedBox(height: 36),
           Text(
-            ProductBrand.tagline,
+            isPlatform
+                ? ProductBrand.platformSubtitle
+                : ProductBrand.tagline,
             style: theme.textTheme.headlineMedium?.copyWith(
               fontWeight: FontWeight.w700,
               height: 1.25,
               letterSpacing: -0.2,
             ),
           ),
-          const SizedBox(height: 12),
-          Text(
-            ProductBrand.subtitle,
-            style: theme.textTheme.titleMedium?.copyWith(
-              color: scheme.onSurfaceVariant,
-              fontWeight: FontWeight.w500,
+          if (!isPlatform) ...[
+            const SizedBox(height: 12),
+            Text(
+              ProductBrand.subtitle,
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: scheme.onSurfaceVariant,
+                fontWeight: FontWeight.w500,
+              ),
             ),
-          ),
-          const SizedBox(height: 36),
-          const _ConversationPreview(),
+          ],
         ],
       ),
-    );
-  }
-}
-
-/// 对话示意卡：用真实场景文案建立「这是客服产品」的直觉，而不是抽象图标墙。
-class _ConversationPreview extends StatelessWidget {
-  const _ConversationPreview();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: scheme.surface.withOpacity(0.88),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: scheme.outlineVariant.withOpacity(0.9)),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF1F2329).withOpacity(0.06),
-            blurRadius: 28,
-            offset: const Offset(0, 12),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 28,
-                height: 28,
-                decoration: BoxDecoration(
-                  color: scheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(Icons.forum_rounded,
-                    size: 16, color: scheme.primary),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  '连接客户，也连接团队',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              Container(
-                width: 8,
-                height: 8,
-                decoration: const BoxDecoration(
-                  color: Color(0xFF34B368),
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                '在线',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: _PreviewBubble(
-              text: '你好，有个问题想咨询一下。',
-              color: scheme.surfaceContainerHighest,
-              alignEnd: false,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Align(
-            alignment: Alignment.centerRight,
-            child: _PreviewBubble(
-              text: '我在，我们一起看看。',
-              color: scheme.primaryContainer,
-              alignEnd: true,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Divider(color: scheme.outlineVariant.withOpacity(0.7)),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Icon(Icons.sentiment_satisfied_alt_outlined,
-                  size: 18, color: scheme.outline),
-              const SizedBox(width: 12),
-              Icon(Icons.attach_file, size: 18, color: scheme.outline),
-              const Spacer(),
-              Text(
-                '每个企业拥有独立的账号、消息与接入空间',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: scheme.outline,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PreviewBubble extends StatelessWidget {
-  const _PreviewBubble({
-    required this.text,
-    required this.color,
-    required this.alignEnd,
-  });
-
-  final String text;
-  final Color color;
-  final bool alignEnd;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 280),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.only(
-          topLeft: const Radius.circular(12),
-          topRight: const Radius.circular(12),
-          bottomLeft: Radius.circular(alignEnd ? 12 : 4),
-          bottomRight: Radius.circular(alignEnd ? 4 : 12),
-        ),
-      ),
-      child: Text(text, style: Theme.of(context).textTheme.bodyMedium),
     );
   }
 }

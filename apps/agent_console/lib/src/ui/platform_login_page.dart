@@ -83,6 +83,7 @@ class _PlatformLoginPageState extends State<PlatformLoginPage> {
       title: '登录运营后台',
       subtitle: '管理企业、套餐与平台状态',
       badgeLabel: '平台运营',
+      heroKind: LoginHeroKind.platform,
       child: ListenableBuilder(
         listenable: widget.controller,
         builder: (context, _) {

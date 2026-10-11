@@ -72,16 +72,23 @@ class _ChatPanelState extends State<ChatPanel> {
   /// Set while the thread is being re-laid out, so the auto-scroll does not
   /// fight the agent's own scrolling.
   bool _stickToBottom = true;
+  Timer? _readTimer;
 
   @override
   void initState() {
     super.initState();
+    _readTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      final id = widget.workbench.selectedId;
+      if (mounted && _stickToBottom && _scroll.hasClients && id != null)
+        unawaited(widget.workbench.markRead(id));
+    });
     _scroll.addListener(_onScroll);
     widget.workbench.addListener(_onWorkbenchChanged);
   }
 
   @override
   void dispose() {
+    _readTimer?.cancel();
     _draftDebounce?.cancel();
     _flashTimer?.cancel();
     _searchDebounce?.cancel();
@@ -600,7 +607,8 @@ class _EmptyThread extends StatelessWidget {
                       end: Alignment.bottomRight,
                       colors: [
                         scheme.primary,
-                        Color.lerp(scheme.primary, const Color(0xFF22D3EE), 0.4)!,
+                        Color.lerp(
+                            scheme.primary, const Color(0xFF22D3EE), 0.4)!,
                       ],
                     ),
                     borderRadius: BorderRadius.circular(28),
@@ -1658,7 +1666,8 @@ class _BubbleShell extends StatelessWidget {
                 ? Border.all(color: theme.colorScheme.primary, width: 2)
                 : (!isAgent
                     ? Border.all(
-                        color: theme.colorScheme.outlineVariant.withOpacity(0.7),
+                        color:
+                            theme.colorScheme.outlineVariant.withOpacity(0.7),
                       )
                     : null),
           ),
@@ -1926,9 +1935,8 @@ class _MessageStatusRow extends StatelessWidget {
           ),
       ]);
     } else if (receipt != MessageReceipt.none) {
-      final color = receipt == MessageReceipt.read
-          ? theme.colorScheme.primary
-          : mute;
+      final color =
+          receipt == MessageReceipt.read ? theme.colorScheme.primary : mute;
       children.addAll([
         const SizedBox(width: 6),
         Icon(
@@ -1987,8 +1995,8 @@ class _NoteBubble extends StatelessWidget {
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
             decoration: BoxDecoration(
-              color:
-                  color.withAlpha(theme.brightness == Brightness.dark ? 36 : 24),
+              color: color
+                  .withAlpha(theme.brightness == Brightness.dark ? 36 : 24),
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
                 color: flash ? theme.colorScheme.primary : color.withAlpha(80),
@@ -2539,7 +2547,7 @@ class _Composer extends StatelessWidget {
                                   ? '写一条内部备注，访客看不到'
                                   : visitorTyping
                                       ? '对方正在输入…'
-                                      : '输入回复内容…',
+                                      : '请输入消息...',
                               filled: true,
                               fillColor: noteMode
                                   ? scheme.tertiaryContainer.withAlpha(35)
