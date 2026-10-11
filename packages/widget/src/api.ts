@@ -31,6 +31,7 @@ export class ApiError extends Error {
 
 export interface BootstrapInput {
   inboxKey: string;
+  identityToken?: string;
   externalId?: string;
   displayName?: string;
   email?: string;

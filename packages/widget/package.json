@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "tsc -p tsconfig.json && node --test test/attachments.test.mjs",
     "build": "tsc -p tsconfig.json && esbuild src/index.ts --bundle --format=iife --target=es2022 --minify --outfile=dist/widget.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

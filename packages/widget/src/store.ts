@@ -1,3 +1,4 @@
+import type { ChannelPresentation, ChannelItem } from "./types.js";
 // The store owns all visitor-side state and is the only place that talks to the
 // API and the socket. The UI is a pure function of the snapshot it reads, which
 // keeps re-renders cheap and makes the send path (optimistic message, then
@@ -21,6 +22,7 @@ const TYPING_TTL_MS = 4_000;
 const PAGE_SIZE = 50;
 
 export interface Snapshot {
+ automation?: ChannelPresentation;
   status: 'IDLE' | 'BOOTSTRAPPING' | 'READY' | 'FAILED';
   error?: string;
   open: boolean;
@@ -115,6 +117,9 @@ export class ChatStore {
   readonly #socket: VisitorSocket;
   readonly #listeners = new Set<Listener>();
   #state: Snapshot;
+  // 原始文件仅保留在当前页面内，用于上传失败重试，不写入本地持久化存储。
+  readonly #pendingFiles = new Map<string, File>();
+  #attachmentConversation?: Promise<void>;
   #typingTimer?: ReturnType<typeof setTimeout>;
   #typingSentAt = 0;
   #pollTimer?: ReturnType<typeof setInterval>;
@@ -178,7 +183,8 @@ export class ChatStore {
       return;
     }
     this.#patch({ status: 'BOOTSTRAPPING', error: undefined });
-    const cached = this.#readSession();
+    // 登录身份切换时重新验证票据，不能沿用匿名或上一个用户的缓存身份。
+    const cached = (this.#options.identityToken || this.#options.bridge?.getVisitor?.()?.identityToken) ? undefined : this.#readSession();
     try {
       if (cached) {
         this.#api.setToken(cached.token);
@@ -191,6 +197,11 @@ export class ChatStore {
           const live = await this.#api.listConversations();
           this.#patch({
             status: 'READY',
+            agentsOnline: live.agentsOnline ?? 0,
+            aiEnabled: live.aiEnabled ?? false,
+            automation: live.automation,
+            welcomeMessage: live.welcomeMessage || this.#options.welcomeMessage,
+            offlineMessage: live.offlineMessage || this.#options.offlineMessage,
             conversations: live.items ?? [],
             activeId: this.#pickActive(live.items ?? []),
           });
@@ -213,6 +224,7 @@ export class ChatStore {
     const bridge = this.#options.bridge?.getVisitor?.();
     const result = await this.#api.bootstrap({
       inboxKey: this.#options.inboxKey,
+      identityToken: bridge?.identityToken ?? this.#options.identityToken,
       externalId: bridge?.externalId ?? this.#options.externalId,
       displayName: bridge?.displayName ?? this.#options.displayName,
       email: bridge?.email ?? this.#options.email,
@@ -233,6 +245,7 @@ export class ChatStore {
       status: 'READY',
       agentsOnline: result.agentsOnline,
       aiEnabled: result.aiEnabled,
+      automation: result.inbox.automation,
       welcomeMessage: result.inbox.welcomeMessage || this.#options.welcomeMessage,
       offlineMessage: result.inbox.offlineMessage || this.#options.offlineMessage,
       conversations,
@@ -258,6 +271,7 @@ export class ChatStore {
   }
 
   destroy(): void {
+    this.#pendingFiles.clear();
     this.#socket.close();
     if (this.#pollTimer) {
       clearInterval(this.#pollTimer);
@@ -384,7 +398,7 @@ export class ChatStore {
       this.#patch({ messages: [...this.#state.messages, optimistic] });
     }
     try {
-      const created = await this.#api.createConversation(subject ?? this.#options.subject ?? '', content, this.#options.embedded ? 'APP' : 'WEB');
+      const created = await this.#api.createConversation(subject ?? this.#options.subject ?? '', content, this.#options.source ?? (this.#options.embedded ? 'APP' : 'WEB'));
       const conversations = [created.conversation, ...this.#state.conversations.filter((item) => item.id !== created.conversation.id)];
       this.#patch({ conversations, activeId: created.conversation.id });
       this.#writeSession({ ...this.#requireSession(), conversations });
@@ -476,11 +490,18 @@ export class ChatStore {
     this.#patch({ search: { query: '', running: false, hits: [] } });
   }
 
+  async selectChannelItem(item: ChannelItem): Promise<void> {
+    if (item.action === 'LINK') return;
+    // 菜单动作由服务器重新校验，客户端不能指定任意机器人回复内容。
+    await this.send(item.title, [], 'TEXT', undefined, { menuId: item.id });
+  }
+
   async send(
     content: string,
     attachmentIds: string[] = [],
     messageType: ChatMessage['messageType'] = 'TEXT',
     replyToId?: string,
+    metadata?: Record<string, unknown>,
   ): Promise<void> {
     let id = this.#state.activeId;
     const text = content.trim();
@@ -500,14 +521,21 @@ export class ChatStore {
       createdAt: new Date().toISOString(),
       delivery: 'SENDING',
       replyTo: quote,
+      metadata,
       reactions: [],
     };
     optimistic.localId = optimistic.id;
     this.#patch({ messages: [...this.#state.messages, optimistic], replyTo: undefined });
 
     if (!id) {
-      await this.startConversation(text);
-      return;
+      // 首条文字也走带 clientMessageId 的发送接口，避免建会话首消息
+      // 与乐观消息使用不同标识，造成重复气泡和永久“发送中”。
+      id = await this.#ensureAttachmentConversation();
+      if (!id) {
+        this.#failMessage(optimistic.localId, new Error('创建会话失败，请重试'));
+        return;
+      }
+      optimistic.conversationId = id;
     }
     try {
       const saved = await this.#api.sendMessage(id, {
@@ -516,6 +544,7 @@ export class ChatStore {
         messageType,
         attachmentIds,
         replyToId: replyToId ?? quote?.id,
+        metadata,
       });
       saved.attachments = this.#resolveAttachments(saved, optimistic);
       this.#patch({ messages: mergeMessages(this.#state.messages, [toChatMessage(saved)]) });
@@ -538,7 +567,7 @@ export class ChatStore {
    * element has loaded enough to report it.
    */
   async sendVoice(blob: Blob, durationMs: number): Promise<void> {
-    const id = this.#state.activeId;
+    const id = await this.#ensureAttachmentConversation();
     if (!id) {
       this.#emit({ type: 'error', data: '请先发送一条消息以开始对话' });
       return;
@@ -567,11 +596,14 @@ export class ChatStore {
       createdAt: new Date().toISOString(),
       delivery: 'SENDING',
       reactions: [],
+      metadata: { durationMs: Math.round(durationMs) },
     };
     placeholder.localId = placeholder.id;
+    this.#pendingFiles.set(placeholder.localId, file);
     this.#patch({ messages: [...this.#state.messages, placeholder], uploading: this.#state.uploading + 1 });
     try {
       const uploaded = await this.#api.upload(id, file);
+      placeholder.attachments = [uploaded];
       const saved = await this.#api.sendMessage(id, {
         content: '语音消息',
         clientMessageId: placeholder.localId,
@@ -580,6 +612,7 @@ export class ChatStore {
         metadata: { durationMs: Math.round(durationMs) },
       });
       saved.attachments = saved.attachments?.length ? saved.attachments : [uploaded];
+      this.#pendingFiles.delete(placeholder.localId);
       this.#patch({ messages: mergeMessages(this.#state.messages, [toChatMessage(saved)]) });
       this.#emit({ type: 'sent', data: saved });
       void this.#refreshActiveSummary(id);
@@ -592,17 +625,29 @@ export class ChatStore {
   }
 
   async sendFiles(files: FileList | File[]): Promise<void> {
-    const id = this.#state.activeId;
     const list = Array.from(files);
     if (!list.length) {
       return;
     }
+    const id = await this.#ensureAttachmentConversation();
     if (!id) {
       this.#emit({ type: 'error', data: '请先发送一条消息以开始对话' });
       return;
     }
     for (const file of list) {
       await this.#sendOneFile(id, file);
+    }
+  }
+
+  async #ensureAttachmentConversation(): Promise<string | undefined> {
+    if (this.#state.activeId) return this.#state.activeId;
+    // 首条消息允许是附件；并发选择文件时共享建会话请求，避免重复会话。
+    this.#attachmentConversation ??= this.startConversation('');
+    try {
+      await this.#attachmentConversation;
+      return this.#state.activeId;
+    } finally {
+      this.#attachmentConversation = undefined;
     }
   }
 
@@ -629,9 +674,11 @@ export class ChatStore {
       reactions: [],
     };
     placeholder.localId = placeholder.id;
+    this.#pendingFiles.set(placeholder.localId, file);
     this.#patch({ messages: [...this.#state.messages, placeholder], uploading: this.#state.uploading + 1 });
     try {
       const uploaded = await this.#api.upload(conversationId, file);
+      placeholder.attachments = [uploaded];
       const saved = await this.#api.sendMessage(conversationId, {
         content: file.name,
         clientMessageId: placeholder.localId,
@@ -639,6 +686,7 @@ export class ChatStore {
         attachmentIds: [uploaded.id],
       });
       saved.attachments = saved.attachments?.length ? saved.attachments : [uploaded];
+      this.#pendingFiles.delete(placeholder.localId);
       this.#patch({ messages: mergeMessages(this.#state.messages, [toChatMessage(saved)]) });
       this.#emit({ type: 'sent', data: saved });
       void this.#refreshActiveSummary(conversationId);
@@ -662,20 +710,26 @@ export class ChatStore {
         message.localId === localIdValue ? { ...message, delivery: 'SENDING', error: undefined } : message,
       ),
     });
-    const id = this.#state.activeId;
-    if (!id) {
-      await this.startConversation(target.content);
-      return;
-    }
     try {
+      await this.#ensureAttachmentConversation();
+      const id = this.#state.activeId!;
+      if (target.messageType !== 'TEXT' && attachmentIds.length === 0) {
+        const file = this.#pendingFiles.get(localIdValue);
+        if (!file) throw new Error('原始文件已不可用，请重新选择文件');
+        const uploaded = await this.#api.upload(id, file);
+        target.attachments = [uploaded];
+        attachmentIds.push(uploaded.id);
+      }
       const saved = await this.#api.sendMessage(id, {
         content: target.content,
         clientMessageId: target.localId,
         messageType: target.messageType,
         attachmentIds,
         replyToId: target.replyTo?.id,
-        metadata: target.messageType === 'AUDIO' ? (target.metadata as Record<string, unknown>) : undefined,
+        metadata: target.metadata as Record<string, unknown> | undefined,
       });
+      this.#pendingFiles.delete(localIdValue);
+      saved.attachments = saved.attachments?.length ? saved.attachments : target.attachments;
       this.#patch({ messages: mergeMessages(this.#state.messages, [toChatMessage(saved)]) });
     } catch (error) {
       this.#failMessage(localIdValue, error);
@@ -804,7 +858,13 @@ export class ChatStore {
     }
     try {
       const conversations = await this.#api.listConversations();
-      this.#patch({ conversations: conversations.items ?? [], agentsOnline: this.#state.agentsOnline });
+      this.#patch({ conversations: conversations.items ?? [],
+        agentsOnline: conversations.agentsOnline ?? this.#state.agentsOnline,
+        aiEnabled: conversations.aiEnabled ?? this.#state.aiEnabled,
+        automation: conversations.automation,
+        welcomeMessage: conversations.welcomeMessage || this.#state.welcomeMessage,
+        offlineMessage: conversations.offlineMessage || this.#state.offlineMessage,
+      });
       const id = this.#state.activeId;
       if (!id) {
         return;
@@ -846,6 +906,7 @@ export class ChatStore {
     switch (event.type) {
       case 'message.created': {
         const message = event.data as Message | undefined;
+        if (message?.private) return;
         if (!message?.id || !message.conversationId) {
           return;
         }
@@ -899,6 +960,7 @@ export class ChatStore {
         // content already stripped when it was recalled, so the client replaces
         // the row rather than trying to reconstruct what happened.
         const message = event.data as Message | undefined;
+        if (message?.private) return;
         if (!message?.id || message.conversationId !== this.#state.activeId) {
           return;
         }
@@ -1041,7 +1103,9 @@ export class ChatStore {
   }
 
   #storageKey(): string {
-    return `${this.#options.storage}.${this.#options.inboxKey}`;
+    const signed = this.#options.identityToken || this.#options.bridge?.getVisitor?.()?.identityToken;
+    // 退出业务账号后匿名组件不能读取之前的登录聊天会话。
+    return `${this.#options.storage}.${this.#options.inboxKey}.${signed ? 'signed' : this.#options.externalId || 'guest'}`;
   }
 
   #readSession(): StoredSession | undefined {

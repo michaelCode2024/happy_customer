@@ -5,7 +5,7 @@
     "moduleResolution": "bundler",
     "strict": true,
     "declaration": true,
-    "outDir": "dist",
+    "outDir": "build/modules",
     "rootDir": "src",
     "noUncheckedIndexedAccess": true,
     "useDefineForClassFields": true

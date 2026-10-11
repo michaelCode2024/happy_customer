@@ -1,13 +1,19 @@
+import type { ChannelItem } from "./types.js";
 // Shadow-DOM renderer. Two rules keep it usable inside someone else's page:
 // every style is scoped to the shadow root, and the composer is a persistent
 // node that re-renders only patch the message list, so typing is never
 // interrupted and the caret never jumps.
 
+import { requestMicrophone, collectRecordingChunks } from './recording.js';
 import type { ResolvedOptions } from './config.js';
 import type { ChatStore, Snapshot } from './store.js';
 import type { ChatMessage, SearchHit } from './types.js';
 
 const ICONS = {
+  plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M7 12h10"/></svg>',
+  smile: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M7.5 14a5 5 0 0 0 9 0"/><circle cx="8.5" cy="9" r=".7"/><circle cx="15.5" cy="9" r=".7"/></svg>',
+  image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 5-5 4 4 4-6 5 7"/></svg>',
+  camera: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7h4l2-3h6l2 3h4v13H3z"/><circle cx="12" cy="13" r="4"/></svg>',
   chat: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>',
   close: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>',
   send: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>',
@@ -156,6 +162,9 @@ export class WidgetView {
   #recordStartedAt = 0;
   #recordTimer?: ReturnType<typeof setInterval>;
   #recording = false;
+  #requestingMicrophone = false;
+  #toolsNode?: HTMLDivElement;
+  #emojiNode?: HTMLDivElement;
 
   constructor(root: ShadowRoot, options: ResolvedOptions, store: ChatStore, handlers: UiHandlers) {
     this.#root = root;
@@ -191,6 +200,8 @@ export class WidgetView {
   setInputValue(value: string): void {
     if (this.#input) {
       this.#input.value = value;
+      this.#autoGrow();
+      this.#syncSendButton();
     }
   }
 
@@ -265,12 +276,24 @@ export class WidgetView {
           <button type="button" class="rd-icon rd-reply-close" title="取消引用">${ICONS.close}</button>
         </div>
         <div class="rd-composer-row">
-          <button type="button" class="rd-icon rd-attach" title="发送图片或文件">${ICONS.clip}</button>
+          <button type="button" class="rd-icon rd-mic" title="录制语音" aria-label="录制语音" hidden>${ICONS.mic}</button>
           <textarea class="rd-input" rows="1" placeholder="${escapeAttr(this.#options.placeholder)}" maxlength="4000"></textarea>
-          <button type="button" class="rd-icon rd-mic" title="按住说话" hidden>${ICONS.mic}</button>
-          <button type="submit" class="rd-send" title="发送">${ICONS.send}</button>
+          <button type="button" class="rd-icon rd-emoji-toggle" title="表情" aria-label="表情" aria-expanded="false">${ICONS.smile}</button>
+          <button type="button" class="rd-icon rd-more-toggle" title="更多功能" aria-label="更多功能" aria-expanded="false">${ICONS.plus}</button>
+          <button type="submit" class="rd-send" title="发送" aria-label="发送消息" hidden>发送</button>
         </div>
-        <input type="file" class="rd-file" multiple hidden>
+        <div class="rd-tools" hidden>
+          <button type="button" class="rd-tool" data-picker="image"><span>${ICONS.image}</span>图片</button>
+          <button type="button" class="rd-tool" data-picker="camera"><span>${ICONS.camera}</span>拍照</button>
+          <button type="button" class="rd-tool" data-picker="file"><span>${ICONS.clip}</span>文件</button>
+          <button type="button" class="rd-tool rd-history"><span>${ICONS.search}</span>聊天记录</button>
+          <p class="rd-tools-hint">图片和文件选择后发送，请勿上传密码等敏感信息</p>
+        </div>
+        <div class="rd-emojis" aria-label="选择表情" hidden><div class="rd-emoji-tabs" role="tablist" aria-label="表情分类"><button type="button" role="tab" aria-selected="true" data-emoji-category="0">笑脸</button><button type="button" role="tab" aria-selected="false" data-emoji-category="1">心情</button><button type="button" role="tab" aria-selected="false" data-emoji-category="2">手势</button><button type="button" role="tab" aria-selected="false" data-emoji-category="3">日常</button></div><div class="rd-emoji-grid" data-emoji-group="0"><button type="button" class="rd-emoji" aria-label="😀">😀</button><button type="button" class="rd-emoji" aria-label="😃">😃</button><button type="button" class="rd-emoji" aria-label="😄">😄</button><button type="button" class="rd-emoji" aria-label="😁">😁</button><button type="button" class="rd-emoji" aria-label="😆">😆</button><button type="button" class="rd-emoji" aria-label="😅">😅</button><button type="button" class="rd-emoji" aria-label="😂">😂</button><button type="button" class="rd-emoji" aria-label="🤣">🤣</button><button type="button" class="rd-emoji" aria-label="😊">😊</button><button type="button" class="rd-emoji" aria-label="🙂">🙂</button><button type="button" class="rd-emoji" aria-label="🙃">🙃</button><button type="button" class="rd-emoji" aria-label="😉">😉</button><button type="button" class="rd-emoji" aria-label="😌">😌</button><button type="button" class="rd-emoji" aria-label="😍">😍</button><button type="button" class="rd-emoji" aria-label="🥰">🥰</button><button type="button" class="rd-emoji" aria-label="😘">😘</button><button type="button" class="rd-emoji" aria-label="😋">😋</button><button type="button" class="rd-emoji" aria-label="😛">😛</button><button type="button" class="rd-emoji" aria-label="😜">😜</button><button type="button" class="rd-emoji" aria-label="🤪">🤪</button><button type="button" class="rd-emoji" aria-label="🤔">🤔</button><button type="button" class="rd-emoji" aria-label="🤭">🤭</button><button type="button" class="rd-emoji" aria-label="🤫">🤫</button><button type="button" class="rd-emoji" aria-label="🫡">🫡</button></div><div class="rd-emoji-grid" data-emoji-group="1" hidden><button type="button" class="rd-emoji" aria-label="😎">😎</button><button type="button" class="rd-emoji" aria-label="🤩">🤩</button><button type="button" class="rd-emoji" aria-label="🥳">🥳</button><button type="button" class="rd-emoji" aria-label="😏">😏</button><button type="button" class="rd-emoji" aria-label="😒">😒</button><button type="button" class="rd-emoji" aria-label="😔">😔</button><button type="button" class="rd-emoji" aria-label="😢">😢</button><button type="button" class="rd-emoji" aria-label="😭">😭</button><button type="button" class="rd-emoji" aria-label="😤">😤</button><button type="button" class="rd-emoji" aria-label="😠">😠</button><button type="button" class="rd-emoji" aria-label="😡">😡</button><button type="button" class="rd-emoji" aria-label="🤯">🤯</button><button type="button" class="rd-emoji" aria-label="😳">😳</button><button type="button" class="rd-emoji" aria-label="🥺">🥺</button><button type="button" class="rd-emoji" aria-label="😱">😱</button><button type="button" class="rd-emoji" aria-label="😨">😨</button><button type="button" class="rd-emoji" aria-label="😰">😰</button><button type="button" class="rd-emoji" aria-label="😥">😥</button><button type="button" class="rd-emoji" aria-label="😓">😓</button><button type="button" class="rd-emoji" aria-label="🤗">🤗</button><button type="button" class="rd-emoji" aria-label="🥱">🥱</button><button type="button" class="rd-emoji" aria-label="😴">😴</button><button type="button" class="rd-emoji" aria-label="😷">😷</button><button type="button" class="rd-emoji" aria-label="🤒">🤒</button></div><div class="rd-emoji-grid" data-emoji-group="2" hidden><button type="button" class="rd-emoji" aria-label="👍">👍</button><button type="button" class="rd-emoji" aria-label="👎">👎</button><button type="button" class="rd-emoji" aria-label="👏">👏</button><button type="button" class="rd-emoji" aria-label="🙌">🙌</button><button type="button" class="rd-emoji" aria-label="👐">👐</button><button type="button" class="rd-emoji" aria-label="🤝">🤝</button><button type="button" class="rd-emoji" aria-label="🙏">🙏</button><button type="button" class="rd-emoji" aria-label="💪">💪</button><button type="button" class="rd-emoji" aria-label="👌">👌</button><button type="button" class="rd-emoji" aria-label="✌️">✌️</button><button type="button" class="rd-emoji" aria-label="🤞">🤞</button><button type="button" class="rd-emoji" aria-label="🤟">🤟</button><button type="button" class="rd-emoji" aria-label="🤘">🤘</button><button type="button" class="rd-emoji" aria-label="🤙">🤙</button><button type="button" class="rd-emoji" aria-label="👋">👋</button><button type="button" class="rd-emoji" aria-label="🤚">🤚</button><button type="button" class="rd-emoji" aria-label="✋">✋</button><button type="button" class="rd-emoji" aria-label="🖐️">🖐️</button><button type="button" class="rd-emoji" aria-label="👊">👊</button><button type="button" class="rd-emoji" aria-label="✊">✊</button><button type="button" class="rd-emoji" aria-label="🤛">🤛</button><button type="button" class="rd-emoji" aria-label="🤜">🤜</button><button type="button" class="rd-emoji" aria-label="🙋">🙋</button><button type="button" class="rd-emoji" aria-label="🫶">🫶</button></div><div class="rd-emoji-grid" data-emoji-group="3" hidden><button type="button" class="rd-emoji" aria-label="❤️">❤️</button><button type="button" class="rd-emoji" aria-label="🧡">🧡</button><button type="button" class="rd-emoji" aria-label="💛">💛</button><button type="button" class="rd-emoji" aria-label="💚">💚</button><button type="button" class="rd-emoji" aria-label="💙">💙</button><button type="button" class="rd-emoji" aria-label="💜">💜</button><button type="button" class="rd-emoji" aria-label="🖤">🖤</button><button type="button" class="rd-emoji" aria-label="🤍">🤍</button><button type="button" class="rd-emoji" aria-label="💕">💕</button><button type="button" class="rd-emoji" aria-label="💖">💖</button><button type="button" class="rd-emoji" aria-label="💯">💯</button><button type="button" class="rd-emoji" aria-label="✅">✅</button><button type="button" class="rd-emoji" aria-label="🎉">🎉</button><button type="button" class="rd-emoji" aria-label="🎊">🎊</button><button type="button" class="rd-emoji" aria-label="🎁">🎁</button><button type="button" class="rd-emoji" aria-label="🌹">🌹</button><button type="button" class="rd-emoji" aria-label="🌸">🌸</button><button type="button" class="rd-emoji" aria-label="☀️">☀️</button><button type="button" class="rd-emoji" aria-label="🌈">🌈</button><button type="button" class="rd-emoji" aria-label="⭐">⭐</button><button type="button" class="rd-emoji" aria-label="🔥">🔥</button><button type="button" class="rd-emoji" aria-label="☕">☕</button><button type="button" class="rd-emoji" aria-label="🍰">🍰</button><button type="button" class="rd-emoji" aria-label="🎈">🎈</button></div></div>
+        <div class="rd-upload-status" role="status" hidden></div>
+        <input type="file" class="rd-upload-input" data-kind="file" multiple hidden>
+        <input type="file" class="rd-upload-input" data-kind="image" accept="image/*" multiple hidden>
+        <input type="file" class="rd-upload-input" data-kind="camera" accept="image/*" capture="environment" hidden>
       </form>
       <div class="rd-footer"></div>`;
 
@@ -286,15 +309,72 @@ export class WidgetView {
     this.#pinnedBar = panel.querySelector('.rd-pinned') as HTMLDivElement;
     this.#recordBar = panel.querySelector('.rd-recording') as HTMLDivElement;
 
-    const fileInput = panel.querySelector('.rd-file') as HTMLInputElement;
-    const attach = panel.querySelector('.rd-attach') as HTMLButtonElement;
-    attach.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', () => {
+    this.#toolsNode = panel.querySelector('.rd-tools') as HTMLDivElement;
+    this.#emojiNode = panel.querySelector('.rd-emojis') as HTMLDivElement;
+    const more = panel.querySelector('.rd-more-toggle') as HTMLButtonElement;
+    const emojiToggle = panel.querySelector('.rd-emoji-toggle') as HTMLButtonElement;
+    const closePanels = () => {
+      this.#toolsNode!.hidden = true;
+      this.#emojiNode!.hidden = true;
+      more.setAttribute('aria-expanded', 'false');
+      emojiToggle.setAttribute('aria-expanded', 'false');
+    };
+    // 点消息区空白（或气泡外区域）收起「+」工具栏 / 表情面板，对齐常见 IM 交互。
+    const thread = panel.querySelector('.rd-thread') as HTMLDivElement;
+    thread.addEventListener('pointerdown', () => {
+      if (this.#toolsNode!.hidden && this.#emojiNode!.hidden) return;
+      closePanels();
+    });
+    // Keep touch taps from moving focus to the button and fighting the soft keyboard.
+    [more, emojiToggle].forEach(button => button.addEventListener('pointerdown', event => event.preventDefault()));
+    panel.querySelectorAll<HTMLButtonElement>('[data-emoji-category]').forEach(button => {
+      button.addEventListener('pointerdown', event => event.preventDefault());
+      button.addEventListener('click', () => {
+        panel.querySelectorAll<HTMLButtonElement>('[data-emoji-category]').forEach(tab => tab.setAttribute('aria-selected', String(tab === button)));
+        panel.querySelectorAll<HTMLElement>('[data-emoji-group]').forEach(group => { group.hidden = group.dataset.emojiGroup !== button.dataset.emojiCategory; });
+      });
+    });
+    more.addEventListener('click', () => {
+      const open = this.#toolsNode!.hidden;
+      if (open) this.#input?.blur();
+      closePanels();
+      this.#toolsNode!.hidden = !open;
+      more.setAttribute('aria-expanded', String(open));
+    });
+    emojiToggle.addEventListener('click', () => {
+      const open = this.#emojiNode!.hidden;
+      if (open) this.#input?.blur();
+      closePanels();
+      this.#emojiNode!.hidden = !open;
+      emojiToggle.setAttribute('aria-expanded', String(open));
+    });
+    panel.querySelectorAll<HTMLButtonElement>('[data-picker]').forEach(button => button.addEventListener('click', () => {
+      const picker = panel.querySelector<HTMLInputElement>(`input[data-kind="${button.dataset.picker}"]`);
+      picker?.click();
+    }));
+    panel.querySelectorAll<HTMLInputElement>('.rd-upload-input').forEach(fileInput => fileInput.addEventListener('change', () => {
       if (fileInput.files?.length) {
         this.#handlers.onFiles(fileInput.files);
+        closePanels();
       }
       fileInput.value = '';
+    }));
+    panel.querySelector('.rd-history')?.addEventListener('click', () => {
+      closePanels();
+      this.#searchOpen = true;
+      this.#syncSearchBar();
+      if (this.#lastSnapshot) this.#renderResults(this.#lastSnapshot);
+      this.#searchInput?.focus();
     });
+    panel.querySelectorAll<HTMLButtonElement>('.rd-emoji').forEach(button => button.addEventListener('click', () => {
+      const input = this.#input!;
+      // 在当前光标处插入，避免选表情时覆盖已经输入的咨询内容。
+      const emoji = button.textContent ?? '';
+      if (input.value.length - (input.selectionEnd - input.selectionStart) + emoji.length > input.maxLength) return;
+      input.setRangeText(emoji, input.selectionStart, input.selectionEnd, 'end');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }));
+    this.#input.addEventListener('focus', closePanels);
 
     this.#composer.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -303,13 +383,16 @@ export class WidgetView {
         return;
       }
       this.#handlers.onSend(text);
+      closePanels();
       if (this.#input) {
         this.#input.value = '';
         this.#autoGrow();
+        this.#syncSendButton();
       }
     });
     this.#input.addEventListener('input', () => {
       this.#autoGrow();
+      this.#syncSendButton();
       this.#handlers.onTyping();
     });
     this.#input.addEventListener('keydown', (event) => {
@@ -317,8 +400,14 @@ export class WidgetView {
         event.preventDefault();
         this.#composer?.requestSubmit();
       }
-      if (event.key === 'Escape' && !this.#replyBar?.hidden) {
-        this.#handlers.onClearQuote();
+      if (event.key === 'Escape') {
+        if (!this.#toolsNode?.hidden || !this.#emojiNode?.hidden) {
+          closePanels();
+          return;
+        }
+        if (!this.#replyBar?.hidden) {
+          this.#handlers.onClearQuote();
+        }
       }
     });
     (panel.querySelector('.rd-reply-close') as HTMLButtonElement).addEventListener('click', () =>
@@ -336,12 +425,15 @@ export class WidgetView {
     (panel.querySelector('.rd-rec-cancel') as HTMLButtonElement).addEventListener('click', () => this.#stopRecording(true));
     (panel.querySelector('.rd-rec-send') as HTMLButtonElement).addEventListener('click', () => this.#stopRecording(false));
 
+    let searchTimer: ReturnType<typeof setTimeout> | undefined;
     (panel.querySelector('.rd-search-toggle') as HTMLButtonElement).addEventListener('click', () => {
       this.#searchOpen = true;
       this.#syncSearchBar();
+      if (this.#lastSnapshot) this.#renderResults(this.#lastSnapshot);
       this.#searchInput?.focus();
     });
     (panel.querySelector('.rd-search-close') as HTMLButtonElement).addEventListener('click', () => {
+      if (searchTimer) clearTimeout(searchTimer);
       this.#searchOpen = false;
       this.#handlers.onClearSearch();
       if (this.#searchInput) {
@@ -349,7 +441,6 @@ export class WidgetView {
       }
       this.#syncSearchBar();
     });
-    let searchTimer: ReturnType<typeof setTimeout> | undefined;
     this.#searchInput.addEventListener('input', () => {
       const query = this.#searchInput?.value ?? '';
       if (searchTimer) {
@@ -360,6 +451,11 @@ export class WidgetView {
       searchTimer = setTimeout(() => this.#handlers.onSearch(query), 250);
     });
     this.#searchInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        if (searchTimer) clearTimeout(searchTimer);
+        this.#handlers.onSearch(this.#searchInput?.value ?? '');
+      }
       if (event.key === 'Escape') {
         (panel.querySelector('.rd-search-close') as HTMLButtonElement).click();
       }
@@ -392,6 +488,14 @@ export class WidgetView {
     slot.appendChild(panel);
   }
 
+  #syncSendButton(): void {
+    const hasText = Boolean(this.#input?.value.trim());
+    const send = this.#composer?.querySelector<HTMLButtonElement>('.rd-send');
+    const more = this.#composer?.querySelector<HTMLButtonElement>('.rd-more-toggle');
+    if (send) send.hidden = !hasText;
+    if (more) more.hidden = hasText;
+  }
+
   #syncLauncher(snapshot: Snapshot): void {
     if (!this.#launcher) {
       return;
@@ -413,7 +517,7 @@ export class WidgetView {
       return;
     }
     const subtitle = panel.querySelector('.rd-subtitle') as HTMLElement;
-    subtitle.textContent = this.#subtitle(snapshot);
+    subtitle.textContent = snapshot.automation?.channelSubtitle ? `${snapshot.automation.channelSubtitle} · ${this.#subtitle(snapshot)}` : this.#subtitle(snapshot);
     subtitle.classList.toggle('is-online', snapshot.agentsOnline > 0);
 
     const back = panel.querySelector('.rd-back') as HTMLElement;
@@ -434,6 +538,9 @@ export class WidgetView {
     this.#syncFooter(snapshot);
     const composer = this.#composer as HTMLFormElement;
     composer.hidden = showList && !snapshot.activeId;
+    const uploadStatus = composer.querySelector('.rd-upload-status') as HTMLElement;
+    uploadStatus.hidden = snapshot.uploading === 0;
+    uploadStatus.textContent = snapshot.uploading ? `正在发送 ${snapshot.uploading} 个附件…` : '';
   }
 
   #subtitle(snapshot: Snapshot): string {
@@ -489,21 +596,57 @@ export class WidgetView {
     });
   }
 
+  #channelItemHtml(i: ChannelItem): string {
+    return i.action === 'LINK' && /^https?:\/\//i.test(i.value)
+      ? `<a class="rd-channel-chip" href="${escapeAttr(i.value)}" target="_blank" rel="noopener noreferrer">${escapeHtml(i.title)} ↗</a>`
+      : `<button type="button" class="rd-channel-chip" data-channel="${escapeAttr(i.id)}">${escapeHtml(i.title)}</button>`;
+  }
+
+  #bindChannelActions(node: HTMLElement, snapshot: Snapshot): void {
+    const c=snapshot.automation;
+    const items=[...(c?.menuItems??[]),...(c?.quickLinks??[]),...(c?.diversionLinks??[]),...(c?.cards??[])];
+    node.querySelectorAll<HTMLButtonElement>('[data-question]').forEach(b=>b.onclick=()=>this.#handlers.onSend(b.dataset.question!));
+    node.querySelectorAll<HTMLButtonElement>('[data-channel]').forEach(b=>b.onclick=()=>{
+      const item=items.find(i=>i.id===b.dataset.channel);if(item)void this.#store.selectChannelItem(item);
+    });
+  }
+
+  #welcomeSuggestions(snapshot: Snapshot): string {
+    const c=snapshot.automation;if(!c)return '';
+    return `<div class="rd-welcome-suggestions">${c.guideText || c.guideQuestions?.length ? `<div class="rd-guide-title">${escapeHtml(c.guideText || '你可能想了解')}</div>` : ''}
+      <div class="rd-channel-row">${(c.guideQuestions??[]).map(q=>`<button type="button" class="rd-channel-chip" data-question="${escapeAttr(q)}">${escapeHtml(q)}</button>`).join('')}</div>
+      ${(c.cards??[]).map(i=>`<div class="rd-channel-card">${i.imageUrl && /^https?:\/\//i.test(i.imageUrl)?`<img src="${escapeAttr(i.imageUrl)}" alt="" loading="lazy">`:''}<div><strong>${escapeHtml(i.title)}</strong><p>${escapeHtml(i.description||'')}</p>${this.#channelItemHtml(i)}</div></div>`).join('')}</div>`;
+  }
+
+  #renderChannel(snapshot: Snapshot): void {
+    let panel=this.#root.querySelector<HTMLDivElement>('.rd-channel');
+    if(!panel){panel=document.createElement('div');panel.className='rd-channel';this.#messagesNode?.after(panel);}
+    const c=snapshot.automation;if(!c){panel.hidden=true;return;}
+    const title=this.#root.querySelector<HTMLElement>('.rd-heading strong');
+    if(title)title.textContent=c.channelTitle || this.#options.title;
+    const items=[...(c.menuItems??[]),...(c.quickLinks??[]),...(c.diversionLinks??[])];
+    panel.innerHTML=`<div class="rd-channel-row">${items.map(i=>this.#channelItemHtml(i)).join('')}</div>`;
+    panel.hidden=items.length===0 || (snapshot.conversations.length>1 && !snapshot.activeId);
+    this.#bindChannelActions(panel,snapshot);
+  }
+
   #renderThread(snapshot: Snapshot): void {
     const node = this.#messagesNode;
     if (!node) {
       return;
     }
     const conversationChanged = this.#renderedConversation !== snapshot.activeId;
+    this.#renderChannel(snapshot);
     this.#renderedConversation = snapshot.activeId;
     const previousCount = node.querySelectorAll('.rd-msg').length;
     const shouldStick = this.#atBottom || conversationChanged || snapshot.messages.length > previousCount;
 
     if (snapshot.messages.length === 0) {
       node.innerHTML = `<div class="rd-empty">
-        <span class="rd-avatar lg">${ICONS.chat}</span>
-        <p>${escapeHtml(snapshot.welcomeMessage || '你好！有问题随时问我，我们会尽快回复。')}</p>
-      </div>`;
+        <span class="rd-avatar sm">${ICONS.chat}</span>
+        <div><p>${escapeHtml(snapshot.automation?.openReply || snapshot.welcomeMessage || '你好！有问题随时问我，我们会尽快回复。')}</p><small>可以发送文字、图片或文件，方便我们了解你的问题</small></div>
+      </div>${this.#welcomeSuggestions(snapshot)}`;
+      this.#bindChannelActions(node,snapshot);
     } else {
       const parts: string[] = [];
       if (snapshot.hasMore) {
@@ -663,7 +806,8 @@ export class WidgetView {
     if (attachment.contentType.startsWith('audio/')) {
       return `<audio class="rd-audio" controls preload="metadata" src="${escapeAttr(url)}"></audio>`;
     }
-    return `<a class="rd-file" href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer">
+    const downloadUrl = url.startsWith('blob:') ? url : `${url}${url.includes('?') ? '&' : '?'}download=1`;
+    return `<a class="rd-file" href="${escapeAttr(downloadUrl)}" download="${escapeAttr(attachment.fileName)}" rel="noopener noreferrer">
       <span class="rd-file-name">${escapeHtml(attachment.fileName)}</span>
       <span class="rd-file-size">${escapeHtml(formatSize(attachment.sizeBytes))}</span>
     </a>`;
@@ -693,9 +837,7 @@ export class WidgetView {
       return;
     }
     bar.hidden = !this.#searchOpen;
-    if (this.#searchOpen) {
-      (panel.querySelector('.rd-avatar') as HTMLElement).hidden = true;
-    }
+    (panel.querySelector('.rd-avatar') as HTMLElement).hidden = this.#searchOpen;
   }
 
   #renderResults(snapshot: Snapshot): void {
@@ -704,7 +846,12 @@ export class WidgetView {
       return;
     }
     const { search } = snapshot;
-    if (!this.#searchOpen || !search.query) {
+    if (this.#searchOpen && !search.query) {
+      node.hidden = false;
+      node.innerHTML = '<div class="rd-results-head">查找聊天记录</div><div class="rd-results-head">输入关键词搜索当前会话，按回车立即查找。</div>';
+      return;
+    }
+    if (!this.#searchOpen) {
       node.hidden = true;
       node.innerHTML = '';
       return;
@@ -734,6 +881,8 @@ export class WidgetView {
         }
         this.#searchOpen = false;
         this.#syncSearchBar();
+        node.hidden = true;
+        this.#handlers.onClearSearch();
         target.scrollIntoView({ block: 'center', behavior: 'smooth' });
         target.classList.add('is-flash');
         setTimeout(() => target.classList.remove('is-flash'), 1_600);
@@ -803,27 +952,28 @@ export class WidgetView {
   }
 
   async #startRecording(): Promise<void> {
-    if (this.#recording) {
+    if (this.#recording || this.#requestingMicrophone) {
       return;
     }
+    this.#requestingMicrophone = true;
+    const mic = this.#root.querySelector('.rd-mic') as HTMLButtonElement | null;
+    if (mic) { mic.disabled = true; mic.setAttribute('aria-label', '等待麦克风权限'); }
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch {
-      this.#flashRecordingError('无法访问麦克风，请检查浏览器权限');
+      stream = await requestMicrophone(() => navigator.mediaDevices.getUserMedia({ audio: true }));
+    } catch (error) {
+      this.#flashRecordingError(error instanceof Error && error.message.includes('授权未完成') ? error.message : '无法访问麦克风，请检查浏览器权限');
       return;
+    } finally {
+      this.#requestingMicrophone = false;
+      if (mic) { mic.disabled = false; mic.setAttribute('aria-label', '录制语音'); }
     }
     const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((type) =>
       MediaRecorder.isTypeSupported(type),
     );
     const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
     this.#recorder = recorder;
-    this.#recordChunks = [];
-    recorder.addEventListener('dataavailable', (event) => {
-      if (event.data.size > 0) {
-        this.#recordChunks.push(event.data);
-      }
-    });
+    this.#recordChunks = collectRecordingChunks(recorder);
     recorder.addEventListener('stop', () => {
       stream.getTracks().forEach((track) => track.stop());
     });
@@ -905,6 +1055,8 @@ export class WidgetView {
     return `
 :host { all: initial; }
 * { box-sizing: border-box; }
+/* 隐藏属性必须压过组件布局，避免文件输入框或导航按钮泄漏到界面。 */
+[hidden] { display: none !important; }
 .rd-launcher-slot, .rd-panel-slot { position: fixed; z-index: ${this.#options.zIndex}; ${side}: 20px; }
 .rd-launcher-slot { bottom: 20px; }
 .rd-panel-slot { bottom: 20px; }
@@ -923,10 +1075,10 @@ export class WidgetView {
 }
 .rd-launcher.is-open .rd-launcher-label { display: none; }
 .rd-panel {
-  position: fixed; bottom: 20px; ${side}: 20px; width: 380px; max-width: calc(100vw - 32px);
+  position: fixed; bottom: 20px; ${side}: 20px; width: 400px; max-width: calc(100vw - 32px);
   height: min(640px, calc(100vh - 40px)); display: flex; flex-direction: column; overflow: hidden;
-  border-radius: 8px; background: ${light ? '#ffffff' : '#151b1a'}; color: ${light ? '#1b2422' : '#eef2f1'};
-  border: 1px solid ${light ? '#d7dedb' : '#2a3431'};
+  border-radius: 12px; background: ${light ? '#ffffff' : '#171b24'}; color: ${light ? '#1f2329' : '#eef2f1'};
+  border: 1px solid ${light ? '#e5e6eb' : '#2a3431'}; box-shadow: 0 8px 40px rgba(31,35,41,.12);
   font: 14px/1.55 system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 .rd-panel[hidden] { display: none; }
@@ -936,7 +1088,7 @@ ${this.#options.embedded ? `
 ` : ''}
 .rd-header {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 16px 20px; background: ${light ? '#ffffff' : '#1e1f24'}; color: ${light ? '#111827' : '#ffffff'};
+  padding: 14px 18px; background: ${light ? '#ffffff' : '#1e1f24'}; color: ${light ? '#111827' : '#ffffff'};
   border-bottom: 1px solid ${light ? '#f3f4f6' : '#2b2f37'};
 }
 .rd-header-main { display: flex; align-items: center; gap: 12px; min-width: 0; }
@@ -956,7 +1108,7 @@ ${this.#options.embedded ? `
 .rd-avatar.sm svg { width: 15px; height: 15px; }
 .rd-icon {
   display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0;
-  border: 0; border-radius: 10px; background: transparent; color: inherit; cursor: pointer; transition: all 0.2s;
+  border: 0; border-radius: 10px; background: transparent; color: inherit; cursor: pointer; transition: background-color 0.12s, color 0.12s, border-color 0.12s;
 }
 .rd-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 .rd-icon:hover { background: ${light ? '#f3f4f6' : '#374151'}; color: ${accent}; }
@@ -965,17 +1117,19 @@ ${this.#options.embedded ? `
 .rd-searchbar[hidden] { display: none; }
 .rd-search-input {
   flex: 1; border: 1px solid ${light ? '#e5e7eb' : '#374151'}; border-radius: 12px; padding: 8px 14px;
-  font: inherit; background: ${light ? '#f9fafb' : '#1f2937'}; color: inherit; outline: none; transition: all 0.2s;
+  font: inherit; background: ${light ? '#f9fafb' : '#1f2937'}; color: inherit; outline: none; transition: background-color 0.12s, color 0.12s, border-color 0.12s;
 }
 .rd-search-input:focus { border-color: ${accent}; background: ${light ? '#ffffff' : '#111827'}; }
 .rd-body { position: relative; flex: 1; min-height: 0; display: flex; background: ${light ? '#f9fafb' : '#111827'}; }
 .rd-thread { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.rd-messages { flex: 1; overflow-y: auto; padding: 20px 16px 8px; display: flex; flex-direction: column; gap: 16px; scrollbar-width: thin; }
+.rd-messages { background: ${light ? '#f7f8fa' : '#171b24'}; flex: 1; overflow-y: auto; padding: 20px 18px 12px; display: flex; flex-direction: column; gap: 16px; scrollbar-width: thin; }
 .rd-messages::-webkit-scrollbar { width: 6px; }
 .rd-messages::-webkit-scrollbar-thumb { background: ${light ? '#d1d5db' : '#4b5563'}; border-radius: 3px; }
-.rd-empty { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; color: ${light ? '#6b7280' : '#9ca3af'}; padding: 32px; }
-.rd-empty p { margin: 0; max-width: 260px; line-height: 1.6; }
-.rd-more { align-self: center; border: 1px solid ${light ? '#d7dedb' : '#2a3431'}; background: ${light ? '#ffffff' : '#1b2422'}; color: ${accent}; font: 500 13px system-ui; cursor: pointer; padding: 5px 12px; border-radius: 6px; }
+.rd-channel {padding:10px 16px;border-top:1px solid #edf0f5;background:${light ? '#fff' : '#1f2937'};max-height:104px;overflow:auto;flex-shrink:0}.rd-channel[hidden]{display:none}.rd-channel-row{display:flex;gap:8px;flex-wrap:wrap}.rd-channel-chip{font:inherit;font-size:12px;color:#3370ff;background:#f0f5ff;border:0;border-radius:6px;padding:7px 10px;text-decoration:none;cursor:pointer}.rd-welcome-suggestions{margin:12px 0 20px 38px}.rd-guide-title{color:#6b7280;font-size:12px;margin-bottom:8px}.rd-channel-card{display:flex;gap:12px;border:1px solid #edf0f5;border-radius:8px;padding:12px;margin:8px 0}.rd-channel-card img{width:56px;height:56px;object-fit:cover;border-radius:6px}.rd-channel-card p{font-size:12px;color:#6b7280;margin:5px 0}.rd-empty { display: flex; align-items: flex-start; gap: 10px; color: inherit; padding: 12px 0; }
+.rd-empty p { margin: 0; max-width: 280px; line-height: 1.8; padding: 12px 14px; border-radius: 3px 12px 12px; background: ${light ? '#ffffff' : '#1f2937'}; border: 1px solid ${light ? '#eef0f1' : '#374151'}; }
+.rd-empty small { display: block; max-width: 280px; margin-top: 12px; font-size: 11px; line-height: 1.7; color: ${light ? '#858d97' : '#a8aebb'}; }
+.rd-empty .rd-avatar { align-self: flex-start; }
+.rd-more { align-self: center; border: 1px solid ${light ? '#e5e6eb' : '#2a3431'}; background: ${light ? '#ffffff' : '#1f2329'}; color: ${accent}; font: 500 13px system-ui; cursor: pointer; padding: 5px 12px; border-radius: 6px; }
 .rd-more:hover { background: ${accent}0a; }
 .rd-day { align-self: center; font-size: 12px; font-weight: 500; color: ${light ? '#6b7280' : '#9ca3af'}; margin: 8px 0; }
 .rd-unread { display: flex; align-items: center; gap: 12px; font-size: 12px; font-weight: 500; color: #ef4444; margin: 8px 0; }
@@ -988,17 +1142,17 @@ ${this.#options.embedded ? `
 .rd-bubble-wrap { position: relative; display: flex; align-items: center; gap: 6px; max-width: 100%; }
 .rd-row.is-mine .rd-bubble-wrap { flex-direction: row-reverse; }
 .rd-bubble {
-  padding: 8px 12px; border-radius: 6px; background: ${light ? '#f0f3f2' : '#1f2937'};
+  padding: 8px 12px; border-radius: 8px; background: ${light ? '#ffffff' : '#1f2937'};
   color: ${light ? '#111827' : '#f9fafb'}; word-break: break-word; white-space: normal;
-  min-width: 0; border: 1px solid ${light ? '#e2e8e5' : '#374151'};
+  min-width: 0; border: 1px solid ${light ? '#e5e6eb' : '#374151'};
 }
-.rd-row.is-mine .rd-bubble { background: ${accent}; color: #ffffff; border-color: ${accent}; }
+.rd-row.is-mine .rd-bubble { background: ${light ? accent + "14" : accent + "38"}; color: ${light ? "#1f2329" : "#eef2f6"}; border-color: ${light ? accent + "20" : accent + "44"}; }
 .rd-bubble a { color: inherit; text-decoration: underline; }
 .rd-bubble img, .rd-bubble video { display: block; max-width: 100%; border-radius: 10px; }
 .rd-bubble audio { width: 100%; }
 .rd-bubble.is-recalled { font-size: 12px; opacity: .7; font-style: normal; }
 .rd-quote-btn {
-  opacity: 0; border: 1px solid ${light ? '#d7dedb' : '#2a3431'}; background: ${light ? '#ffffff' : '#1f2937'}; color: ${light ? '#6b7280' : '#9ca3af'}; cursor: pointer;
+  opacity: 0; border: 1px solid ${light ? '#e5e6eb' : '#2a3431'}; background: ${light ? '#ffffff' : '#1f2937'}; color: ${light ? '#6b7280' : '#9ca3af'}; cursor: pointer;
   width: 28px; height: 28px; border-radius: 6px; flex: none;
   display: flex; align-items: center; justify-content: center;
 }
@@ -1016,8 +1170,9 @@ ${this.#options.embedded ? `
   display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px;
   background: ${light ? '#f3f4f6' : '#374151'}; color: inherit; text-decoration: none; border: 1px solid ${light ? '#e5e7eb' : '#4b5563'};
 }
-.rd-file-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 190px; }
-.rd-file-size { opacity: .7; font-size: 12px; }
+.rd-bubble .rd-file { color: ${light ? '#1f2329' : '#eef2f1'}; }
+.rd-file-name { min-width: 0; flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 190px; }
+.rd-file-size { flex: none; white-space: nowrap; opacity: .7; font-size: 12px; }
 .rd-voice { display: flex; flex-direction: column; gap: 2px; min-width: 190px; }
 .rd-voice small { font-size: 11px; opacity: .75; }
 .rd-reactions { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -1032,7 +1187,7 @@ ${this.#options.embedded ? `
 .rd-state { font-size: 11px; }
 .rd-state.is-failed { display: inline-flex; align-items: center; gap: 3px; border: 0; background: transparent; color: #ff4d4f; cursor: pointer; padding: 0; font: inherit; font-size: 11px; }
 .rd-state.is-failed svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; }
-.rd-sys { align-self: center; font-size: 12px; color: ${light ? '#8c93a3' : '#8b91a0'}; background: ${light ? '#f0f3f2' : '#23262d'}; padding: 3px 8px; border-radius: 4px; }
+.rd-sys { align-self: center; font-size: 12px; color: ${light ? '#8c93a3' : '#8b91a0'}; background: ${light ? '#f5f6f8' : '#23262d'}; padding: 3px 8px; border-radius: 4px; }
 .rd-row.is-flash .rd-bubble { outline: 2px solid ${accent}88; }
 .rd-pinned { display: flex; align-items: center; gap: 8px; margin: 8px 12px 0; padding: 6px 10px; border-radius: 10px; background: ${light ? '#f5f7fb' : '#23262d'}; font-size: 12px; color: ${light ? '#5b6172' : '#a8aebb'}; }
 .rd-pinned[hidden] { display: none; }
@@ -1076,6 +1231,29 @@ ${this.#options.embedded ? `
 .rd-composer { display: flex; flex-direction: column; border-top: 1px solid ${light ? '#f3f4f6' : '#2b2f37'}; background: ${light ? '#ffffff' : '#1e1f24'}; }
 .rd-composer[hidden] { display: none; }
 .rd-composer-row { display: flex; align-items: flex-end; gap: 8px; padding: 12px 16px; }
+.rd-composer-row { align-items: center; gap: 6px; padding: 10px 12px; background: ${light ? '#f5f6f7' : '#1e1f24'}; }
+.rd-composer-row .rd-icon { flex: none; width: 34px; height: 40px; padding: 5px; background: transparent; color: ${light ? '#39433f' : '#d1d5db'}; }
+.rd-composer-row .rd-icon svg { width: 25px; height: 25px; }
+.rd-tools { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px 8px; padding: 22px 16px 16px; background: ${light ? '#f5f6f7' : '#1e1f24'}; border-top: 1px solid ${light ? '#e8ebed' : '#374151'}; }
+.rd-tool { display: flex; flex-direction: column; align-items: center; gap: 9px; border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; font-size: 12px; }
+.rd-tool span { display: grid; place-items: center; width: 54px; height: 54px; background: ${light ? '#ffffff' : '#2b3038'}; border-radius: 14px; border: 1px solid ${light ? '#eceeef' : '#374151'}; }
+.rd-tool svg { width: 26px; height: 26px; }
+.rd-tool:hover span { border-color: ${accent}; }
+.rd-tools-hint { grid-column: 1 / -1; margin: 0; font-size: 11px; text-align: center; color: ${light ? '#858d97' : '#a8aebb'}; line-height: 1.6; }
+.rd-upload-status { padding: 4px 16px 10px; font-size: 12px; color: ${accent}; }
+.rd-emojis { flex-shrink: 0; height: 202px; box-sizing: border-box; contain: layout paint; padding: 8px 12px; background: ${light ? '#f5f6f7' : '#1e1f24'}; }
+.rd-emoji-tabs { display:flex; gap:8px; margin-bottom:8px; }
+.rd-emoji-tabs button { flex:1; border:0; padding:7px 0; border-radius:6px; background:transparent; color:inherit; cursor:pointer; font:inherit; font-size:12px; }
+.rd-emoji-tabs button[aria-selected="true"] { background:#e5edff; color:#3370ff; }
+.rd-emoji-grid { display:grid; grid-template-columns:repeat(8,minmax(0,1fr)); gap:6px; }
+.rd-icon, .rd-emoji, .rd-emoji-tabs button, .rd-tool { touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
+.rd-composer { flex-shrink:0; }
+.rd-tools { flex-shrink:0; contain:layout paint; }
+.rd-emoji { border: 0; border-radius: 8px; background: transparent; padding: 6px 0; font-size: 24px; cursor: pointer; }
+.rd-emoji:hover { background: ${light ? '#e7ebed' : '#374151'}; }
+.rd-composer-row .rd-input { min-width: 0; border: 0; border-radius: 8px; background: ${light ? '#ffffff' : '#111827'}; padding: 10px; font-size: 15px; }
+.rd-composer-row .rd-send { width: 52px; font: 500 13px system-ui; border-radius: 8px; }
+.rd-composer { padding-bottom: env(safe-area-inset-bottom, 0px); }
 .rd-reply { display: flex; align-items: center; gap: 8px; padding: 8px 16px 0; font-size: 12px; color: ${light ? '#6b7280' : '#9ca3af'}; }
 .rd-reply[hidden] { display: none; }
 .rd-reply-icon svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; display: block; color: ${accent}; }
@@ -1086,7 +1264,7 @@ ${this.#options.embedded ? `
 .rd-reply .rd-icon svg { width: 14px; height: 14px; }
 .rd-input {
   flex: 1; resize: none; border: 1px solid ${light ? '#e5e7eb' : '#374151'}; border-radius: 14px; padding: 10px 14px;
-  font: inherit; line-height: 1.5; max-height: 120px; background: ${light ? '#f9fafb' : '#111827'}; color: inherit; outline: none; transition: all 0.2s;
+  font: inherit; line-height: 1.5; max-height: 120px; background: ${light ? '#f9fafb' : '#111827'}; color: inherit; outline: none; transition: background-color 0.12s, color 0.12s, border-color 0.12s;
 }
 .rd-input:focus { border-color: ${accent}; background: ${light ? '#ffffff' : '#111827'}; }
 .rd-send {

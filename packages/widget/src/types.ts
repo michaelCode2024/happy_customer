@@ -93,7 +93,11 @@ export interface Conversation {
   updatedAt: string;
 }
 
+export interface ChannelItem { id: string; title: string; description?: string; imageUrl?: string; action: "REPLY" | "LINK" | "HANDOFF"; value: string; }
+export interface ChannelPresentation { channelTitle?: string; channelSubtitle?: string; openReply?: string; guideText?: string; guideQuestions?: string[]; diversionLinks?: ChannelItem[]; menuItems?: ChannelItem[]; quickLinks?: ChannelItem[]; cards?: ChannelItem[]; }
+
 export interface InboxInfo {
+ automation?: ChannelPresentation;
   id: string;
   name: string;
   welcomeMessage?: string;
@@ -145,6 +149,11 @@ export interface SearchHit {
 }
 
 export interface ConversationPage {
+ automation?: ChannelPresentation;
+  agentsOnline?: number;
+  aiEnabled?: boolean;
+  welcomeMessage?: string;
+  offlineMessage?: string;
   items: Conversation[] | null;
 }
 

@@ -9,6 +9,8 @@ export interface RelayDeskWidgetOptions {
   inboxKey: string;
   /** Stable id for the visitor from the host application (user id, phone...). */
   externalId?: string;
+  /** 客户后端签发的短期身份票据，API Key 不得传到客户端。 */
+  identityToken?: string;
   displayName?: string;
   email?: string;
   phone?: string;
@@ -36,6 +38,8 @@ export interface RelayDeskWidgetOptions {
   storage?: string;
   /** Skip the launcher and speak to the host page, for App WebView embeds. */
   embedded?: boolean;
+  /** 会话来源用于渠道统计，H5 页面默认 H5，App WebView 可指定 APP。 */
+  source?: "WEB" | "H5" | "APP" | "PC";
   /**
    * Target origin for window.parent.postMessage when the widget runs inside an
    * iframe. Defaults to '*' so a host product can listen without pre-sharing
@@ -68,7 +72,7 @@ export interface WidgetBridge {
   postMessage?: (payload: string) => void;
   onMessage?: (handler: (payload: string) => void) => void;
   /** Native clients can supply the visitor identity directly. */
-  getVisitor?: () => { externalId?: string; displayName?: string; email?: string; phone?: string } | undefined;
+  getVisitor?: () => { externalId?: string; identityToken?: string; displayName?: string; email?: string; phone?: string } | undefined;
 }
 
 export const DEFAULTS = {
@@ -76,9 +80,9 @@ export const DEFAULTS = {
   subtitle: '在线咨询',
   welcomeMessage: '',
   offlineMessage: '',
-  placeholder: '请输入您的问题…',
-  // 与坐席控制台青绿种子色对齐，避免默认 SaaS 蓝。
-  primaryColor: '#087F72',
+  placeholder: '发送消息…',
+  // 默认使用聊桥品牌蓝；接入企业可覆盖，不改已有自定义主题。
+  primaryColor: '#3370FF',
   position: 'right' as const,
   theme: 'light' as const,
   launcher: 'bubble' as const,

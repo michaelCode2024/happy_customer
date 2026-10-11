@@ -125,6 +125,7 @@ function optionsFromScript(script: HTMLScriptElement): RelayDeskWidgetOptions | 
   if (script.dataset.externalId) {
     options.externalId = script.dataset.externalId;
   }
+  if (script.dataset.identityToken) options.identityToken = script.dataset.identityToken;
   if (script.dataset.displayName) {
     options.displayName = script.dataset.displayName;
   }

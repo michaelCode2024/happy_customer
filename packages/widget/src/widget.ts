@@ -32,7 +32,7 @@ export class RelayDeskWidgetElement extends HTMLElement {
     const resolved = resolveOptions(options);
     this.#options = resolved;
     this.#store = new ChatStore(resolved);
-    this.#view = new WidgetView(this.attachShadow({ mode: 'open' }), resolved, this.#store, {
+    this.#view = new WidgetView(this.shadowRoot ?? this.attachShadow({ mode: 'open' }), resolved, this.#store, {
       onToggle: () => this.toggle(),
       onClose: () => this.close(),
       onSend: (text) => void this.#store?.send(text),
@@ -183,11 +183,11 @@ export class RelayDeskWidgetElement extends HTMLElement {
   }
 
   #handleHostCommand(payload: string): void {
-    let parsed: { type?: string; content?: string; source?: string } = {};
+    let parsed: { type?: string; content?: string; source?: string; identityToken?: string } = {};
     try {
       parsed = typeof payload === 'string'
-        ? (JSON.parse(payload) as { type?: string; content?: string; source?: string })
-        : (payload as { type?: string; content?: string; source?: string });
+        ? JSON.parse(payload)
+        : payload;
     } catch {
       return;
     }
@@ -196,6 +196,12 @@ export class RelayDeskWidgetElement extends HTMLElement {
       return;
     }
     switch (parsed.type) {
+      case 'authenticate':
+        // 身份票据通过指定来源宿主传入，不进入 URL、浏览器历史或引荐日志。
+        if (typeof parsed.identityToken === 'string' && parsed.identityToken && this.#options?.parentOrigin && this.#options.parentOrigin !== '*') {
+          this.configure({ ...this.#options, externalId: undefined, identityToken: parsed.identityToken, autoOpen: true });
+        }
+        break;
       case 'open':
         this.open();
         break;
@@ -255,6 +261,7 @@ export function optionsFromElement(element: HTMLElement): RelayDeskWidgetOptions
   };
   const mapping: Array<[string, keyof RelayDeskWidgetOptions]> = [
     ['external-id', 'externalId'],
+    ['identity-token', 'identityToken'],
     ['display-name', 'displayName'],
     ['email', 'email'],
     ['phone', 'phone'],
