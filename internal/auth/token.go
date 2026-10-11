@@ -20,6 +20,7 @@ const (
 	KindWidget   = "widget"
 	KindAgent    = "agent"
 	KindPlatform = "platform"
+	KindIdentity = "visitor_identity"
 )
 
 // Roles are evaluated by the permission helpers in this package.
@@ -30,20 +31,23 @@ const (
 	RoleSupervisor = "SUPERVISOR"
 )
 
-var ErrUnauthorized = errors.New("token is invalid or expired")
+// 鉴权失败文案可能透传到客户端，保持中文。
+var ErrUnauthorized = errors.New("登录已失效或令牌无效，请重新登录")
 
 type Principal struct {
-	Kind      string    `json:"k"`
-	TenantID  uuid.UUID `json:"t"`
-	InboxID   uuid.UUID `json:"i,omitempty"`
-	VisitorID uuid.UUID `json:"v,omitempty"`
-	AgentID   uuid.UUID `json:"a,omitempty"`
-	Email     string    `json:"e,omitempty"`
-	Name      string    `json:"n,omitempty"`
-	Role      string    `json:"r,omitempty"`
-	SessionID uuid.UUID `json:"s,omitempty"`
-	IssuedAt  int64     `json:"iat"`
-	ExpiresAt int64     `json:"exp"`
+	PlatformAdminID uuid.UUID `json:"pa,omitempty"`
+	Kind            string    `json:"k"`
+	TenantID        uuid.UUID `json:"t"`
+	InboxID         uuid.UUID `json:"i,omitempty"`
+	VisitorID       uuid.UUID `json:"v,omitempty"`
+	AgentID         uuid.UUID `json:"a,omitempty"`
+	Email           string    `json:"e,omitempty"`
+	Name            string    `json:"n,omitempty"`
+	Role            string    `json:"r,omitempty"`
+	ExternalID      string    `json:"externalId,omitempty"`
+	SessionID       uuid.UUID `json:"s,omitempty"`
+	IssuedAt        int64     `json:"iat"`
+	ExpiresAt       int64     `json:"exp"`
 }
 
 // TokenService issues and verifies the signed, stateless tokens used by every
@@ -64,6 +68,11 @@ func (s *TokenService) IssueWidget(tenantID, inboxID, visitorID uuid.UUID) (stri
 	return s.issue(Principal{Kind: KindWidget, TenantID: tenantID, InboxID: inboxID, VisitorID: visitorID}, s.widgetTTL)
 }
 
+// 客户后端证明登录用户身份；票据不能当聊天令牌使用，且只绑定一个企业入口。
+func (s *TokenService) IssueVisitorIdentity(tenantID, inboxID uuid.UUID, externalID, name string) (string, error) {
+	return s.issue(Principal{Kind: KindIdentity, TenantID: tenantID, InboxID: inboxID, ExternalID: externalID, Name: name}, 5*time.Minute)
+}
+
 func (s *TokenService) IssueAgent(p Principal) (string, error) {
 	p.Kind = KindAgent
 	return s.issue(p, s.agentTTL)
@@ -72,6 +81,10 @@ func (s *TokenService) IssueAgent(p Principal) (string, error) {
 func (s *TokenService) IssuePlatform(label string) (string, error) {
 	p := Principal{Kind: KindPlatform, Name: label}
 	return s.issue(p, 24*time.Hour)
+}
+
+func (s *TokenService) IssuePlatformSession(adminID, sessionID uuid.UUID, label string) (string, error) {
+	return s.issue(Principal{Kind: KindPlatform, PlatformAdminID: adminID, SessionID: sessionID, Name: label}, 8*time.Hour)
 }
 
 func (s *TokenService) issue(p Principal, ttl time.Duration) (string, error) {

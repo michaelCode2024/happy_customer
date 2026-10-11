@@ -22,7 +22,8 @@ const (
 	argonKeyLength   = 32
 )
 
-var ErrInvalidCredentials = errors.New("email or password is incorrect")
+// 登录失败文案直接给控制台展示，须与界面语言一致（中文）。
+var ErrInvalidCredentials = errors.New("账号或密码错误")
 
 func init() {
 	if argonMemory < 8*1024 {
@@ -169,7 +170,7 @@ func (a *Authenticator) Login(ctx context.Context, email, password, tenantSlug s
 		return AgentAccount{}, errors.New("该坐席账号已被停用")
 	}
 	if account.TenantStatus != "ACTIVE" {
-		return AgentAccount{}, errors.New("该企业账号已停用，请联系 RelayDesk")
+		return AgentAccount{}, errors.New("该企业账号已停用，请联系平台管理员")
 	}
 	return account, nil
 }
