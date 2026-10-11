@@ -1,4 +1,10 @@
+import 'package:relaydesk_agent_console/src/util/group_window_stub.dart'
+    if (dart.library.html) 'package:relaydesk_agent_console/src/util/group_window_web.dart';
+import 'package:relaydesk_agent_console/src/ui/groups_page.dart';
+import 'package:relaydesk_agent_console/src/ui/automation_page.dart';
 import 'dart:async';
+import 'package:relaydesk_agent_console/src/ui/overview_page.dart';
+import 'package:relaydesk_agent_console/src/ui/brand.dart';
 
 import 'package:flutter/material.dart';
 
@@ -11,17 +17,24 @@ import 'package:relaydesk_agent_console/src/ui/conversation_list.dart';
 import 'package:relaydesk_agent_console/src/ui/integration_page.dart';
 import 'package:relaydesk_agent_console/src/ui/knowledge_page.dart';
 import 'package:relaydesk_agent_console/src/ui/settings_page.dart';
+import 'package:relaydesk_agent_console/src/ui/tenant_admin_page.dart';
 import 'package:relaydesk_agent_console/src/ui/stats_page.dart';
+import 'package:relaydesk_agent_console/src/theme.dart';
 import 'package:relaydesk_agent_console/src/ui/visitor_sidebar.dart';
 import 'package:relaydesk_agent_console/src/util/attachment_picker.dart';
 import 'package:relaydesk_agent_console/src/util/voice_player.dart';
 
 /// The console's top-level sections.
 enum WorkbenchSection {
+  overview,
   conversations,
+  groups,
   stats,
   knowledge,
   integrations,
+  enterprise,
+  automation,
+  channels,
   settings
 }
 
@@ -61,10 +74,29 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
   late final WorkbenchController _workbench;
   late final AttachmentPicker _picker;
 
-  WorkbenchSection _section = WorkbenchSection.conversations;
+  WorkbenchSection _section = WorkbenchSection.overview;
 
   /// True while the customer record is open as a pushed page on a narrow window.
   bool _profileOpen = false;
+  Timer? _planRefresh;
+  Map<String, dynamic> _features = {};
+  bool _loadingPlan = false;
+  Future<void> _refreshPlan() async {
+    if (_loadingPlan) return;
+    _loadingPlan = true;
+    try {
+      final result = await widget.session.api.entitlements();
+      if (mounted)
+        setState(() =>
+            _features = Map<String, dynamic>.from(result['features'] as Map));
+    } catch (_) {
+      // The API rechecks the plan on every protected operation.
+    } finally {
+      _loadingPlan = false;
+    }
+  }
+
+  bool _has(String feature) => _features[feature] == true;
 
   @override
   void initState() {
@@ -74,13 +106,113 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
       selfId: widget.session.agent?.id ?? '',
     );
     _picker = widget.picker ?? ImageAttachmentPicker();
+    unawaited(_refreshPlan());
+    _planRefresh =
+        Timer.periodic(const Duration(seconds: 5), (_) => _refreshPlan());
+    _workbench.onGroupUpdated = checkIncomingCall;
     _workbench.connectRealtime();
     unawaited(_workbench.refreshConversations());
     unawaited(_workbench.loadReferenceData());
   }
 
+  final Set<String> noticedCalls = {};
+  bool incomingDialog = false;
+  Future<void> checkIncomingCall(String id) async {
+    if (!_has('groups') || incomingDialog || groupCallPanelIsOpen || !mounted)
+      return;
+    try {
+      final response =
+          await widget.session.api.groupRequest('GET', '/$id/calls');
+      if (groupCallPanelIsOpen || !mounted) return;
+      final calls = (response['items'] as List).cast<Map<String, dynamic>>();
+      for (final call in calls) {
+        if (call['state'] != 'RINGING' ||
+            call['recipientKind'] != 'agent' ||
+            call['recipientId'] != widget.session.agent?.id ||
+            noticedCalls.contains(call['id'])) {
+          continue;
+        }
+        noticedCalls.add(call['id'] as String);
+        incomingDialog = true;
+        if (!mounted) return;
+        await showDialog<void>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+                    title: const Text('语音来电'),
+                    content: Text('${call['callerName']} 邀请你进行语音通话'),
+                    actions: [
+                      TextButton(
+                          onPressed: () async {
+                            try {
+                              await widget.session.api.groupRequest(
+                                  'POST', '/$id/calls/${call['id']}',
+                                  body: {'action': 'decline'});
+                              if (ctx.mounted) Navigator.pop(ctx);
+                            } catch (e) {
+                              if (mounted)
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text(e.toString())));
+                            }
+                          },
+                          child: const Text('拒接')),
+                      FilledButton(
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            _openGroupCall(id);
+                          },
+                          child: const Text('打开通话'))
+                    ]));
+        incomingDialog = false;
+        return;
+      }
+      final conference =
+          await widget.session.api.groupRequest('GET', '/$id/rooms');
+      if (!mounted || groupCallPanelIsOpen) return;
+      final room = conference['room'] as Map<String, dynamic>?;
+      if (room != null && noticedCalls.add('room-${room['id']}')) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(room['mediaKind'] == 'VIDEO' ? '群视频通话已发起' : '群语音通话已发起'),
+          duration: const Duration(seconds: 8),
+          action: SnackBarAction(
+              label: '打开通话', onPressed: () => _openGroupCall(id)),
+        ));
+      }
+    } catch (_) {
+      incomingDialog = false;
+    }
+  }
+
+  void _openGroupCall(String id) {
+    showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => Dialog(
+            insetPadding: const EdgeInsets.all(12),
+            child: SizedBox(
+                width: 900,
+                height: 720,
+                child: Column(children: [
+                  Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 4),
+                      child: Row(children: [
+                        const Expanded(
+                            child: Text('群聊与音视频通话',
+                                style: TextStyle(fontWeight: FontWeight.w600))),
+                        IconButton(
+                            tooltip: '关闭通话面板',
+                            onPressed: () => Navigator.pop(ctx),
+                            icon: const Icon(Icons.close))
+                      ])),
+                  Expanded(
+                      child: groupCallPanel(id, widget.session.api.token,
+                          widget.session.agent!.id))
+                ]))));
+  }
+
   @override
   void dispose() {
+    _planRefresh?.cancel();
     _workbench.dispose();
     // The player is a process-wide singleton, so it is released rather than
     // disposed: signing out and back in must not hand the new session a dead
@@ -95,16 +227,27 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
   List<_SectionSpec> _sections(AgentProfile? agent) {
     final canReport = agent?.canViewReports ?? false;
     return <_SectionSpec>[
+      if (_has('groups'))
+        const _SectionSpec(
+            section: WorkbenchSection.groups,
+            label: '群聊',
+            icon: Icons.groups_outlined,
+            selectedIcon: Icons.groups),
+      const _SectionSpec(
+          section: WorkbenchSection.overview,
+          label: '工作概览',
+          icon: Icons.space_dashboard_outlined,
+          selectedIcon: Icons.space_dashboard),
       const _SectionSpec(
         section: WorkbenchSection.conversations,
-        label: '会话',
+        label: '收件箱',
         icon: Icons.forum_outlined,
         selectedIcon: Icons.forum,
       ),
       if (canReport)
         const _SectionSpec(
           section: WorkbenchSection.stats,
-          label: '统计',
+          label: '数据统计',
           icon: Icons.insights_outlined,
           selectedIcon: Icons.insights,
         ),
@@ -114,19 +257,40 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
         icon: Icons.menu_book_outlined,
         selectedIcon: Icons.menu_book,
       ),
-      if (agent?.role == 'OWNER' || agent?.role == 'ADMIN')
+      if (_has('integrations') &&
+          (agent?.role == 'OWNER' || agent?.role == 'ADMIN'))
         const _SectionSpec(
           section: WorkbenchSection.integrations,
-          label: '开发接入',
+          label: '应用接入',
           icon: Icons.integration_instructions_outlined,
           selectedIcon: Icons.integration_instructions,
         ),
+      if (agent?.role == 'OWNER' || agent?.role == 'ADMIN') ...[
+        if (_has('automation'))
+          const _SectionSpec(
+              section: WorkbenchSection.automation,
+              label: '自动回复',
+              icon: Icons.auto_awesome_outlined,
+              selectedIcon: Icons.auto_awesome),
+        if (_has('channels'))
+          const _SectionSpec(
+              section: WorkbenchSection.channels,
+              label: '渠道管理',
+              icon: Icons.hub_outlined,
+              selectedIcon: Icons.hub),
+      ],
       const _SectionSpec(
         section: WorkbenchSection.settings,
-        label: '设置',
+        label: '个人设置',
         icon: Icons.settings_outlined,
         selectedIcon: Icons.settings,
       ),
+      if (agent?.role == 'OWNER' || agent?.role == 'ADMIN')
+        const _SectionSpec(
+            section: WorkbenchSection.enterprise,
+            label: '企业管理',
+            icon: Icons.people_outline,
+            selectedIcon: Icons.people),
     ];
   }
 
@@ -135,6 +299,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     return ListenableBuilder(
       listenable: widget.session,
       builder: (context, _) {
+        _workbench.readingThread = _section == WorkbenchSection.conversations;
         final agent = widget.session.agent;
         final sections = _sections(agent);
         // A role change (or a stale stored session) can make the current section
@@ -149,9 +314,17 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
             final body = _bodyFor(width);
             if (!useRail) {
               return Scaffold(
-                appBar: _compactAppBar(agent),
+                // 这两个页面已有自己的工具栏，窄屏不再重复占用一行标题。
+                appBar: _section == WorkbenchSection.integrations ||
+                        _section == WorkbenchSection.enterprise ||
+                        _section == WorkbenchSection.automation ||
+                        _section == WorkbenchSection.channels
+                    ? null
+                    : _compactAppBar(agent),
                 body: body,
                 bottomNavigationBar: NavigationBar(
+                  labelBehavior:
+                      NavigationDestinationLabelBehavior.onlyShowSelected,
                   selectedIndex:
                       sections.indexWhere((spec) => spec.section == _section),
                   onDestinationSelected: (index) =>
@@ -167,46 +340,67 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                 ),
               );
             }
-            final extended = width >= 1240;
+            // 宽屏：细图标轨 + 内容浮层，会话页不再叠一层厚顶栏抢高度。
+            final showChrome = _section != WorkbenchSection.conversations;
             return Scaffold(
               body: Row(
-                children: <Widget>[
-                  NavigationRail(
-                    extended: extended,
-                    selectedIndex:
-                        sections.indexWhere((spec) => spec.section == _section),
-                    onDestinationSelected: (index) =>
-                        setState(() => _section = sections[index].section),
-                    leading: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      child: _RailLeading(agent: agent, extended: extended),
+                children: [
+                  ListenableBuilder(
+                    listenable: _workbench,
+                    builder: (context, _) => ConsoleIconRail(
+                      selectedIndex: sections
+                          .indexWhere((spec) => spec.section == _section),
+                      onSelected: (index) =>
+                          setState(() => _section = sections[index].section),
+                      items: [
+                        for (final spec in sections)
+                          WorkspaceNavItem(
+                            spec.label,
+                            _section == spec.section
+                                ? spec.selectedIcon
+                                : spec.icon,
+                            count:
+                                spec.section == WorkbenchSection.conversations
+                                    ? _workbench.queued
+                                    : 0,
+                          ),
+                      ],
+                      avatar: _RailLeading(agent: agent, extended: false),
+                      footer: _ConnectionBadge(workbench: _workbench),
                     ),
-                    trailing: Expanded(
-                      child: Align(
-                        alignment: Alignment.bottomCenter,
-                        child: Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: _ConnectionBadge(workbench: _workbench),
+                  ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surface,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.outlineVariant,
+                          ),
+                          boxShadow: RelayTheme.softShadow(
+                            Theme.of(context).brightness,
+                          ),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(18),
+                          child: Column(
+                            children: [
+                              if (showChrome)
+                                _WorkbenchChromeBar(
+                                  tenantName:
+                                      widget.session.tenant?.name ?? '企业工作空间',
+                                  sectionTitle: _sectionTitle(_section),
+                                  workbench: _workbench,
+                                ),
+                              Expanded(child: body),
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                    destinations: <NavigationRailDestination>[
-                      for (final spec in sections)
-                        NavigationRailDestination(
-                          icon: Badge(
-                            isLabelVisible: spec.section ==
-                                    WorkbenchSection.conversations &&
-                                _workbench.queued > 0,
-                            label: Text('${_workbench.queued}'),
-                            child: Icon(spec.icon),
-                          ),
-                          selectedIcon: Icon(spec.selectedIcon),
-                          label: Text(spec.label),
-                        ),
-                    ],
                   ),
-                  const VerticalDivider(width: 1),
-                  Expanded(child: body),
                 ],
               ),
             );
@@ -218,10 +412,29 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
 
   Widget _bodyFor(double width) {
     switch (_section) {
+      case WorkbenchSection.groups:
+        return GroupsPage(session: widget.session);
+      case WorkbenchSection.overview:
+        return OverviewPage(
+            workbench: _workbench,
+            name: widget.session.agent?.displayName ?? '',
+            onInbox: () =>
+                setState(() => _section = WorkbenchSection.conversations),
+            onKnowledge: () =>
+                setState(() => _section = WorkbenchSection.knowledge));
+      case WorkbenchSection.automation:
+        return AutomationPage(
+            key: const ValueKey('automation'), api: widget.session.api);
+      case WorkbenchSection.channels:
+        return AutomationPage(
+            key: const ValueKey('channels'),
+            api: widget.session.api,
+            channels: true);
       case WorkbenchSection.stats:
         return StatsPage(session: widget.session, workbench: _workbench);
       case WorkbenchSection.knowledge:
-        return KnowledgePage(session: widget.session, workbench: _workbench);
+        return KnowledgePage(
+            session: widget.session, workbench: _workbench, canAI: _has('ai'));
       case WorkbenchSection.settings:
         return SettingsPage(
           session: widget.session,
@@ -230,6 +443,10 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
         );
       case WorkbenchSection.integrations:
         return IntegrationPage(api: widget.session.api);
+      case WorkbenchSection.enterprise:
+        return TenantAdminPage(
+            api: widget.session.api,
+            tenantSlug: widget.session.tenant?.slug ?? '');
       case WorkbenchSection.conversations:
         return _conversations(width);
     }
@@ -242,7 +459,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     );
     // Three panes need genuine room. Below this the customer record is pushed on
     // top of the thread instead of shrinking it into uselessness.
-    final inlineProfile = width >= 1400;
+    final inlineProfile = width >= 1260;
     final sideBySide = width >= 760;
 
     if (!sideBySide) {
@@ -265,10 +482,18 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     return Row(
       children: <Widget>[
         SizedBox(
-          width: width >= 1100 ? 340 : 300,
-          child: list,
+          width: width >= 1100 ? 320 : 292,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border(
+                right: BorderSide(
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                ),
+              ),
+            ),
+            child: list,
+          ),
         ),
-        const VerticalDivider(width: 1),
         Expanded(
           child: _ProfileScope(
             open: !inlineProfile && _profileOpen,
@@ -278,10 +503,18 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
           ),
         ),
         if (inlineProfile) ...<Widget>[
-          const VerticalDivider(width: 1),
-          SizedBox(
-            width: 320,
-            child: VisitorSidebar(workbench: _workbench),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border(
+                left: BorderSide(
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                ),
+              ),
+            ),
+            child: SizedBox(
+              width: 292,
+              child: VisitorSidebar(workbench: _workbench),
+            ),
           ),
         ],
       ],
@@ -317,11 +550,16 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
   }
 
   static String _sectionTitle(WorkbenchSection section) => switch (section) {
-        WorkbenchSection.conversations => '会话',
-        WorkbenchSection.stats => '统计',
+        WorkbenchSection.groups => '群聊',
+        WorkbenchSection.overview => '工作概览',
+        WorkbenchSection.conversations => '收件箱',
+        WorkbenchSection.stats => '数据统计',
         WorkbenchSection.knowledge => '知识库',
-        WorkbenchSection.integrations => '开发接入',
-        WorkbenchSection.settings => '设置',
+        WorkbenchSection.integrations => '应用接入',
+        WorkbenchSection.settings => '个人设置',
+        WorkbenchSection.enterprise => '企业管理',
+        WorkbenchSection.automation => '自动回复',
+        WorkbenchSection.channels => '渠道管理',
       };
 }
 
@@ -337,6 +575,63 @@ class _SectionSpec {
   final String label;
   final IconData icon;
   final IconData selectedIcon;
+}
+
+/// 非会话页的轻顶栏：企业名 + 当前模块，避免再占一整条沉重 AppBar。
+class _WorkbenchChromeBar extends StatelessWidget {
+  const _WorkbenchChromeBar({
+    required this.tenantName,
+    required this.sectionTitle,
+    required this.workbench,
+  });
+
+  final String tenantName;
+  final String sectionTitle;
+  final WorkbenchController workbench;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Container(
+      height: 54,
+      padding: const EdgeInsets.symmetric(horizontal: 18),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: scheme.primaryContainer.withOpacity(0.7),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              tenantName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: scheme.primary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Icon(Icons.chevron_right, size: 16, color: scheme.outline),
+          const SizedBox(width: 4),
+          Text(
+            sectionTitle,
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const Spacer(),
+          _ConnectionBadge(workbench: workbench),
+        ],
+      ),
+    );
+  }
 }
 
 /// The avatar and tenant name at the top of the rail.

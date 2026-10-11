@@ -1,3 +1,5 @@
+import 'package:relaydesk_agent_console/src/util/message_alert_stub.dart'
+    if (dart.library.html) 'package:relaydesk_agent_console/src/util/message_alert_web.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -49,7 +51,8 @@ class WorkbenchController extends ChangeNotifier {
 
   // ------------------------------------------------------------------- state
 
-  QueueFilter _filter = QueueFilter.mine;
+  // 默认完整收件箱，避免新咨询落在待分配或其他坐席名下时被误认为丢消息。
+  QueueFilter _filter = QueueFilter.all;
   String? _inboxFilter;
   String _search = '';
   bool _includeResolved = false;
@@ -87,6 +90,10 @@ class WorkbenchController extends ChangeNotifier {
   /// the agent reads.
   int _readBoundary = 0;
 
+  /// 当前会话里访客已读 / 已送达的最大序号，驱动坐席气泡回执。
+  int _visitorLastReadSequence = 0;
+  int _visitorLastDeliveredSequence = 0;
+
   /// The highest sequence this console has rendered, reported back as a
   /// delivery receipt. Delivery and reading are separate: a thread that is open
   /// but not being looked at has delivered its messages without anyone reading
@@ -111,6 +118,7 @@ class WorkbenchController extends ChangeNotifier {
   StreamSubscription<SocketState>? _stateSubscription;
   StreamSubscription<void>? _reconnectSubscription;
   Timer? _listDebounce;
+  Timer? _syncTimer;
 
   /// Guards against two overlapping full reloads: the socket can deliver a burst
   /// of events (a handoff creates a message and an assignment at once), and each
@@ -191,6 +199,40 @@ class WorkbenchController extends ChangeNotifier {
       _messages.any((message) => message.sequence > _readBoundary) &&
       _messages.any((message) => message.sequence <= _readBoundary);
 
+  int get visitorLastReadSequence => _visitorLastReadSequence;
+
+  int get visitorLastDeliveredSequence => _visitorLastDeliveredSequence;
+
+  /// 坐席发出去的公开消息回执；访客消息 / 系统消息返回 [MessageReceipt.none]。
+  MessageReceipt receiptFor(ChatMessage message) {
+    if (!message.isFromAgent || message.isPrivate || message.isDeleted) {
+      if (message.delivery == DeliveryState.sending) {
+        return MessageReceipt.sending;
+      }
+      if (message.delivery == DeliveryState.failed) {
+        return MessageReceipt.failed;
+      }
+      return MessageReceipt.none;
+    }
+    if (message.delivery == DeliveryState.sending) {
+      return MessageReceipt.sending;
+    }
+    if (message.delivery == DeliveryState.failed) {
+      return MessageReceipt.failed;
+    }
+    final sequence = message.sequence;
+    if (sequence <= 0) {
+      return MessageReceipt.unread;
+    }
+    if (sequence <= _visitorLastReadSequence) {
+      return MessageReceipt.read;
+    }
+    if (sequence <= _visitorLastDeliveredSequence) {
+      return MessageReceipt.delivered;
+    }
+    return MessageReceipt.unread;
+  }
+
   List<AgentSummary> get agents => _agents;
 
   List<CannedResponse> get canned => _canned;
@@ -200,14 +242,17 @@ class WorkbenchController extends ChangeNotifier {
   SocketState get socketState => _socketState;
 
   /// True while the visitor on the open thread is typing.
-  bool get visitorTyping => _typingConversationId != null &&
+  bool get visitorTyping =>
+      _typingConversationId != null &&
       _selectedId != null &&
       _typingConversationId == _selectedId;
 
   /// Canned responses that apply to the open conversation's inbox.
   List<CannedResponse> get cannedForSelection {
     final inboxId = selected?.inboxId ?? '';
-    return _canned.where((entry) => entry.appliesTo(inboxId)).toList(growable: false);
+    return _canned
+        .where((entry) => entry.appliesTo(inboxId))
+        .toList(growable: false);
   }
 
   // ------------------------------------------------------------------ socket
@@ -223,6 +268,9 @@ class WorkbenchController extends ChangeNotifier {
     });
     _reconnectSubscription = socket.reconnects.listen((_) => _resync());
     socket.connect();
+    _syncTimer ??= Timer.periodic(const Duration(seconds: 15), (_) {
+      if (!_closed && !_loadingList && !_loadingThread) _resync();
+    });
   }
 
   void _resync() {
@@ -235,7 +283,16 @@ class WorkbenchController extends ChangeNotifier {
     }
   }
 
+  void Function(String groupId)? onGroupUpdated;
   void _onEvent(RealtimeEvent event) {
+    if (event.type == 'support.assets.updated') {
+      unawaited(loadCanned());
+      unawaited(loadTags());
+    }
+    if (event.type == 'group.updated') {
+      final id = event.data['groupId'] as String?;
+      if (id != null) onGroupUpdated?.call(id);
+    }
     switch (event.type) {
       case 'message.created':
       case 'message.updated':
@@ -251,6 +308,13 @@ class WorkbenchController extends ChangeNotifier {
         break;
     }
     if (event.type == 'message.created') {
+      if (event.data['senderType'] == 'VISITOR' &&
+          event.data['private'] != true &&
+          _alertedMessages.add(event.data['id'].toString())) {
+        messageAlert(event.data['id'].toString(), '');
+        if (_alertedMessages.length > 500)
+          _alertedMessages.remove(_alertedMessages.first);
+      }
       _applyIncomingMessage(event);
     }
     if (event.type == 'message.updated') {
@@ -275,6 +339,48 @@ class WorkbenchController extends ChangeNotifier {
         event.type == 'conversation.transferred' ||
         event.type == 'conversation.status') {
       _patchFromEvent(event);
+    }
+    if (event.type == 'conversation.read') {
+      _scheduleListRefresh();
+      _applyVisitorReceipt(event, read: true);
+    }
+    if (event.type == 'conversation.delivered') {
+      _applyVisitorReceipt(event, read: false);
+    }
+  }
+
+  /// 访客端上报送达 / 已读后，推进气泡回执；只处理当前打开的会话。
+  void _applyVisitorReceipt(RealtimeEvent event, {required bool read}) {
+    if (event.conversationId != _selectedId) {
+      return;
+    }
+    if (asString(event.data['readerType']) != 'VISITOR') {
+      return;
+    }
+    final sequence = asInt(event.data['sequence']);
+    if (sequence <= 0) {
+      return;
+    }
+    var changed = false;
+    if (sequence > _visitorLastDeliveredSequence) {
+      _visitorLastDeliveredSequence = sequence;
+      changed = true;
+    }
+    if (read && sequence > _visitorLastReadSequence) {
+      _visitorLastReadSequence = sequence;
+      changed = true;
+      // 仅移除已读边界以内的消息，后来的公开回复保持未读。
+      _patchLocal(
+        event.conversationId,
+        (conversation) => conversation.copyWith(
+            visitorUnread: _messages
+                .where((m) =>
+                    m.sequence > sequence && !m.isFromVisitor && !m.isPrivate)
+                .length),
+      );
+    }
+    if (changed) {
+      _notify();
     }
   }
 
@@ -327,14 +433,16 @@ class WorkbenchController extends ChangeNotifier {
       // A message outside the retained window was recalled; the pin bar may
       // still be showing it, so it is dropped from there too.
       if (updated.isDeleted && _pins.any((pin) => pin.id == updated.id)) {
-        _pins = _pins.where((pin) => pin.id != updated.id).toList(growable: false);
+        _pins =
+            _pins.where((pin) => pin.id != updated.id).toList(growable: false);
         _notify();
       }
       return;
     }
     _messages = List<ChatMessage>.of(_messages)..[index] = updated;
     if (updated.isDeleted) {
-      _pins = _pins.where((pin) => pin.id != updated.id).toList(growable: false);
+      _pins =
+          _pins.where((pin) => pin.id != updated.id).toList(growable: false);
     } else if (_pins.any((pin) => pin.id == updated.id) ||
         _pins.any((pin) => pin.pinnedAt == null)) {
       _pins = _pins
@@ -464,17 +572,33 @@ class WorkbenchController extends ChangeNotifier {
         inboxId: _inboxFilter,
         query: _search,
         limit: 50,
+        status: _includeResolved ? 'ALL' : null,
       );
       if (generation != _listGeneration) {
         return;
       }
       _conversations = page.items;
+      // 列表是最新状态来源：新消息自动重开会话时同步标题和操作菜单。
+      final currentDetail = _detail;
+      if (currentDetail != null) {
+        for (final row in page.items) {
+          if (row.id == _selectedId) {
+            _detail = ConversationDetail(
+              conversation: row,
+              visitor: currentDetail.visitor,
+              rating: currentDetail.rating,
+            );
+            break;
+          }
+        }
+      }
       _queued = page.queued;
       _listError = null;
       // A conversation that vanished from the filter (because someone else
       // claimed it) should not stay open in the reading pane.
       final selected = _selectedId;
-      if (selected != null && !_conversations.any((item) => item.id == selected)) {
+      if (selected != null &&
+          !_conversations.any((item) => item.id == selected)) {
         if (_filter != QueueFilter.all) {
           await _loadDetail(selected);
         }
@@ -535,6 +659,8 @@ class WorkbenchController extends ChangeNotifier {
     _replyTo = null;
     _pins = const <ChatMessage>[];
     _readBoundary = 0;
+    _visitorLastReadSequence = 0;
+    _visitorLastDeliveredSequence = 0;
     _deliveredSequence = 0;
     clearSearch();
     _notify();
@@ -554,6 +680,8 @@ class WorkbenchController extends ChangeNotifier {
     _replyTo = null;
     _pins = const <ChatMessage>[];
     _readBoundary = 0;
+    _visitorLastReadSequence = 0;
+    _visitorLastDeliveredSequence = 0;
     clearSearch();
     _notify();
   }
@@ -620,6 +748,9 @@ class WorkbenchController extends ChangeNotifier {
         if (pages == 0) {
           readBoundary = page.lastReadSequence;
           delivered = page.hasMore ? 0 : serverLast;
+          // 首屏带回访客游标；后续翻页不会改这两个值。
+          _visitorLastReadSequence = page.visitorLastReadSequence;
+          _visitorLastDeliveredSequence = page.visitorLastDeliveredSequence;
         }
         collected.addAll(page.items);
         pages += 1;
@@ -647,7 +778,8 @@ class WorkbenchController extends ChangeNotifier {
     // exists and can be fetched on demand.
     _hasMoreHistory = pages >= maxPages;
     _messages = _trimHistory(collected);
-    _lastSequence = math.max(serverLast, collected.isEmpty ? 0 : collected.last.sequence);
+    _lastSequence =
+        math.max(serverLast, collected.isEmpty ? 0 : collected.last.sequence);
     _readBoundary = readBoundary;
     _loadingThread = false;
     _notify();
@@ -748,7 +880,8 @@ class WorkbenchController extends ChangeNotifier {
       return;
     }
     _conversations = _conversations
-        .map((conversation) => conversation.id == id ? detail.conversation : conversation)
+        .map((conversation) =>
+            conversation.id == id ? detail.conversation : conversation)
         .toList(growable: false);
     _notify();
   }
@@ -776,7 +909,8 @@ class WorkbenchController extends ChangeNotifier {
     // from whatever the composer had selected. Passing it explicitly is what
     // makes a retry re-send the same quote rather than the one that replaced it.
     final quoted = quote ?? _replyTo?.toQuote();
-    final localId = clientMessageId ?? 'local-${DateTime.now().microsecondsSinceEpoch}';
+    final localId =
+        clientMessageId ?? 'local-${DateTime.now().microsecondsSinceEpoch}';
     final messageType = attachments.isEmpty
         ? 'TEXT'
         : (attachments.every((item) => item.isImage) ? 'IMAGE' : 'FILE');
@@ -800,13 +934,29 @@ class WorkbenchController extends ChangeNotifier {
         content: content,
         clientMessageId: localId,
         messageType: messageType,
-        attachmentIds: attachments.map((item) => item.id).toList(growable: false),
+        attachmentIds:
+            attachments.map((item) => item.id).toList(growable: false),
         private: private,
         replyToId: quoted?.id,
         selfId: selfId,
       );
       _replaceLocal(localId, saved.copyWith(delivery: DeliveryState.sent));
       _lastSequence = math.max(_lastSequence, saved.sequence);
+      // 公开回复刚发出时访客侧尚未读，列表立刻标访客未读，等 read 事件再清。
+      if (!private) {
+        _patchLocal(
+          id,
+          (conversation) => conversation.copyWith(
+            visitorUnread: saved.sequence > _visitorLastReadSequence
+                ? conversation.visitorUnread + 1
+                : conversation.visitorUnread,
+            lastMessagePreview: content.trim().isEmpty
+                ? conversation.lastMessagePreview
+                : content.trim(),
+            lastMessageAt: saved.createdAt,
+          ),
+        );
+      }
       _notify();
       // Sending a reply is what clears the stored draft; the server does the
       // same on its side, so the two cannot disagree about what is pending.
@@ -814,10 +964,12 @@ class WorkbenchController extends ChangeNotifier {
       _scheduleListRefresh();
       return true;
     } on ApiException catch (failure) {
-      _replaceLocal(localId, optimistic.copyWith(
-        delivery: DeliveryState.failed,
-        error: failure.message,
-      ));
+      _replaceLocal(
+          localId,
+          optimistic.copyWith(
+            delivery: DeliveryState.failed,
+            error: failure.message,
+          ));
       _notify();
       return false;
     }
@@ -877,7 +1029,8 @@ class WorkbenchController extends ChangeNotifier {
     try {
       final updated = await api.deleteMessage(id, message.id, selfId: selfId);
       _substitute(updated);
-      _pins = _pins.where((pin) => pin.id != updated.id).toList(growable: false);
+      _pins =
+          _pins.where((pin) => pin.id != updated.id).toList(growable: false);
       _scheduleListRefresh();
       _notify();
     } on ApiException catch (failure) {
@@ -901,11 +1054,13 @@ class WorkbenchController extends ChangeNotifier {
         selfId: selfId,
       );
       _messages = _messages
-          .map((item) =>
-              item.id == message.id ? item.copyWith(reactions: reactions) : item)
+          .map((item) => item.id == message.id
+              ? item.copyWith(reactions: reactions)
+              : item)
           .toList(growable: false);
       _pins = _pins
-          .map((pin) => pin.id == message.id ? pin.copyWith(reactions: reactions) : pin)
+          .map((pin) =>
+              pin.id == message.id ? pin.copyWith(reactions: reactions) : pin)
           .toList(growable: false);
       _notify();
     } on ApiException catch (failure) {
@@ -934,7 +1089,8 @@ class WorkbenchController extends ChangeNotifier {
         .toList(growable: false);
     _notify();
     try {
-      final pins = await api.setPinned(id, message.id, pinned: pinned, selfId: selfId);
+      final pins =
+          await api.setPinned(id, message.id, pinned: pinned, selfId: selfId);
       if (_selectedId != id) {
         return;
       }
@@ -1132,7 +1288,8 @@ class WorkbenchController extends ChangeNotifier {
     if (id == null) {
       return;
     }
-    _patchLocal(id, (conversation) => conversation.copyWith(priority: priority));
+    _patchLocal(
+        id, (conversation) => conversation.copyWith(priority: priority));
     _notify();
     try {
       await api.setPriority(id, priority);
@@ -1158,16 +1315,35 @@ class WorkbenchController extends ChangeNotifier {
     }
   }
 
+  final Set<String> _alertedMessages = {};
+  bool readingThread = false;
+  final Map<String, int> _readAcknowledged = {};
+  bool _readBusy = false;
   Future<void> markRead(String conversationId) async {
+    if (!readingThread ||
+        !pageVisible() ||
+        _selectedId != conversationId ||
+        _lastSequence <= (_readAcknowledged[conversationId] ?? 0) ||
+        _readBusy) return;
+    final boundary = _lastSequence;
+    _readBusy = true;
     try {
-      await api.markRead(conversationId, sequence: _lastSequence);
-      _patchLocal(
-        conversationId,
-        (conversation) => conversation.copyWith(agentUnread: 0),
-      );
+      await api.markRead(conversationId, sequence: boundary);
+      _readAcknowledged[conversationId] = boundary;
+      if (_selectedId == conversationId) {
+        _patchLocal(
+          conversationId,
+          (conversation) => conversation.copyWith(
+              agentUnread: _messages
+                  .where((m) => m.sequence > boundary && m.isFromVisitor)
+                  .length),
+        );
+      }
       _notify();
     } on ApiException {
-      // A missed read receipt must never block the UI.
+      // Retry on the next visible pass.
+    } finally {
+      _readBusy = false;
     }
   }
 
@@ -1222,8 +1398,9 @@ class WorkbenchController extends ChangeNotifier {
     Conversation Function(Conversation) update,
   ) {
     _conversations = _conversations
-        .map((conversation) =>
-            conversation.id == conversationId ? update(conversation) : conversation)
+        .map((conversation) => conversation.id == conversationId
+            ? update(conversation)
+            : conversation)
         .toList(growable: false);
     final detail = _detail;
     if (detail != null && detail.conversation.id == conversationId) {
@@ -1313,6 +1490,7 @@ class WorkbenchController extends ChangeNotifier {
   void dispose() {
     _closed = true;
     _listDebounce?.cancel();
+    _syncTimer?.cancel();
     _typingDecay?.cancel();
     _deliveredDebounce?.cancel();
     _eventSubscription?.cancel();

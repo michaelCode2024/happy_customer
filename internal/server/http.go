@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"github.com/google/uuid"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -167,6 +169,15 @@ func (a *API) requireWidget(next func(http.ResponseWriter, *http.Request, auth.P
 			failCode(w, 401, "WIDGET_TOKEN_INVALID", "访客令牌无效或已过期，请刷新页面重新连接")
 			return
 		}
+		if !a.tenantActive(r.Context(), principal.TenantID) {
+			failCode(w, 403, "TENANT_SUSPENDED", "企业已停用")
+			return
+		}
+		var enabled bool
+		if a.db.QueryRow(r.Context(), `select exists(select 1 from visitor v join inbox i on i.id=v.inbox_id where v.id=$1 and v.tenant_id=$2 and i.status='ACTIVE')`, principal.VisitorID, principal.TenantID).Scan(&enabled) != nil || !enabled {
+			failCode(w, 403, "INBOX_DISABLED", "客服入口已停用")
+			return
+		}
 		next(w, r, principal)
 	}
 }
@@ -182,6 +193,15 @@ func (a *API) requireAgent(next func(http.ResponseWriter, *http.Request, auth.Pr
 		}
 		if !a.authn.SessionValid(r.Context(), principal.SessionID, principal.AgentID) {
 			failCode(w, 401, "AGENT_SESSION_REVOKED", "登录状态已被注销，请重新登录")
+			return
+		}
+		var active bool
+		principal, active = a.currentAgent(r.Context(), principal)
+		if !active {
+			failCode(w, 401, "AGENT_SESSION_REVOKED", "账号或企业已停用，请重新登录")
+			return
+		}
+		if !a.allowPlanRoute(w, r, principal) {
 			return
 		}
 		next(w, r, principal)
@@ -205,22 +225,21 @@ func (a *API) requireRole(role []string, next func(http.ResponseWriter, *http.Re
 func (a *API) requirePlatform(next func(http.ResponseWriter, *http.Request, auth.Principal)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		principal, err := a.tokens.Verify(bearer(r))
-		if err == nil && principal.Kind == auth.KindPlatform {
+		if err == nil && a.platformSessionValid(r.Context(), principal) {
 			next(w, r, principal)
 			return
 		}
-		// The static token is also accepted straight from the Authorization
-		// header so deploy scripts and break-glass debugging work without first
-		// exchanging it. The X-RelayDesk-Key spelling is kept for callers that
-		// already send it.
-		if a.cfg.PlatformAdminToken != "" &&
-			(subtleEqual(bearer(r), a.cfg.PlatformAdminToken) ||
-				subtleEqual(r.Header.Get("X-RelayDesk-Key"), a.cfg.PlatformAdminToken)) {
-			next(w, r, auth.Principal{Kind: auth.KindPlatform, Name: "static-token"})
-			return
-		}
-		failCode(w, 401, "PLATFORM_TOKEN_INVALID", "平台管理令牌无效")
+		failCode(w, 401, "PLATFORM_SESSION_INVALID", "平台登录已失效，请使用账号密码重新登录")
 	}
+}
+
+func (a *API) platformSessionValid(ctx context.Context, principal auth.Principal) bool {
+	if principal.Kind != auth.KindPlatform || principal.PlatformAdminID == uuid.Nil || principal.SessionID == uuid.Nil || principal.ExpiresAt <= time.Now().Unix() {
+		return false
+	}
+	var valid bool
+	err := a.db.QueryRow(ctx, `select exists(select 1 from platform_session s join platform_admin a on a.id=s.admin_id where s.id=$1 and s.admin_id=$2 and s.revoked_at is null and s.expires_at>now() and a.status='ACTIVE')`, principal.SessionID, principal.PlatformAdminID).Scan(&valid)
+	return err == nil && valid
 }
 
 func bearer(r *http.Request) string {

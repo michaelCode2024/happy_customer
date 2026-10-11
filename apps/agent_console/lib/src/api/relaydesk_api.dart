@@ -765,12 +765,13 @@ class RelayDeskApi {
   /// phrasings as one newline-separated block of text, so the list is joined
   /// here; the console is the only place that thinks of them as separate lines.
   Future<List<Map<String, dynamic>>> knowledgeCategories() async {
-    final body =
-        await _send('GET', '/api/v1/console/knowledge-categories');
+    final body = await _send('GET', '/api/v1/console/knowledge-categories');
     return asMapList(body['items']);
   }
+
   Future<String> createKnowledge({
-    required String title, String categoryId='',
+    required String title,
+    String categoryId = '',
     required String content,
     List<String> questionExamples = const <String>[],
   }) async {
@@ -778,7 +779,8 @@ class RelayDeskApi {
       'POST',
       '/api/v1/console/knowledge',
       body: <String, dynamic>{
-        'title': title,'categoryId':categoryId,
+        'title': title,
+        'categoryId': categoryId,
         'content': content,
         'questionExamples': joinExamples(questionExamples),
       },
@@ -787,7 +789,8 @@ class RelayDeskApi {
   }
 
   Future<void> updateKnowledge({
-    required String id,String? categoryId,
+    required String id,
+    String? categoryId,
     String title = '',
     String content = '',
     List<String>? questionExamples,
@@ -796,7 +799,8 @@ class RelayDeskApi {
       'PATCH',
       '/api/v1/console/knowledge/$id',
       body: <String, dynamic>{
-        'title': title,if(categoryId!=null)'categoryId':categoryId,
+        'title': title,
+        if (categoryId != null) 'categoryId': categoryId,
         'content': content,
         if (questionExamples != null)
           'questionExamples': joinExamples(questionExamples),
