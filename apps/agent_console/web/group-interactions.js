@@ -2,7 +2,12 @@
 const el = id => document.getElementById(id);
 const query = new URLSearchParams(location.search);
 const ticket = query.get('invite') || '';
-const cache = query.has('console') ? 'liaoqiao-console-group' : 'liaoqiao-group-' + ticket;
+// 宿主可把 identityToken + groupId 放进查询串，打开已入群用户的群页。
+const identityToken = query.get('identityToken') || '';
+const deepGroupId = query.get('groupId') || query.get('group') || '';
+const cache = query.has('console')
+  ? 'liaoqiao-console-group'
+  : 'liaoqiao-group-' + (ticket || deepGroupId || (identityToken ? 'identity' : 'anon'));
 let token = '', groupId = '', actorId = '', actorKind = 'widget';
 let socket, retry, searchTimer, pollTimer, items = [], pending = null, sending = false;
 let group = null, refreshGeneration = 0, call = null, peer = null, media = null;
@@ -80,11 +85,24 @@ async function start() {
 el('joinButton').onclick = async () => {
   el('joinButton').disabled = true; el('error').hidden = true;
   try {
-    const result = await api('POST', '/api/v1/group-join/' + encodeURIComponent(ticket), {name: el('name').value.trim()});
+    const body = {name: el('name').value.trim()};
+    if (identityToken) body.identityToken = identityToken;
+    const result = await api('POST', '/api/v1/group-join/' + encodeURIComponent(ticket), body);
     token = result.token; groupId = result.groupId; actorId = result.visitorId; actorKind = 'widget';
     sessionStorage.setItem(cache, JSON.stringify({token, groupId, actorId, actorKind})); await start();
   } catch(e) { error(e); } finally { el('joinButton').disabled = false; }
 };
+async function openWithIdentity() {
+  el('join').hidden = true; el('loading').hidden = false; el('error').hidden = true;
+  try {
+    const result = await api('POST', '/api/v1/groups/session', {identityToken, groupId: deepGroupId});
+    token = result.token; groupId = result.groupId; actorId = result.visitorId; actorKind = 'widget';
+    sessionStorage.setItem(cache, JSON.stringify({token, groupId, actorId, actorKind}));
+    // 票据勿长期留在地址栏，避免 Referer / 历史泄露。
+    history.replaceState({}, '', location.pathname + '?groupId=' + encodeURIComponent(groupId));
+    await start();
+  } catch(e) { el('join').hidden = !ticket; error(e); } finally { el('loading').hidden = true; }
+}
 el('send').onclick = async () => {
   const content = el('draft').value.trim(); if (!content || sending || group?.archived) return;
   sending = true; el('send').disabled = true; el('error').hidden = true;
@@ -294,7 +312,14 @@ if (query.has('console') && (window.opener || window.parent !== window)) {
   });
   setTimeout(() => { clearInterval(ready); if (!token) { el('loading').hidden = true; error(new Error('登录交接未完成，请返回客服工作台重新打开')); } }, 15000);
 } else if (token) start();
-else if (!ticket) { el('joinButton').disabled = true; error(new Error('请通过客服提供的有效邀请链接进入，或从工作台打开。')); }
+else if (identityToken && deepGroupId) openWithIdentity();
+else if (!ticket) { el('joinButton').disabled = true; error(new Error('请通过客服提供的有效邀请链接进入，或由业务系统打开群聊。')); }
+else if (identityToken) {
+  // 邀请链接 + 登录票据：称呼可空，服务端用票据里的昵称。
+  el('name').placeholder = '可选，默认使用登录昵称';
+  const hint = el('join').querySelector('p');
+  if (hint) hint.textContent = '已识别登录身份，确认后加入群聊。';
+}
 window.addEventListener('pagehide', () => {
   ended = true; clearTimeout(retry); clearTimeout(searchTimer); clearInterval(pollTimer); socket?.close();
   if (call && token) fetch(path('/calls/' + call.id), {method:'POST',keepalive:true,headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({action:'end'})}).catch(() => {});

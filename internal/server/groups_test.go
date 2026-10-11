@@ -40,6 +40,8 @@ func TestGroupMembershipIsolationAndIdempotency(t *testing.T) {
 		}
 	}
 	exec(`insert into tenant(id,name,slug,status) values($1,'groups test',$2,'ACTIVE')`, tenant, tenant.String())
+	exec(`insert into tenant_subscription(tenant_id,plan,status) values($1,'GROWTH','ACTIVE')
+		on conflict (tenant_id) do update set plan='GROWTH', status='ACTIVE'`, tenant)
 	exec(`insert into inbox(id,tenant_id,name,public_key,status) values($1,$2,'test',$3,'ACTIVE')`, inbox, tenant, inbox.String())
 	for _, id := range []uuid.UUID{owner, other, outsider} {
 		exec(`insert into agent(id,tenant_id,email,display_name,password_hash,role,status) values($1,$2,$3,'test','x','AGENT','ACTIVE')`, id, tenant, id.String())
@@ -54,6 +56,7 @@ func TestGroupMembershipIsolationAndIdempotency(t *testing.T) {
 		db.Exec(ctx, `delete from agent_inbox where inbox_id=$1`, inbox)
 		db.Exec(ctx, `delete from agent where tenant_id=$1`, tenant)
 		db.Exec(ctx, `delete from inbox where tenant_id=$1`, tenant)
+		db.Exec(ctx, `delete from tenant_subscription where tenant_id=$1`, tenant)
 		db.Exec(ctx, `delete from tenant where id=$1`, tenant)
 	}()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))

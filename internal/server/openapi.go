@@ -23,7 +23,12 @@ import (
 // Everything a key can do is scoped to its own tenant by construction: the
 // tenant id comes from the key row, never from the request body or the path.
 func (a *API) registerOpen(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/v1/open/unread", a.requireAPIKey("read", a.openUnread))
+	mux.HandleFunc("GET /api/v1/open/conversations/{id}/receipts", a.requireAPIKey("read", a.openReceipts))
+	mux.HandleFunc("POST /api/v1/open/conversations/{id}/read", a.requireAPIKey("write", a.openReceipt))
+	mux.HandleFunc("POST /api/v1/open/conversations/{id}/delivered", a.requireAPIKey("write", a.openReceipt))
 	mux.HandleFunc("GET /api/v1/open/me", a.requireAPIKey("read", a.openMe))
+	mux.HandleFunc("POST /api/v1/open/visitor-identity", a.requireAPIKey("write", a.openVisitorIdentity))
 
 	mux.HandleFunc("GET /api/v1/open/conversations", a.requireAPIKey("read", a.openListConversations))
 	mux.HandleFunc("GET /api/v1/open/conversations/{id}", a.requireAPIKey("read", a.openGetConversation))
@@ -37,6 +42,34 @@ func (a *API) registerOpen(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/v1/open/agents", a.requireAPIKey("read", a.openListAgents))
 	mux.HandleFunc("GET /api/v1/open/stats", a.requireAPIKey("read", a.openStats))
+	a.registerOpenGroups(mux)
+}
+
+func (a *API) openVisitorIdentity(w http.ResponseWriter, r *http.Request, p apiKeyPrincipal) {
+	var in struct {
+		InboxKey    string `json:"inboxKey"`
+		ExternalID  string `json:"externalId"`
+		DisplayName string `json:"displayName"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if strings.TrimSpace(in.ExternalID) == "" || len(in.ExternalID) > 200 {
+		fail(w, 400, "externalId 必须为 1 到 200 个字符")
+		return
+	}
+	inbox, err := a.loadInbox(r.Context(), in.InboxKey)
+	if err != nil || inbox.TenantID != p.TenantID {
+		fail(w, 404, "客服入口不存在或不属于当前企业")
+		return
+	}
+	token, err := a.tokens.IssueVisitorIdentity(p.TenantID, inbox.ID, strings.TrimSpace(in.ExternalID), strings.TrimSpace(in.DisplayName))
+	if err != nil {
+		fail(w, 500, "签发身份票据失败")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	respond(w, 200, map[string]any{"identityToken": token, "expiresIn": 300, "inboxKey": in.InboxKey})
 }
 
 // apiKeyPrincipal is the authenticated caller of the open API.
@@ -91,6 +124,9 @@ func (a *API) requireAPIKey(scope string, next func(http.ResponseWriter, *http.R
 		}
 		if !scopeAllowed(scopes, scope) {
 			failCode(w, 403, "SCOPE_REQUIRED", "该密钥没有 "+scope+" 权限")
+			return
+		}
+		if !a.allowPlanRoute(w, r, auth.Principal{TenantID: p.TenantID}) {
 			return
 		}
 		p.Scopes = scopes
@@ -335,6 +371,9 @@ func (a *API) openPostMessage(w http.ResponseWriter, r *http.Request, p apiKeyPr
 	})
 	if err != nil {
 		a.logger.Error("open api message failed", "error", err)
+		if failServiceError(w, err) {
+			return
+		}
 		fail(w, 500, "发送消息失败："+err.Error())
 		return
 	}
@@ -818,4 +857,77 @@ func (a *API) applyConversationTags(ctx handlerContext, tenantID, conversationID
 		}
 	}
 	return tx.Commit(ctx) == nil
+}
+
+func (a *API) openUnread(w http.ResponseWriter, r *http.Request, p apiKeyPrincipal) {
+	var agent, visitor, conversations int64
+	err := a.db.QueryRow(r.Context(), `select coalesce(sum(agent_unread),0),coalesce(sum(visitor_unread),0),count(*) filter(where agent_unread>0 or visitor_unread>0) from conversation where tenant_id=$1`, p.TenantID).Scan(&agent, &visitor, &conversations)
+	if err != nil {
+		fail(w, 500, "查询未读失败")
+		return
+	}
+	respond(w, 200, map[string]any{"agentUnread": agent, "visitorUnread": visitor, "unreadConversations": conversations})
+}
+func (a *API) openReceipts(w http.ResponseWriter, r *http.Request, p apiKeyPrincipal) {
+	id, ok := a.openConversationID(w, r, p)
+	if !ok {
+		return
+	}
+	rows, err := a.db.Query(r.Context(), `select reader_type,reader_id,last_read_sequence,last_delivered_sequence,updated_at from conversation_read where conversation_id=$1 order by reader_type,reader_id`, id)
+	if err != nil {
+		fail(w, 500, "查询回执失败")
+		return
+	}
+	defer rows.Close()
+	items := []map[string]any{}
+	for rows.Next() {
+		var kind string
+		var actor uuid.UUID
+		var read, delivered int64
+		var updated time.Time
+		if rows.Scan(&kind, &actor, &read, &delivered, &updated) != nil {
+			fail(w, 500, "查询回执失败")
+			return
+		}
+		items = append(items, map[string]any{"readerType": kind, "readerId": actor, "readSequence": read, "deliveredSequence": delivered, "updatedAt": updated})
+	}
+	if rows.Err() != nil {
+		fail(w, 500, "查询回执失败")
+		return
+	}
+	respond(w, 200, map[string]any{"items": items})
+}
+func (a *API) openReceipt(w http.ResponseWriter, r *http.Request, p apiKeyPrincipal) {
+	id, ok := a.openConversationID(w, r, p)
+	if !ok {
+		return
+	}
+	var in struct {
+		ReaderType string    `json:"readerType"`
+		ReaderID   uuid.UUID `json:"readerId"`
+		Sequence   int64     `json:"sequence"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if in.Sequence <= 0 || (in.ReaderType != "AGENT" && in.ReaderType != "VISITOR") {
+		fail(w, 400, "readerType 为 AGENT/VISITOR，sequence 必须大于零")
+		return
+	}
+	var valid bool
+	if in.ReaderType == "VISITOR" {
+		_ = a.db.QueryRow(r.Context(), `select exists(select 1 from conversation where id=$1 and tenant_id=$2 and visitor_id=$3)`, id, p.TenantID, in.ReaderID).Scan(&valid)
+	} else {
+		_ = a.db.QueryRow(r.Context(), `select exists(select 1 from agent where id=$1 and tenant_id=$2 and status='ACTIVE' and email<>'bot@relaydesk.local')`, in.ReaderID, p.TenantID).Scan(&valid)
+	}
+	if !valid {
+		fail(w, 404, "读取者不存在或不属于当前会话/企业")
+		return
+	}
+	err := a.advanceReceipt(r.Context(), id, p.TenantID, in.ReaderType, in.ReaderID, in.Sequence, strings.HasSuffix(r.URL.Path, "/read"))
+	if err != nil {
+		fail(w, 500, "更新回执失败")
+		return
+	}
+	a.openReceipts(w, r, p)
 }

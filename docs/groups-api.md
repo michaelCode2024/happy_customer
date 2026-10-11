@@ -14,8 +14,20 @@
 | POST | /api/v1/groups/{id}/members | 群主添加同企业账号，agentId |
 | DELETE | /api/v1/groups/{id}/members/{kind}/{actor} | 群主移除成员或成员退出，群主不能直接退出 |
 | POST | /api/v1/groups/{id}/invite | 群主生成服务群邀请，24小时有效，撤销旧邀请 |
-| POST | /api/v1/group-join/{ticket} | 客户填写 name 加入，返回 token、groupId、visitorId |
+| POST | /api/v1/group-join/{ticket} | 客户加入：匿名传 `name`；登录客户可传 `identityToken`（可选 `name`），与一对一复用同一 visitor |
+| POST | /api/v1/groups/session | 已入群登录客户用 `identityToken` + `groupId` 换群聊 token，无需邀请链 |
 | GET | /ws/groups?token=... | 实时 group.updated 事件，客户端据 groupId 增量获取状态 |
+
+### 用宿主用户群体进群
+
+不要把对方整库用户同步进聊桥。推荐两步：
+
+1. **业务后端加人**：`POST /api/v1/open/groups/{id}/members`，body 为宿主用户的 `externalId` 列表（见 [开放 API](open-api.md)）。
+2. **前端打开群页**：
+   - 企业版：后端签发 `identityToken` 后打开 `/groups.html?groupId=<id>&identityToken=<票据>`（页面会立刻换成会话并清掉地址栏中的票据）；或邀请链接同时带 `identityToken`。
+   - 专业版及以上：后端调用 `POST /api/v1/open/groups/{id}/member-token`，把返回的 `token` 写入前端 `sessionStorage`（键名 `liaoqiao-group-<groupId>`，值为 `{token,groupId,actorId,actorKind:"widget"}`），再打开 `/groups.html?groupId=<id>`。
+
+匿名邀请链（只填称呼）仍然可用，适合临时客人；登录用户应走 `externalId` 映射，避免同一人出现多个匿名 visitor。
 
 服务群邀请链接具备加入权限，应仅提供给准备邀请的客户；内部群不能生成客户邀请。归档停止发消息及加入，保留历史。移出后不能读取历史或继续发消息。群消息首版仅支持文字，不支持附件和单独的@提醒。
 

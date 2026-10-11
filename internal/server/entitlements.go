@@ -34,10 +34,14 @@ func routeFeature(path string) string {
 	if path == "/api/v1/open/visitor-identity" {
 		return "identity"
 	}
+	// 开放群聊接口同时属于开放 API，套餐上以群聊能力为准。
+	if strings.HasPrefix(path, "/api/v1/open/groups") {
+		return "groups"
+	}
 	if strings.HasPrefix(path, "/api/v1/open/") {
 		return "integrations"
 	}
-	if strings.HasPrefix(path, "/api/v1/groups") {
+	if strings.HasPrefix(path, "/api/v1/groups") || strings.HasPrefix(path, "/api/v1/group-join") {
 		return "groups"
 	}
 	if strings.Contains(path, "/automation") {

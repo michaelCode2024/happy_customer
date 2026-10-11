@@ -58,6 +58,8 @@ func (a *API) registerGroups(m *http.ServeMux) {
 	m.HandleFunc("DELETE /api/v1/groups/{id}/members/{kind}/{actor}", a.groupAuth(a.groupRemove))
 	m.HandleFunc("POST /api/v1/groups/{id}/invite", a.requireAgent(a.groupInvite))
 	m.HandleFunc("POST /api/v1/group-join/{ticket}", a.limit(a.widgetRate, a.groupJoin))
+	// 已入群的登录客户用 identityToken 换群聊会话，无需再走邀请链。
+	m.HandleFunc("POST /api/v1/groups/session", a.limit(a.widgetRate, a.groupSession))
 	m.HandleFunc("PATCH /api/v1/groups/{id}/me", a.groupAuth(a.groupNickname))
 	m.HandleFunc("POST /api/v1/groups/{id}/messages/{message}/recall", a.groupAuth(a.groupRecall))
 	m.HandleFunc("POST /api/v1/groups/{id}/dissolve", a.requireAgent(a.groupDissolve))
@@ -447,14 +449,20 @@ func (a *API) groupInvite(w http.ResponseWriter, r *http.Request, p auth.Princip
 }
 func (a *API) groupJoin(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Name string `json:"name"`
+		Name          string `json:"name"`
+		IdentityToken string `json:"identityToken"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
 	in.Name = strings.TrimSpace(in.Name)
-	if in.Name == "" || len([]rune(in.Name)) > 120 {
+	identityToken := strings.TrimSpace(in.IdentityToken)
+	if identityToken == "" && (in.Name == "" || len([]rune(in.Name)) > 120) {
 		fail(w, 400, "请输入称呼（最多120字）")
+		return
+	}
+	if identityToken != "" && in.Name != "" && len([]rune(in.Name)) > 120 {
+		fail(w, 400, "称呼最多120字")
 		return
 	}
 	tx, e := a.db.Begin(r.Context())
@@ -469,27 +477,153 @@ func (a *API) groupJoin(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "邀请已过期或已撤销")
 		return
 	}
-	var count int
-	if tx.QueryRow(r.Context(), `select count(*) from chat_group_member where group_id=$1`, id).Scan(&count) != nil || count >= 100 {
-		fail(w, 409, "群成员已达到上限")
+	if !a.tenantHasFeature(r.Context(), tenant, "groups") {
+		failCode(w, 403, "PLAN_FEATURE_REQUIRED", "当前套餐未包含群聊功能")
 		return
 	}
-	visitor := uuid.New()
-	if _, e = tx.Exec(r.Context(), `insert into visitor(id,tenant_id,inbox_id,display_name) values($1,$2,$3,$4)`, visitor, tenant, inbox, in.Name); e != nil {
-		fail(w, 500, "加入失败")
-		return
-	}
-	if _, e = tx.Exec(r.Context(), `insert into chat_group_member(group_id,actor_kind,actor_id,name) values($1,'widget',$2,$3)`, id, visitor, in.Name); e != nil {
-		fail(w, 500, "加入失败")
-		return
+
+	var visitor uuid.UUID
+	displayName := in.Name
+	status := 201
+	if identityToken != "" {
+		// 登录客户：票据绑定入口，与一对一会话复用同一 visitor。
+		identity, verifyErr := a.tokens.Verify(identityToken)
+		if verifyErr != nil || identity.Kind != auth.KindIdentity || identity.TenantID != tenant || identity.InboxID != inbox || identity.ExternalID == "" {
+			failCode(w, 401, "IDENTITY_TOKEN_INVALID", "访客身份票据无效、已过期或不属于此群入口")
+			return
+		}
+		displayName = strings.TrimSpace(identity.Name)
+		if displayName == "" {
+			displayName = in.Name
+		}
+		if displayName == "" {
+			displayName = "客户"
+		}
+		var upsertErr error
+		visitor, _, upsertErr = upsertVisitorExternal(r.Context(), tx, tenant, inbox, identity.ExternalID, displayName)
+		if upsertErr != nil {
+			fail(w, 500, "加入失败")
+			return
+		}
+		var already bool
+		if tx.QueryRow(r.Context(), `select exists(select 1 from chat_group_member where group_id=$1 and actor_kind='widget' and actor_id=$2)`, id, visitor).Scan(&already) != nil {
+			fail(w, 500, "加入失败")
+			return
+		}
+		if already {
+			_, _ = tx.Exec(r.Context(), `update chat_group_member set name=$3 where group_id=$1 and actor_kind='widget' and actor_id=$2`, id, visitor, displayName)
+			status = 200
+		} else {
+			var count int
+			if tx.QueryRow(r.Context(), `select count(*) from chat_group_member where group_id=$1`, id).Scan(&count) != nil || count >= 100 {
+				fail(w, 409, "群成员已达到上限")
+				return
+			}
+			if _, e = tx.Exec(r.Context(), `insert into chat_group_member(group_id,actor_kind,actor_id,name) values($1,'widget',$2,$3)`, id, visitor, displayName); e != nil {
+				fail(w, 500, "加入失败")
+				return
+			}
+		}
+	} else {
+		var count int
+		if tx.QueryRow(r.Context(), `select count(*) from chat_group_member where group_id=$1`, id).Scan(&count) != nil || count >= 100 {
+			fail(w, 409, "群成员已达到上限")
+			return
+		}
+		visitor = uuid.New()
+		if _, e = tx.Exec(r.Context(), `insert into visitor(id,tenant_id,inbox_id,display_name) values($1,$2,$3,$4)`, visitor, tenant, inbox, displayName); e != nil {
+			fail(w, 500, "加入失败")
+			return
+		}
+		if _, e = tx.Exec(r.Context(), `insert into chat_group_member(group_id,actor_kind,actor_id,name) values($1,'widget',$2,$3)`, id, visitor, displayName); e != nil {
+			fail(w, 500, "加入失败")
+			return
+		}
 	}
 	token, e := a.tokens.IssueWidget(tenant, inbox, visitor)
 	if e != nil || tx.Commit(r.Context()) != nil {
 		fail(w, 500, "加入失败")
 		return
 	}
-	a.groupPublish(r.Context(), id)
-	respond(w, 201, map[string]any{"token": token, "groupId": id, "visitorId": visitor})
+	if status == 201 {
+		a.groupPublish(r.Context(), id)
+	}
+	respond(w, status, map[string]any{"token": token, "groupId": id, "visitorId": visitor})
+}
+
+// groupSession 供已入群的登录客户用 identityToken 打开群页，不依赖邀请链接。
+func (a *API) groupSession(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		IdentityToken string `json:"identityToken"`
+		GroupID       string `json:"groupId"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	identityToken := strings.TrimSpace(in.IdentityToken)
+	gid, err := uuid.Parse(strings.TrimSpace(in.GroupID))
+	if identityToken == "" || err != nil {
+		fail(w, 400, "需要 identityToken 与 groupId")
+		return
+	}
+	identity, verifyErr := a.tokens.Verify(identityToken)
+	if verifyErr != nil || identity.Kind != auth.KindIdentity || identity.ExternalID == "" {
+		failCode(w, 401, "IDENTITY_TOKEN_INVALID", "访客身份票据无效或已过期")
+		return
+	}
+	if !a.tenantHasFeature(r.Context(), identity.TenantID, "groups") {
+		failCode(w, 403, "PLAN_FEATURE_REQUIRED", "当前套餐未包含群聊功能")
+		return
+	}
+
+	var tenant, inbox, visitor uuid.UUID
+	var kind string
+	var closed bool
+	var status string
+	err = a.db.QueryRow(r.Context(), `
+		select g.tenant_id, g.inbox_id, g.kind, (g.archived or g.dissolved_at is not null), t.status
+		  from chat_group g join tenant t on t.id=g.tenant_id
+		 where g.id=$1`, gid).Scan(&tenant, &inbox, &kind, &closed, &status)
+	if err != nil || tenant != identity.TenantID || kind != "SERVICE" || (status != "ACTIVE" && status != "TRIAL") {
+		fail(w, 404, "群不存在或不可用")
+		return
+	}
+	if inbox != identity.InboxID {
+		failCode(w, 401, "IDENTITY_TOKEN_INVALID", "访客身份票据不属于此群入口")
+		return
+	}
+	if closed {
+		fail(w, 409, "群已归档或解散")
+		return
+	}
+
+	tx, e := a.db.Begin(r.Context())
+	if e != nil {
+		fail(w, 500, "打开群聊失败")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	name := strings.TrimSpace(identity.Name)
+	if name == "" {
+		name = "客户"
+	}
+	visitor, _, e = upsertVisitorExternal(r.Context(), tx, tenant, inbox, identity.ExternalID, name)
+	if e != nil {
+		fail(w, 500, "打开群聊失败")
+		return
+	}
+	var member bool
+	if tx.QueryRow(r.Context(), `select exists(select 1 from chat_group_member where group_id=$1 and actor_kind='widget' and actor_id=$2)`, gid, visitor).Scan(&member) != nil || !member {
+		fail(w, 403, "你还不是该群成员，请先接受邀请或由业务系统加人")
+		return
+	}
+	token, e := a.tokens.IssueWidget(tenant, inbox, visitor)
+	if e != nil || tx.Commit(r.Context()) != nil {
+		fail(w, 500, "打开群聊失败")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	respond(w, 200, map[string]any{"token": token, "groupId": gid, "visitorId": visitor})
 }
 func (a *API) groupPublish(ctx context.Context, id uuid.UUID) {
 	rows, e := a.db.Query(ctx, `select actor_kind,actor_id from chat_group_member where group_id=$1`, id)
