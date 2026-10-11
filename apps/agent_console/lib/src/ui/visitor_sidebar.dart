@@ -24,6 +24,8 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
   final _displayName = TextEditingController();
   List<VisitorNote> _notes = const <VisitorNote>[];
   List<Conversation> _history = const <Conversation>[];
+  VisitorProfile? _profile;
+  int _loadRevision = 0;
   bool _loading = false;
   bool _savingNote = false;
   String? _loadedVisitorId;
@@ -39,9 +41,14 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
   /// Loads the visitor record, notes and history whenever the open conversation
   /// changes to a different person.
   Future<void> _ensureLoaded(String visitorId) async {
-    if (_loadedVisitorId == visitorId || _loading) {
+    if (_loadedVisitorId == visitorId) {
       return;
     }
+    final revision = ++_loadRevision;
+    _loadedVisitorId = visitorId;
+    _profile = null;
+    _notes = const <VisitorNote>[];
+    _history = const <Conversation>[];
     _loading = true;
     _error = null;
     try {
@@ -51,19 +58,20 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
         api.notes(visitorId),
         api.visitorConversations(visitorId),
       ]);
-      if (!mounted) {
+      if (!mounted || revision != _loadRevision) {
         return;
       }
       setState(() {
         final profile = results[0] as VisitorProfile;
-        _loadedVisitorId = visitorId;
+        // 使用完整客户接口返回的会话数，切换客户时忽略旧请求结果。
+        _profile = profile;
         _displayName.text = profile.displayName;
         _notes = results[1] as List<VisitorNote>;
         _history = results[2] as List<Conversation>;
         _loading = false;
       });
     } catch (error) {
-      if (!mounted) {
+      if (!mounted || revision != _loadRevision) {
         return;
       }
       setState(() {
@@ -108,10 +116,17 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
       return;
     }
     try {
-      await widget.workbench.api.updateVisitor(id: visitorId, displayName: name);
+      await widget.workbench.api
+          .updateVisitor(id: visitorId, displayName: name);
       if (!mounted) {
         return;
       }
+      setState(() {
+        _loadedVisitorId = null;
+        _profile = null;
+      });
+      await widget.workbench.refreshConversations(silent: true);
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('客户名称已更新')),
       );
@@ -128,7 +143,9 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
     return ListenableBuilder(
       listenable: widget.workbench,
       builder: (context, _) {
-        final visitor = widget.workbench.detail?.visitor;
+        final detailVisitor = widget.workbench.detail?.visitor;
+        final visitor =
+            _profile?.id == detailVisitor?.id ? _profile : detailVisitor;
         if (visitor == null) {
           return const Center(child: Text('暂无可用的客户资料'));
         }
@@ -139,7 +156,26 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
             (_) => _ensureLoaded(visitor.id),
           );
         }
-        return ListView(
+        final scheme = Theme.of(context).colorScheme;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              height: 56,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              alignment: Alignment.centerLeft,
+              decoration: BoxDecoration(
+                border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
+              ),
+              child: Text(
+                '客户资料',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+            ),
+            Expanded(
+              child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
           children: <Widget>[
             _header(context, visitor),
@@ -165,12 +201,12 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
               ),
               const SizedBox(height: 18),
             ],
-            _sectionTitle(context, '客户资料'),
+            _sectionTitle(context, '显示名称'),
             const SizedBox(height: 8),
             TextField(
               controller: _displayName,
               decoration: InputDecoration(
-                labelText: '显示名称',
+                labelText: '昵称',
                 suffixIcon: IconButton(
                   tooltip: '保存',
                   icon: const Icon(Icons.check),
@@ -247,6 +283,9 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
                     : null,
               ),
           ],
+              ),
+            ),
+          ],
         );
       },
     );
@@ -261,9 +300,10 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
           height: 48,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: HSLColor.fromAHSL(1, avatarHue(visitor.id).toDouble(), 0.42, 0.62)
+            color: HSLColor.fromAHSL(
+                    1, avatarHue(visitor.id).toDouble(), 0.48, 0.58)
                 .toColor(),
-            shape: BoxShape.circle,
+            borderRadius: BorderRadius.circular(8),
           ),
           child: Text(
             initials(visitor.label),
@@ -283,12 +323,14 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
                 visitor.label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.titleSmall,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               Text(
                 visitor.externalId.isEmpty
                     ? '访客 ${shortId(visitor.id)}'
-                    : '外部 ID ${visitor.externalId}',
+                    : 'ID ${visitor.externalId}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.labelSmall?.copyWith(
@@ -307,8 +349,9 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withAlpha(90),
-        borderRadius: BorderRadius.circular(10),
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
       child: Column(
         children: <Widget>[
@@ -339,7 +382,8 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
     );
   }
 
-  Widget _factRow(BuildContext context, IconData icon, String label, String value) {
+  Widget _factRow(
+      BuildContext context, IconData icon, String label, String value) {
     final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
@@ -452,7 +496,9 @@ class _NoteRow extends StatelessWidget {
           const SizedBox(height: 2),
           SelectableText(note.content, style: theme.textTheme.bodySmall),
           const SizedBox(height: 6),
-          Divider(height: 1, color: theme.colorScheme.outlineVariant.withAlpha(120)),
+          Divider(
+              height: 1,
+              color: theme.colorScheme.outlineVariant.withAlpha(120)),
         ],
       ),
     );

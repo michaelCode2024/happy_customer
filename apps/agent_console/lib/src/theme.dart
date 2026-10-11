@@ -1,23 +1,36 @@
 import 'package:flutter/material.dart';
 
-/// 通语控制台主题：偏飞书/企微的浅色留白、细边与圆角，主色只承担行动与选中态。
+/// 通语控制台主题：对齐腾讯 IM / 云信 / 企点一类国内 B 端工作台。
+///
+/// 特征：腾讯蓝主色、会话列表白底选中浅蓝、聊天气泡区浅灰底、
+/// 坐席气泡实心蓝+白字、访客白气泡、圆角方形头像、信息密度偏高。
 class RelayTheme {
   const RelayTheme._();
 
-  /// 定稿主色，与 Logo 蓝一致。
-  static const Color seed = Color(0xFF2F6BFF);
+  /// 接近腾讯 IM / 企点常用主色，避免发紫。
+  static const Color seed = Color(0xFF147AFF);
 
-  static const Color visitorBubbleLight = Color(0xFFF2F4F7);
-  static const Color visitorBubbleDark = Color(0xFF26282E);
+  /// 会话列表选中行。
+  static const Color listSelectedLight = Color(0xFFE8F3FF);
+  static const Color listSelectedDark = Color(0xFF1A2A40);
 
-  /// 内容浮层的轻阴影，用来做出「卡片浮在画布上」的层次。
+  /// 消息区画布（微信/腾讯 IM 常见浅灰）。
+  static const Color chatCanvasLight = Color(0xFFEDEFF2);
+  static const Color chatCanvasDark = Color(0xFF111418);
+
+  /// 坐席气泡：实心蓝；访客：白底。
+  static const Color agentBubbleLight = Color(0xFF147AFF);
+  static const Color agentBubbleDark = Color(0xFF3B82F6);
+  static const Color visitorBubbleLight = Color(0xFFFFFFFF);
+  static const Color visitorBubbleDark = Color(0xFF2A2F38);
+
   static List<BoxShadow> softShadow(Brightness brightness) => [
         BoxShadow(
           color: brightness == Brightness.dark
               ? Colors.black.withOpacity(0.35)
-              : const Color(0xFF0F172A).withOpacity(0.06),
-          blurRadius: 24,
-          offset: const Offset(0, 8),
+              : const Color(0xFF0F172A).withOpacity(0.04),
+          blurRadius: 16,
+          offset: const Offset(0, 4),
         ),
       ];
 
@@ -28,26 +41,29 @@ class RelayTheme {
     );
     return _base(scheme.copyWith(
       primary: seed,
-      primaryContainer: const Color(0xFFE8F0FF),
-      onPrimaryContainer: const Color(0xFF1D4ED8),
+      primaryContainer: const Color(0xFFE8F3FF),
+      onPrimary: Colors.white,
+      onPrimaryContainer: const Color(0xFF0B4DB8),
+      secondary: const Color(0xFF5B6B7C),
       surface: Colors.white,
-      surfaceContainerHighest: const Color(0xFFF5F7FB),
-      outlineVariant: const Color(0xFFE6EAF0),
-      onSurface: const Color(0xFF111827),
-      onSurfaceVariant: const Color(0xFF6B7280),
+      surfaceContainerHighest: const Color(0xFFF5F7FA),
+      outlineVariant: const Color(0xFFE3E6EB),
+      onSurface: const Color(0xFF1F2329),
+      onSurfaceVariant: const Color(0xFF8F959E),
+      error: const Color(0xFFF53F3F),
     ));
   }
 
   static ThemeData dark() {
     final scheme = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF82A7FF),
+      seedColor: const Color(0xFF5BA3FF),
       brightness: Brightness.dark,
     );
     return _base(scheme.copyWith(
-      primary: const Color(0xFF82A7FF),
-      primaryContainer: const Color(0xFF243552),
-      surface: const Color(0xFF171B24),
-      surfaceContainerHighest: const Color(0xFF222735),
+      primary: const Color(0xFF5BA3FF),
+      primaryContainer: const Color(0xFF1A2A40),
+      surface: const Color(0xFF171B22),
+      surfaceContainerHighest: const Color(0xFF222733),
       outlineVariant: const Color(0xFF303848),
     ));
   }
@@ -70,38 +86,38 @@ class RelayTheme {
       colorScheme: scheme,
     ).textTheme.apply(fontFamilyFallback: _cjkFallback);
 
-    final radius = BorderRadius.circular(12);
+    final radius = BorderRadius.circular(8);
 
     return ThemeData(
       useMaterial3: true,
       colorScheme: scheme,
       textTheme: textTheme.copyWith(
-        bodyMedium: textTheme.bodyMedium?.copyWith(fontSize: 14, height: 1.55),
-        bodySmall: textTheme.bodySmall?.copyWith(fontSize: 12.5, height: 1.5),
-        titleMedium:
-            textTheme.titleMedium?.copyWith(fontSize: 15.5, fontWeight: FontWeight.w600),
-        titleSmall:
-            textTheme.titleSmall?.copyWith(fontSize: 14, fontWeight: FontWeight.w600),
+        bodyMedium: textTheme.bodyMedium?.copyWith(fontSize: 14, height: 1.5),
+        bodySmall: textTheme.bodySmall?.copyWith(fontSize: 12, height: 1.4),
+        titleMedium: textTheme.titleMedium
+            ?.copyWith(fontSize: 15, fontWeight: FontWeight.w600),
+        titleSmall: textTheme.titleSmall
+            ?.copyWith(fontSize: 14, fontWeight: FontWeight.w600),
         headlineSmall: textTheme.headlineSmall?.copyWith(
           fontWeight: FontWeight.w700,
-          letterSpacing: -0.3,
+          letterSpacing: -0.2,
         ),
       ),
       primaryTextTheme: textTheme,
       iconTheme: IconThemeData(size: 20, color: scheme.onSurfaceVariant),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          minimumSize: const Size(64, 36),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          minimumSize: const Size(64, 34),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: scheme.onSurface,
-          minimumSize: const Size(80, 38),
+          minimumSize: const Size(80, 36),
           side: BorderSide(color: scheme.outlineVariant),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
         ),
       ),
       checkboxTheme: CheckboxThemeData(
@@ -109,31 +125,32 @@ class RelayTheme {
         side: BorderSide(color: scheme.outlineVariant, width: 1.5),
       ),
       chipTheme: ChipThemeData(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
         side: BorderSide(color: scheme.outlineVariant),
         showCheckmark: false,
-        labelStyle: const TextStyle(fontSize: 13),
+        labelStyle: const TextStyle(fontSize: 12),
         backgroundColor: scheme.surfaceContainerHighest,
+        padding: const EdgeInsets.symmetric(horizontal: 6),
       ),
       fontFamilyFallback: _cjkFallback,
-      // 外层略冷灰画布，内层纯白浮层；避免脏灰或发紫底。
+      // 国内 IM 控制台：整页浅灰底，三栏贴边，少「浮卡片」。
       scaffoldBackgroundColor:
-          isDark ? const Color(0xFF0F1218) : const Color(0xFFF3F5F9),
+          isDark ? const Color(0xFF0F1218) : const Color(0xFFF0F2F5),
       appBarTheme: AppBarTheme(
-        toolbarHeight: 56,
+        toolbarHeight: 52,
         scrolledUnderElevation: 0,
-        backgroundColor: isDark ? const Color(0xFF171B24) : Colors.white,
+        backgroundColor: isDark ? const Color(0xFF171B22) : Colors.white,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         titleTextStyle: TextStyle(
           color: scheme.onSurface,
-          fontSize: 17,
+          fontSize: 16,
           fontWeight: FontWeight.w600,
           fontFamilyFallback: _cjkFallback,
         ),
       ),
       navigationRailTheme: NavigationRailThemeData(
-        backgroundColor: isDark ? const Color(0xFF171B24) : Colors.white,
+        backgroundColor: isDark ? const Color(0xFF171B22) : Colors.white,
         indicatorColor: scheme.primaryContainer,
         selectedIconTheme: IconThemeData(color: scheme.primary, size: 22),
         unselectedIconTheme:
@@ -141,17 +158,19 @@ class RelayTheme {
         labelType: NavigationRailLabelType.none,
       ),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: isDark ? const Color(0xFF171B24) : Colors.white,
+        backgroundColor: isDark ? const Color(0xFF171B22) : Colors.white,
         indicatorColor: scheme.primaryContainer,
-        height: 64,
+        height: 60,
         elevation: 0,
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          minimumSize: const Size(88, 40),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          backgroundColor: seed,
+          foregroundColor: Colors.white,
+          minimumSize: const Size(72, 36),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
         ),
       ),
       cardTheme: CardTheme(
@@ -161,19 +180,19 @@ class RelayTheme {
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
           borderRadius: radius,
-          side: BorderSide(color: scheme.outlineVariant.withOpacity(0.9)),
+          side: BorderSide(color: scheme.outlineVariant),
         ),
       ),
       dialogTheme: DialogTheme(
         backgroundColor: scheme.surface,
         surfaceTintColor: Colors.transparent,
         titleTextStyle: TextStyle(
-          fontSize: 20,
+          fontSize: 18,
           fontWeight: FontWeight.w700,
           color: scheme.onSurface,
           fontFamilyFallback: _cjkFallback,
         ),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
       tabBarTheme: TabBarTheme(
         labelColor: scheme.primary,
@@ -186,15 +205,15 @@ class RelayTheme {
       dataTableTheme: DataTableThemeData(
         headingRowColor: WidgetStatePropertyAll(scheme.surfaceContainerHighest),
         headingRowHeight: 44,
-        dataRowMinHeight: 52,
-        dataRowMaxHeight: 64,
-        horizontalMargin: 20,
-        columnSpacing: 28,
+        dataRowMinHeight: 48,
+        dataRowMaxHeight: 56,
+        horizontalMargin: 16,
+        columnSpacing: 24,
       ),
       segmentedButtonTheme: SegmentedButtonThemeData(
         style: ButtonStyle(
           shape: WidgetStatePropertyAll(
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
           ),
           side: WidgetStatePropertyAll(BorderSide(color: scheme.outlineVariant)),
         ),
@@ -203,15 +222,15 @@ class RelayTheme {
       dividerTheme: DividerThemeData(
         space: 1,
         thickness: 1,
-        color: scheme.outlineVariant.withAlpha(isDark ? 100 : 160),
+        color: scheme.outlineVariant,
       ),
       inputDecorationTheme: InputDecorationTheme(
         isDense: true,
         contentPadding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
         hintStyle: TextStyle(
           fontSize: 13,
-          color: scheme.onSurfaceVariant.withAlpha(150),
+          color: scheme.onSurfaceVariant.withAlpha(160),
         ),
         labelStyle: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
         helperStyle: TextStyle(
@@ -220,18 +239,18 @@ class RelayTheme {
         ),
         errorMaxLines: 2,
         filled: true,
-        fillColor: isDark ? const Color(0xFF1F2430) : const Color(0xFFF8FAFC),
+        fillColor: isDark ? const Color(0xFF1F2430) : const Color(0xFFF5F6F8),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: scheme.outlineVariant),
+          borderRadius: BorderRadius.circular(6),
+          borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: scheme.outlineVariant),
+          borderRadius: BorderRadius.circular(6),
+          borderSide: BorderSide.none,
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: scheme.primary, width: 1.5),
+          borderRadius: BorderRadius.circular(6),
+          borderSide: BorderSide(color: scheme.primary, width: 1.2),
         ),
       ),
       listTileTheme: const ListTileThemeData(
@@ -241,17 +260,28 @@ class RelayTheme {
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         showCloseIcon: true,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
       tooltipTheme:
           const TooltipThemeData(waitDuration: Duration(milliseconds: 500)),
     );
   }
 
+  static Color chatCanvas(ColorScheme scheme) =>
+      scheme.brightness == Brightness.dark ? chatCanvasDark : chatCanvasLight;
+
+  static Color agentBubble(ColorScheme scheme) =>
+      scheme.brightness == Brightness.dark ? agentBubbleDark : agentBubbleLight;
+
   static Color visitorBubble(ColorScheme scheme) =>
       scheme.brightness == Brightness.dark
           ? visitorBubbleDark
           : visitorBubbleLight;
+
+  static Color listSelected(ColorScheme scheme) =>
+      scheme.brightness == Brightness.dark
+          ? listSelectedDark
+          : listSelectedLight;
 
   static Color tagTint(ColorScheme scheme) =>
       scheme.brightness == Brightness.dark

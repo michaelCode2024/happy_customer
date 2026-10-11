@@ -192,10 +192,11 @@ class WorkspaceSidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final dark = scheme.brightness == Brightness.dark;
+    // 左侧导航纯白/深色贴边，与腾讯云控制台侧栏一致，不做灰渐变。
     return Container(
-      width: 240,
+      width: 220,
       decoration: BoxDecoration(
-        color: dark ? const Color(0xFF151922) : const Color(0xFFFAFBFD),
+        color: dark ? const Color(0xFF151922) : Colors.white,
         border: Border(right: BorderSide(color: scheme.outlineVariant)),
       ),
       child: Column(
@@ -345,7 +346,7 @@ class WorkspaceSidebar extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 16, 16),
             child: Text(
-              '不会用？先点「客户消息」接待',
+              '通语工作台',
               style: TextStyle(fontSize: 11, color: scheme.outline, height: 1.35),
             ),
           ),

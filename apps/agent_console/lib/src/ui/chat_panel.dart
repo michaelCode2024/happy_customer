@@ -491,25 +491,28 @@ class _ChatPanelState extends State<ChatPanel> {
                     _scrollToMessage(workbench, message.sequence),
                 onUnpin: workbench.togglePin,
               ),
-            const Divider(height: 1),
             Expanded(
-              child: _MessageList(
-                key: ValueKey<String>(conversation.id),
-                workbench: workbench,
-                scroll: _scroll,
-                flashSequence: _flashSequence,
-                onRetry: workbench.retry,
-                onLoadOlder: workbench.loadOlder,
-                onQuote: workbench.quote,
-                onEdit: _editMessage,
-                onRecall: _recallMessage,
-                onReact: _pickReaction,
-                onPin: workbench.togglePin,
-                onForward: _forwardMessage,
-                onJumpToBottom: () => _scrollToBottom(force: true),
+              // 消息区浅灰底：对齐微信 / 腾讯 IM，和白底列表、白底输入区分层。
+              child: ColoredBox(
+                color: RelayTheme.chatCanvas(
+                    Theme.of(context).colorScheme),
+                child: _MessageList(
+                  key: ValueKey<String>(conversation.id),
+                  workbench: workbench,
+                  scroll: _scroll,
+                  flashSequence: _flashSequence,
+                  onRetry: workbench.retry,
+                  onLoadOlder: workbench.loadOlder,
+                  onQuote: workbench.quote,
+                  onEdit: _editMessage,
+                  onRecall: _recallMessage,
+                  onReact: _pickReaction,
+                  onPin: workbench.togglePin,
+                  onForward: _forwardMessage,
+                  onJumpToBottom: () => _scrollToBottom(force: true),
+                ),
               ),
             ),
-            const Divider(height: 1),
             _Composer(
               controller: _composer,
               focusNode: _composerFocus,
@@ -588,107 +591,39 @@ class _EmptyThread extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return Container(
-      color: scheme.surface,
+    // 空态也用消息区画布色，避免中间一块「营销卡片」打断三栏工作台。
+    return ColoredBox(
+      color: RelayTheme.chatCanvas(scheme),
       child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 88,
-                  height: 88,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        scheme.primary,
-                        Color.lerp(
-                            scheme.primary, const Color(0xFF22D3EE), 0.4)!,
-                      ],
-                    ),
-                    borderRadius: BorderRadius.circular(28),
-                    boxShadow: [
-                      BoxShadow(
-                        color: scheme.primary.withOpacity(0.25),
-                        blurRadius: 28,
-                        offset: const Offset(0, 12),
-                      ),
-                    ],
-                  ),
-                  child: const Icon(Icons.forum_rounded,
-                      color: Colors.white, size: 42),
-                ),
-                const SizedBox(height: 28),
-                Text(
-                  '欢迎使用通语',
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.4,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  '从左侧选择会话开始接待。客户消息会实时进入收件箱，已读、送达与发送状态都会显示在气泡下方。',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                    height: 1.55,
-                  ),
-                ),
-                const SizedBox(height: 28),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  alignment: WrapAlignment.center,
-                  children: const [
-                    _WelcomeChip(Icons.mark_chat_read_outlined, '已读回执'),
-                    _WelcomeChip(Icons.bolt_outlined, '实时同步'),
-                    _WelcomeChip(Icons.support_agent_outlined, '团队协作'),
-                  ],
-                ),
-              ],
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: scheme.primary.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Icon(Icons.chat_bubble_outline_rounded,
+                  color: scheme.primary, size: 30),
             ),
-          ),
+            const SizedBox(height: 18),
+            Text(
+              '选择左侧会话开始聊天',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '客户消息、已读与送达状态会显示在气泡下方',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ],
         ),
-      ),
-    );
-  }
-}
-
-class _WelcomeChip extends StatelessWidget {
-  const _WelcomeChip(this.icon, this.label);
-
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 15, color: scheme.primary),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: scheme.onSurfaceVariant,
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -715,7 +650,8 @@ class _ThreadHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 10, 12),
+      height: 56,
+      padding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         border: Border(
@@ -727,6 +663,7 @@ class _ThreadHeader extends StatelessWidget {
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 Row(
@@ -738,6 +675,7 @@ class _ThreadHeader extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleSmall?.copyWith(
                           fontWeight: FontWeight.w700,
+                          fontSize: 16,
                         ),
                       ),
                     ),
@@ -745,11 +683,11 @@ class _ThreadHeader extends StatelessWidget {
                     if (conversation.isResolved)
                       const _HeaderChip(label: '已解决', tone: _ChipTone.neutral)
                     else if (conversation.isUnassigned)
-                      const _HeaderChip(label: '未分配', tone: _ChipTone.warn)
+                      const _HeaderChip(label: '待接待', tone: _ChipTone.warn)
                     else
                       _HeaderChip(
                         label: conversation.assigneeName.isEmpty
-                            ? '处理中'
+                            ? '接待中'
                             : conversation.assigneeName,
                         tone: _ChipTone.info,
                       ),
@@ -767,13 +705,9 @@ class _ThreadHeader extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   [
-                    '会话 ${shortId(conversation.id)}',
-                    '来源 ${conversationSourceLabel(conversation.source)}',
-                    '开始于 ${fullTime(conversation.createdAt)}',
+                    conversationSourceLabel(conversation.source),
                     if (conversation.visitorUnread > 0)
                       '访客未读 ${conversation.visitorUnread}',
-                    if (conversation.agentUnread > 0)
-                      '我方未读 ${conversation.agentUnread}',
                   ].join(' · '),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -1473,9 +1407,9 @@ class _MessageBubble extends StatelessWidget {
     }
 
     final isAgent = message.isFromAgent;
-    final textColor = isAgent
-        ? theme.colorScheme.onPrimaryContainer
-        : theme.colorScheme.onSurface;
+    // 坐席实心蓝气泡用白字；访客白气泡用正文色（腾讯 IM / 云信习惯）。
+    final textColor =
+        isAgent ? Colors.white : theme.colorScheme.onSurface;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -1643,9 +1577,10 @@ class _BubbleShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final bubbleColor = isAgent
-        ? theme.colorScheme.primaryContainer
-        : RelayTheme.visitorBubble(theme.colorScheme);
+        ? RelayTheme.agentBubble(scheme)
+        : RelayTheme.visitorBubble(scheme);
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 720),
       child: FractionallySizedBox(
@@ -1653,25 +1588,37 @@ class _BubbleShell extends StatelessWidget {
         alignment: isAgent ? Alignment.centerRight : Alignment.centerLeft,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 250),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
           decoration: BoxDecoration(
             color: bubbleColor,
+            // 小圆角+尖角侧，贴近国内 IM 气泡形态。
             borderRadius: BorderRadius.only(
-              topLeft: const Radius.circular(16),
-              topRight: const Radius.circular(16),
-              bottomLeft: Radius.circular(isAgent ? 16 : 4),
-              bottomRight: Radius.circular(isAgent ? 4 : 16),
+              topLeft: const Radius.circular(8),
+              topRight: const Radius.circular(8),
+              bottomLeft: Radius.circular(isAgent ? 8 : 2),
+              bottomRight: Radius.circular(isAgent ? 2 : 8),
             ),
             border: flash
-                ? Border.all(color: theme.colorScheme.primary, width: 2)
+                ? Border.all(color: scheme.primary, width: 2)
                 : (!isAgent
-                    ? Border.all(
-                        color:
-                            theme.colorScheme.outlineVariant.withOpacity(0.7),
-                      )
+                    ? Border.all(color: scheme.outlineVariant)
                     : null),
+            boxShadow: isAgent
+                ? null
+                : [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.04),
+                      blurRadius: 4,
+                      offset: const Offset(0, 1),
+                    ),
+                  ],
           ),
-          child: child,
+          child: DefaultTextStyle.merge(
+            style: TextStyle(
+              color: isAgent ? Colors.white : scheme.onSurface,
+            ),
+            child: child,
+          ),
         ),
       ),
     );
@@ -1689,8 +1636,9 @@ class _QuoteBlock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // onSurface=true 表示嵌在坐席蓝气泡内，引用条用半透明白。
     final color = onSurface
-        ? theme.colorScheme.onPrimaryContainer
+        ? Colors.white.withOpacity(0.92)
         : theme.colorScheme.onSurfaceVariant;
     return Container(
       padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
@@ -2412,8 +2360,11 @@ class _Composer extends StatelessWidget {
     }
 
     return Container(
-        color: scheme.surface,
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+        decoration: BoxDecoration(
+          color: scheme.surface,
+          border: Border(top: BorderSide(color: scheme.outlineVariant)),
+        ),
+        padding: const EdgeInsets.fromLTRB(10, 6, 12, 10),
         child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
@@ -2427,7 +2378,7 @@ class _Composer extends StatelessWidget {
                     padding: const EdgeInsets.fromLTRB(10, 6, 4, 6),
                     decoration: BoxDecoration(
                         color: scheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(6)),
+                        borderRadius: BorderRadius.circular(4)),
                     child: Row(children: [
                       Icon(Icons.reply, size: 15, color: scheme.primary),
                       const SizedBox(width: 8),
@@ -2456,14 +2407,13 @@ class _Composer extends StatelessWidget {
                             '${attachment.fileName} · ${fileSize(attachment.sizeBytes)}'),
                         onDeleted: () => onRemovePending(attachment.id))
                 ]),
-              Wrap(
-                  spacing: 2,
-                  crossAxisAlignment: WrapCrossAlignment.center,
+              // 工具栏在上、输入在下：对齐腾讯 IM / 企点输入区。
+              Row(
                   children: [
                     PopupMenuButton<String>(
                         tooltip: '表情',
-                        icon: const Icon(Icons.sentiment_satisfied_alt_outlined,
-                            size: 21),
+                        icon: Icon(Icons.sentiment_satisfied_alt_outlined,
+                            size: 22, color: scheme.onSurfaceVariant),
                         onSelected: insert,
                         itemBuilder: (_) => [
                               for (final emoji in [
@@ -2484,12 +2434,14 @@ class _Composer extends StatelessWidget {
                     IconButton(
                         tooltip: '发送图片',
                         onPressed: uploading ? null : onPickImage,
-                        icon: const Icon(Icons.image_outlined, size: 21)),
+                        icon: Icon(Icons.image_outlined,
+                            size: 22, color: scheme.onSurfaceVariant)),
                     if (supportsFiles)
                       IconButton(
                           tooltip: '发送文件',
                           onPressed: uploading ? null : onPickFile,
-                          icon: const Icon(Icons.attach_file, size: 21)),
+                          icon: Icon(Icons.folder_open_outlined,
+                              size: 22, color: scheme.onSurfaceVariant)),
                     if (canned.isNotEmpty)
                       _CannedMenu(
                           canned: canned,
@@ -2500,19 +2452,15 @@ class _Composer extends StatelessWidget {
                             onChanged(content);
                             focusNode.requestFocus();
                           }),
-                    const SizedBox(width: 8),
-                    TextButton.icon(
+                    const Spacer(),
+                    TextButton(
                         onPressed: () => onToggleNote(!noteMode),
-                        icon: Icon(
-                            noteMode
-                                ? Icons.lock_outline
-                                : Icons.sticky_note_2_outlined,
-                            size: 16),
-                        label: Text(noteMode ? '内部备注' : '回复访客'),
                         style: TextButton.styleFrom(
                             foregroundColor: noteMode
                                 ? scheme.tertiary
-                                : scheme.onSurfaceVariant)),
+                                : scheme.onSurfaceVariant,
+                            visualDensity: VisualDensity.compact),
+                        child: Text(noteMode ? '内部备注' : '公开回复')),
                     if (uploading)
                       const SizedBox(
                           width: 16,
@@ -2535,8 +2483,8 @@ class _Composer extends StatelessWidget {
                       child: TextField(
                           controller: controller,
                           focusNode: focusNode,
-                          minLines: compact ? 1 : 3,
-                          maxLines: compact ? 4 : 6,
+                          minLines: compact ? 1 : 2,
+                          maxLines: compact ? 4 : 5,
                           onChanged: onChanged,
                           textInputAction: TextInputAction.newline,
                           keyboardType: TextInputType.multiline,
@@ -2545,26 +2493,37 @@ class _Composer extends StatelessWidget {
                                   ? '写一条内部备注，访客看不到'
                                   : visitorTyping
                                       ? '对方正在输入…'
-                                      : '请输入消息...',
+                                      : '输入消息，Enter 发送',
                               filled: true,
                               fillColor: noteMode
                                   ? scheme.tertiaryContainer.withAlpha(35)
-                                  : scheme.surface,
-                              border: InputBorder.none,
-                              enabledBorder: InputBorder.none,
-                              focusedBorder: InputBorder.none,
+                                  : const Color(0xFFF5F6F8),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(6),
+                                borderSide: BorderSide.none,
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(6),
+                                borderSide: BorderSide.none,
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(6),
+                                borderSide: BorderSide(
+                                    color: scheme.primary, width: 1),
+                              ),
                               contentPadding: const EdgeInsets.symmetric(
-                                  vertical: 10, horizontal: 4),
+                                  vertical: 10, horizontal: 12),
                               hintStyle: theme.textTheme.bodyMedium
                                   ?.copyWith(color: scheme.outline))))),
+              const SizedBox(height: 6),
               Row(children: [
                 Expanded(
                     child: Text(
                         noteMode
                             ? '仅团队成员可见'
                             : compact
-                                ? 'Shift + Enter 换行'
-                                : 'Enter 发送，Shift + Enter 换行',
+                                ? 'Shift+Enter 换行'
+                                : 'Enter 发送 · Shift+Enter 换行',
                         style: theme.textTheme.bodySmall
                             ?.copyWith(color: scheme.outline))),
                 FilledButton(

@@ -19,7 +19,6 @@ import 'package:relaydesk_agent_console/src/ui/knowledge_page.dart';
 import 'package:relaydesk_agent_console/src/ui/settings_page.dart';
 import 'package:relaydesk_agent_console/src/ui/tenant_admin_page.dart';
 import 'package:relaydesk_agent_console/src/ui/stats_page.dart';
-import 'package:relaydesk_agent_console/src/theme.dart';
 import 'package:relaydesk_agent_console/src/ui/visitor_sidebar.dart';
 import 'package:relaydesk_agent_console/src/util/attachment_picker.dart';
 import 'package:relaydesk_agent_console/src/util/voice_player.dart';
@@ -423,13 +422,12 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                 ),
               );
             }
-            // 宽屏：细图标轨 + 内容浮层，会话页不再叠一层厚顶栏抢高度。
+            // 宽屏：左侧导航 + 内容区。接待页贴边三栏（企点/腾讯 IM）；其它页保留轻顶栏。
             final showChrome = _section != WorkbenchSection.conversations;
+            final inbox = _section == WorkbenchSection.conversations;
             return Scaffold(
               body: Row(
                 children: [
-                  // 宽屏用完整侧栏（232px + 中文全名），不再用 88px 图标轨；
-                  // 此前「展开」只是短名，用户体感仍像未展开。
                   ListenableBuilder(
                     listenable: _workbench,
                     builder: (context, _) => WorkspaceSidebar(
@@ -460,36 +458,41 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                     ),
                   ),
                   Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.surface,
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(
-                            color: Theme.of(context).colorScheme.outlineVariant,
-                          ),
-                          boxShadow: RelayTheme.softShadow(
-                            Theme.of(context).brightness,
-                          ),
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(18),
-                          child: Column(
-                            children: [
-                              if (showChrome)
-                                _WorkbenchChromeBar(
-                                  tenantName:
-                                      widget.session.tenant?.name ?? '企业工作空间',
-                                  sectionTitle: _sectionTitle(_section),
-                                  workbench: _workbench,
+                    child: inbox
+                        ? ColoredBox(
+                            color: Theme.of(context).colorScheme.surface,
+                            child: body,
+                          )
+                        : Padding(
+                            padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).colorScheme.surface,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .outlineVariant,
                                 ),
-                              Expanded(child: body),
-                            ],
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: Column(
+                                  children: [
+                                    if (showChrome)
+                                      _WorkbenchChromeBar(
+                                        tenantName:
+                                            widget.session.tenant?.name ??
+                                                '企业工作空间',
+                                        sectionTitle: _sectionTitle(_section),
+                                        workbench: _workbench,
+                                      ),
+                                    Expanded(child: body),
+                                  ],
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
-                      ),
-                    ),
                   ),
                 ],
               ),
@@ -582,12 +585,14 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
       onOpenProfile: inlineProfile ? null : () => _openProfile(),
     );
 
+    // 企点式三栏：会话列表 | 聊天 | 客户资料，竖分割线贴边。
     return Row(
       children: <Widget>[
         SizedBox(
-          width: width >= 1100 ? 320 : 292,
+          width: width >= 1100 ? 300 : 280,
           child: DecoratedBox(
             decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
               border: Border(
                 right: BorderSide(
                   color: Theme.of(context).colorScheme.outlineVariant,
@@ -608,6 +613,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
         if (inlineProfile) ...<Widget>[
           DecoratedBox(
             decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
               border: Border(
                 left: BorderSide(
                   color: Theme.of(context).colorScheme.outlineVariant,
@@ -615,7 +621,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
               ),
             ),
             child: SizedBox(
-              width: 292,
+              width: 280,
               child: VisitorSidebar(workbench: _workbench),
             ),
           ),
