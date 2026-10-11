@@ -345,9 +345,12 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
             return Scaffold(
               body: Row(
                 children: [
+                  // 宽屏用完整侧栏（232px + 中文全名），不再用 88px 图标轨；
+                  // 此前「展开」只是短名，用户体感仍像未展开。
                   ListenableBuilder(
                     listenable: _workbench,
-                    builder: (context, _) => ConsoleIconRail(
+                    builder: (context, _) => WorkspaceSidebar(
+                      subtitle: widget.session.tenant?.name ?? '企业工作空间',
                       selectedIndex: sections
                           .indexWhere((spec) => spec.section == _section),
                       onSelected: (index) =>
@@ -365,7 +368,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                                     : 0,
                           ),
                       ],
-                      avatar: _RailLeading(agent: agent, extended: false),
+                      leading: _RailLeading(agent: agent, extended: true),
                       footer: _ConnectionBadge(workbench: _workbench),
                     ),
                   ),
