@@ -44,6 +44,8 @@ class MessagePage {
     this.firstSequence = 0,
     this.lastReadSequence = 0,
     this.visitorUnread = 0,
+    this.visitorLastReadSequence = 0,
+    this.visitorLastDeliveredSequence = 0,
   });
 
   final List<ChatMessage> items;
@@ -67,6 +69,12 @@ class MessagePage {
 
   /// How many messages the visitor has not read, shown on the thread header.
   final int visitorUnread;
+
+  /// 访客已读到的最大序号，用于坐席气泡「已读」。
+  final int visitorLastReadSequence;
+
+  /// 访客端已收到的最大序号，用于坐席气泡「已送达」。
+  final int visitorLastDeliveredSequence;
 }
 
 class ConversationPage {
@@ -101,6 +109,10 @@ class RelayDeskApi {
 
   /// The bearer token, set once at sign-in and cleared on sign-out.
   String token = '';
+
+  Future<Map<String, dynamic>> groupRequest(String method, String path,
+          {Map<String, dynamic>? body}) =>
+      _send(method, '/api/v1/groups$path', body: body);
 
   bool get hasToken => token.isNotEmpty;
 
@@ -146,6 +158,16 @@ class RelayDeskApi {
   }
 
   /// Tenant developer console. These endpoints require OWNER or ADMIN.
+  Future<Map<String, dynamic>> entitlements() =>
+      _send('GET', '/api/v1/console/entitlements');
+
+  Future<Map<String, dynamic>> adminGet(String resource) =>
+      _send('GET', '/api/v1/admin/$resource');
+
+  Future<Map<String, dynamic>> adminWrite(
+          String method, String resource, Map<String, dynamic> body) =>
+      _send(method, '/api/v1/admin/$resource', body: body);
+
   Future<List<Map<String, dynamic>>> integrationInboxes() async =>
       asMapList((await _send('GET', '/api/v1/admin/inboxes'))['items']);
 
@@ -227,8 +249,13 @@ class RelayDeskApi {
 
   Future<AgentProfile> me() async {
     final body = await _send('GET', '/api/v1/console/me');
+    if (body['tenant'] != null) {
+      currentTenant = TenantInfo.fromJson(asMap(body['tenant']));
+    }
     return AgentProfile.fromJson(body);
   }
+
+  TenantInfo? currentTenant;
 
   /// The presence call returns 200 and the console treats it as fire and forget:
   /// a dropped status update must never block the UI.
@@ -293,6 +320,19 @@ class RelayDeskApi {
     );
   }
 
+  Future<MessagePage> channelMessages(String inboxId, String conversationId,
+      {int after = 0}) async {
+    final body = await adminGet(
+        'inboxes/${Uri.encodeComponent(inboxId)}/conversations/${Uri.encodeComponent(conversationId)}/messages?after=$after');
+    return MessagePage(
+        items: asMapList(body['items'])
+            .map((item) => ChatMessage.fromJson(item, selfId: ''))
+            .toList(),
+        lastSequence: asInt(body['lastSequence']),
+        agentUnread: 0,
+        hasMore: asBool(body['hasMore']));
+  }
+
   Future<ConversationDetail> conversation(String id) async {
     final body = await _send('GET', '/api/v1/console/conversations/$id');
     return ConversationDetail.fromJson(body);
@@ -328,6 +368,8 @@ class RelayDeskApi {
       firstSequence: asInt(body['firstSequence']),
       lastReadSequence: asInt(body['lastReadSequence']),
       visitorUnread: asInt(body['visitorUnread']),
+      visitorLastReadSequence: asInt(body['visitorLastReadSequence']),
+      visitorLastDeliveredSequence: asInt(body['visitorLastDeliveredSequence']),
     );
   }
 
@@ -722,8 +764,13 @@ class RelayDeskApi {
   /// Creates an entry and returns its id. The server stores the example
   /// phrasings as one newline-separated block of text, so the list is joined
   /// here; the console is the only place that thinks of them as separate lines.
+  Future<List<Map<String, dynamic>>> knowledgeCategories() async {
+    final body =
+        await _send('GET', '/api/v1/console/knowledge-categories');
+    return asMapList(body['items']);
+  }
   Future<String> createKnowledge({
-    required String title,
+    required String title, String categoryId='',
     required String content,
     List<String> questionExamples = const <String>[],
   }) async {
@@ -731,7 +778,7 @@ class RelayDeskApi {
       'POST',
       '/api/v1/console/knowledge',
       body: <String, dynamic>{
-        'title': title,
+        'title': title,'categoryId':categoryId,
         'content': content,
         'questionExamples': joinExamples(questionExamples),
       },
@@ -740,7 +787,7 @@ class RelayDeskApi {
   }
 
   Future<void> updateKnowledge({
-    required String id,
+    required String id,String? categoryId,
     String title = '',
     String content = '',
     List<String>? questionExamples,
@@ -749,7 +796,7 @@ class RelayDeskApi {
       'PATCH',
       '/api/v1/console/knowledge/$id',
       body: <String, dynamic>{
-        'title': title,
+        'title': title,if(categoryId!=null)'categoryId':categoryId,
         'content': content,
         if (questionExamples != null)
           'questionExamples': joinExamples(questionExamples),
