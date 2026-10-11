@@ -15,50 +15,27 @@ import (
 
 // registerPlatform is the RelayDesk operations API. It is the only API that may
 // cross tenant boundaries: creating tenants, changing plans, suspending abuse
-// and platform-wide reporting. It is protected by PLATFORM_ADMIN_TOKEN or a
-// platform token issued from it.
+// and platform-wide reporting. Platform accounts use revocable password sessions.
 func (a *API) registerPlatform(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/v1/platform/token", a.platformIssueToken)
+	mux.HandleFunc("POST /api/v1/platform/login", a.limit(a.loginRate, a.platformLogin))
+	mux.HandleFunc("POST /api/v1/platform/token", func(w http.ResponseWriter, r *http.Request) {
+		failCode(w, 410, "PASSWORD_LOGIN_REQUIRED", "平台已改为账号密码登录，请使用 /api/v1/platform/login")
+	})
 
 	platform := a.requirePlatform
+	mux.HandleFunc("GET /api/v1/platform/me", platform(a.platformMe))
+	mux.HandleFunc("POST /api/v1/platform/logout", platform(a.platformLogout))
+	mux.HandleFunc("POST /api/v1/platform/me/password", platform(a.platformPassword))
 	mux.HandleFunc("GET /api/v1/platform/overview", platform(a.platformOverview))
 	mux.HandleFunc("GET /api/v1/platform/tenants", platform(a.platformTenants))
 	mux.HandleFunc("POST /api/v1/platform/tenants", platform(a.platformCreateTenant))
 	mux.HandleFunc("GET /api/v1/platform/tenants/{id}", platform(a.platformTenant))
+	mux.HandleFunc("POST /api/v1/platform/tenants/{id}/agents", platform(a.platformCreateAgent))
 	mux.HandleFunc("PATCH /api/v1/platform/tenants/{id}", platform(a.platformUpdateTenant))
 	mux.HandleFunc("POST /api/v1/platform/tenants/{id}/trial", platform(a.platformExtendTrial))
 	mux.HandleFunc("POST /api/v1/platform/tenants/{id}/owner", platform(a.platformResetOwner))
 	mux.HandleFunc("GET /api/v1/platform/ai-usage", platform(a.platformAIUsage))
 	mux.HandleFunc("GET /api/v1/platform/release-notes", platform(a.platformMeta))
-}
-
-// platformIssueToken exchanges the static PLATFORM_ADMIN_TOKEN for a short-lived
-// bearer token, so the static secret is not typed into long-lived tooling.
-func (a *API) platformIssueToken(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Token string `json:"token"`
-		Label string `json:"label"`
-	}
-	if !decode(w, r, &in) {
-		return
-	}
-	if !subtleEqual(in.Token, a.cfg.PlatformAdminToken) {
-		// Constant-time comparison already happened; the delay is not needed for
-		// security but keeps brute-force attempts cheap to detect in logs.
-		a.logger.Warn("platform token rejected", "ip", clientIP(r))
-		failCode(w, 401, "PLATFORM_TOKEN_INVALID", "平台管理令牌无效")
-		return
-	}
-	label := strings.TrimSpace(in.Label)
-	if label == "" {
-		label = "platform-console"
-	}
-	token, err := a.tokens.IssuePlatform(label)
-	if err != nil {
-		fail(w, 500, "签发令牌失败")
-		return
-	}
-	respond(w, 200, map[string]any{"token": token, "expiresIn": 24 * 3600, "label": label})
 }
 
 func (a *API) platformOverview(w http.ResponseWriter, r *http.Request, _ auth.Principal) {
@@ -120,6 +97,10 @@ func (a *API) platformOverview(w http.ResponseWriter, r *http.Request, _ auth.Pr
 func (a *API) platformTenants(w http.ResponseWriter, r *http.Request, _ auth.Principal) {
 	search := strings.TrimSpace(r.URL.Query().Get("q"))
 	limit := queryInt(r, "limit", 50)
+	offset := queryInt(r, "offset", 0)
+	if offset < 0 {
+		offset = 0
+	}
 	if limit > 200 {
 		limit = 200
 	}
@@ -133,7 +114,7 @@ func (a *API) platformTenants(w http.ResponseWriter, r *http.Request, _ auth.Pri
 		       (select count(*)::int from conversation c where c.tenant_id = t.id and c.status <> 'RESOLVED')
 		  from tenant t left join tenant_subscription s on s.tenant_id = t.id
 		 where ($1 = '' or t.name ilike '%' || $1 || '%' or t.slug ilike '%' || $1 || '%')
-		 order by t.created_at desc limit $2`, search, limit)
+		 order by t.created_at desc, t.id desc limit $2 offset $3`, search, limit, offset)
 	if err != nil {
 		fail(w, 500, "查询租户失败")
 		return
@@ -192,8 +173,8 @@ func (a *API) platformCreateTenant(w http.ResponseWriter, r *http.Request, _ aut
 		slug = "t" + strings.ReplaceAll(uuid.NewString(), "-", "")[:10]
 	}
 	email := strings.ToLower(strings.TrimSpace(in.OwnerEmail))
-	if !strings.Contains(email, "@") {
-		fail(w, 400, "所有者邮箱格式不正确")
+	if email == "" {
+		fail(w, 400, "所有者用户名格式不正确")
 		return
 	}
 	password := in.OwnerPassword
@@ -277,7 +258,7 @@ func (a *API) platformCreateTenant(w http.ResponseWriter, r *http.Request, _ aut
 	if _, err := tx.Exec(r.Context(), `insert into agent(id, tenant_id, email, display_name, password_hash, role, status, max_concurrent)
 		values($1,$2,$3,$4,$5,'OWNER','ACTIVE',0)`, ownerID, tenantID, email, ownerName, hash); err != nil {
 		if isUniqueViolation(err) {
-			failCode(w, 409, "EMAIL_TAKEN", "该邮箱已被使用")
+			failCode(w, 409, "EMAIL_TAKEN", "该用户名已被使用")
 			return
 		}
 		fail(w, 500, "创建所有者账号失败")
@@ -511,7 +492,8 @@ func (a *API) platformUpdateTenant(w http.ResponseWriter, r *http.Request, _ aut
 				return
 			}
 		} else if _, err := a.db.Exec(r.Context(), `update tenant_subscription
-			set plan=$2, status=$3, seat_limit=$4, monthly_message_limit=$5, updated_at=now()
+			set plan=$2, status=$3, seat_limit=$4, monthly_message_limit=$5,
+			trial_ends_at=case when $2::varchar='TRIAL' then coalesce(trial_ends_at,now()+interval '14 days') else null end, updated_at=now()
 			where tenant_id=$1`, id, nextPlan, nextStatus, seatLimit, messageLimit); err != nil {
 			a.logger.Error("update subscription failed", "error", err, "tenant", id, "plan", nextPlan)
 			fail(w, 500, "更新套餐失败")
@@ -547,13 +529,19 @@ func (a *API) platformExtendTrial(w http.ResponseWriter, r *http.Request, _ auth
 		fail(w, 400, "days 必须在 1 到 90 之间")
 		return
 	}
-	if _, err := a.db.Exec(r.Context(), `update tenant_subscription
-		set plan='TRIAL', status='ACTIVE', trial_ends_at = greatest(coalesce(trial_ends_at, now()), now()) + ($2 || ' days')::interval,
+	result, err := a.db.Exec(r.Context(), `update tenant_subscription
+		set status='ACTIVE', trial_ends_at = greatest(coalesce(trial_ends_at, now()), now()) + ($2 || ' days')::interval,
 		    updated_at = now()
-		where tenant_id=$1`, id, itoa(in.Days)); err != nil {
+		where tenant_id=$1 and plan='TRIAL'`, id, itoa(in.Days))
+	if err != nil {
 		fail(w, 500, "延长试用期失败")
 		return
 	}
+	if result.RowsAffected() == 0 {
+		fail(w, 400, "仅试用版企业可以延长试用期")
+		return
+	}
+	a.recordAudit(r.Context(), id, "PLATFORM", uuid.Nil, "tenant.trial.extend", "tenant", id, map[string]any{"days": in.Days})
 	respond(w, 200, map[string]any{"status": "OK", "days": in.Days})
 }
 
@@ -573,8 +561,8 @@ func (a *API) platformResetOwner(w http.ResponseWriter, r *http.Request, _ auth.
 		return
 	}
 	email := strings.ToLower(strings.TrimSpace(in.Email))
-	if !strings.Contains(email, "@") {
-		fail(w, 400, "邮箱格式不正确")
+	if email == "" {
+		fail(w, 400, "用户名格式不正确")
 		return
 	}
 	password := in.Password
@@ -605,7 +593,7 @@ func (a *API) platformResetOwner(w http.ResponseWriter, r *http.Request, _ auth.
 	if err := tx.QueryRow(r.Context(), `select id from agent
 		where tenant_id=$1 and lower(email)=$2 for update`, id, email).Scan(&ownerID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			failCode(w, 404, "AGENT_NOT_FOUND", "该企业下没有这个邮箱的坐席")
+			failCode(w, 404, "AGENT_NOT_FOUND", "该企业下没有这个用户名的坐席")
 			return
 		}
 		a.logger.Error("reset owner lookup failed", "error", err, "tenant", id)
@@ -686,16 +674,21 @@ func (a *API) platformAIUsage(w http.ResponseWriter, r *http.Request, _ auth.Pri
 }
 
 func (a *API) platformMeta(w http.ResponseWriter, r *http.Request, _ auth.Principal) {
+	// model 必须反映当前实例真实 AI 配置，不能写死开发期模型名误导运营。
+	model := strings.TrimSpace(a.cfg.AI.Model)
+	if model == "" {
+		model = "未配置"
+	}
 	respond(w, 200, map[string]any{
-		"product": "RelayDesk 连语客服", "version": version,
-		"model":            "claude-opus-5-5",
+		"product": "聊桥客服", "version": version,
+		"model":            model,
 		"aiProvider":       a.ai.ProviderName(),
 		"aiAvailable":      a.ai.Available(),
 		"storage":          a.cfg.Storage.Describe(),
 		"rateLimits":       map[string]int{"widgetPerMinute": a.cfg.RateLimit.WidgetPerMinute, "loginPerMinute": a.cfg.RateLimit.LoginPerMinute},
 		"uploadMaxMB":      a.cfg.Upload.MaxBytes >> 20,
 		"webhookAttempts":  a.cfg.Webhook.MaxAttempts,
-		"platformFeatures": []string{"multi-tenant", "AI 自动回复", "知识库", "工单路由", "Webhook", "开放 API", "多端接入"},
+		"platformFeatures": []string{"多企业隔离", "AI 自动回复", "知识库", "工单路由", "Webhook", "开放 API", "多端接入"},
 	})
 }
 
@@ -738,4 +731,29 @@ func slugify(value string) string {
 		}
 	}
 	return strings.Trim(builder.String(), "-")
+}
+
+// 目标企业由平台路径确定，不接收客户端自行指定的租户身份。
+func (a *API) platformCreateAgent(w http.ResponseWriter, r *http.Request, p auth.Principal) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		fail(w, 400, "企业 ID 不合法")
+		return
+	}
+	var status string
+	err = a.db.QueryRow(r.Context(), `select status from tenant where id=$1`, id).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		fail(w, 404, "企业不存在")
+		return
+	}
+	if err != nil {
+		fail(w, 500, "读取企业失败")
+		return
+	}
+	if status != "ACTIVE" && status != "TRIAL" {
+		fail(w, 409, "企业已停用，不能建立账户")
+		return
+	}
+	p.TenantID = id
+	a.createPlatformAgent(w, r, p)
 }
