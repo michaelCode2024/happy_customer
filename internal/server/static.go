@@ -15,8 +15,8 @@ var h5Page = template.Must(template.New("h5").Parse(`<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>连语客服</title>
-  <style>html,body{margin:0;height:100%;background:#f5f7f6}</style>
+  <title>通语客服</title>
+  <style>html,body{margin:0;height:100%;background:#f5f6f8}</style>
 </head>
 <body>
   <script>window.RelayDeskSettings={{.SettingsJSON}};</script>
@@ -31,10 +31,23 @@ func (a *API) registerStatic(mux *http.ServeMux) {
 	if a.cfg.StaticDir == "" {
 		return
 	}
+	mux.HandleFunc("GET /groups.html", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		http.ServeFile(w, r, filepath.Join(a.cfg.StaticDir, "groups.html"))
+	})
+	mux.HandleFunc("GET /group-interactions.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		http.ServeFile(w, r, filepath.Join(a.cfg.StaticDir, "group-interactions.js"))
+	})
+	mux.HandleFunc("GET /group-conference.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		http.ServeFile(w, r, filepath.Join(a.cfg.StaticDir, "group-conference.js"))
+	})
 	widget := filepath.Join(a.cfg.StaticDir, "widget.js")
 	console := filepath.Join(a.cfg.StaticDir, "console")
 	mux.HandleFunc("GET /widget.js", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "public, max-age=3600")
+		// 安装脚本使用固定地址，更新时必须重新验证，避免客户继续加载旧界面。
+		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		http.ServeFile(w, r, widget)
 	})
@@ -45,12 +58,16 @@ func (a *API) registerStatic(mux *http.ServeMux) {
 			return
 		}
 		settings := map[string]any{
-			"endpoint":  a.cfg.PublicBaseURL,
-			"inboxKey":  key,
-			"embedded":  true,
-			"launcher":  "none",
-			"autoOpen":  true,
+			"endpoint":     a.cfg.PublicBaseURL,
+			"inboxKey":     key,
+			"embedded":     true,
+			"source":       "H5",
+			"launcher":     "none",
+			"autoOpen":     true,
 			"parentOrigin": firstNonEmpty(r.URL.Query().Get("parentOrigin"), "*"),
+		}
+		if r.URL.Query().Get("source") == "APP" {
+			settings["source"] = "APP"
 		}
 		if theme := r.URL.Query().Get("theme"); theme == "light" || theme == "dark" {
 			settings["theme"] = theme
@@ -100,9 +117,8 @@ func (a *API) registerStatic(mux *http.ServeMux) {
 			}
 			file = filepath.Join(console, "index.html")
 		}
-		if filepath.Base(file) == "index.html" {
-			w.Header().Set("Cache-Control", "no-cache")
-		}
+		// 后台资源使用固定文件名，更新后必须重新验证脚本与图标版本。
+		w.Header().Set("Cache-Control", "no-cache")
 		http.ServeFile(w, r, file)
 	})
 	mux.HandleFunc("GET /console", func(w http.ResponseWriter, r *http.Request) {

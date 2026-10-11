@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
@@ -6,12 +7,10 @@ import 'package:relaydesk_agent_console/src/ui/error_banner.dart';
 import 'package:relaydesk_agent_console/src/ui/login_shell.dart';
 import 'package:relaydesk_agent_console/src/util/server_hint.dart';
 
-/// Sign-in for the RelayDesk operations console.
+/// 平台运营后台登录。
 ///
-/// It asks for the deployment's static platform token rather than an email and
-/// password, because that is the only credential the operations API accepts. The
-/// token is used once to mint a 24-hour bearer token and is never stored, so a
-/// console left open on a laptop cannot be used to mint more of them.
+/// 成功后根路由根据 [PlatformPhase.ready] 进入运营主页；
+/// 退出后相位回到 locked，仍停留在本页，不跳回客服登录。
 class PlatformLoginPage extends StatefulWidget {
   const PlatformLoginPage({
     super.key,
@@ -20,8 +19,6 @@ class PlatformLoginPage extends StatefulWidget {
   });
 
   final PlatformController controller;
-
-  /// Switches back to the agent sign-in form.
   final VoidCallback onAgentLogin;
 
   @override
@@ -31,34 +28,51 @@ class PlatformLoginPage extends StatefulWidget {
 class _PlatformLoginPageState extends State<PlatformLoginPage> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _server;
+  final _email = TextEditingController();
   final _token = TextEditingController();
   bool _obscure = true;
+  bool _emailLoaded = false;
+  late bool _advancedOpen;
 
   @override
   void initState() {
     super.initState();
-    final hint = widget.controller.server;
-    _server = TextEditingController(text: initialServerHint(hint));
-    // A stored server with no stored token is the normal return visit: the
-    // bearer token expired overnight, and the address is still right.
+    final hint = initialServerHint(widget.controller.server);
+    _server = TextEditingController(text: hint);
+    _advancedOpen = hint.trim().isEmpty && !kIsWeb;
     _token.text = '';
+    _loadRememberedEmail();
+  }
+
+  Future<void> _loadRememberedEmail() async {
+    final email = await widget.controller.rememberedEmail();
+    if (!mounted) return;
+    if (email != null && email.isNotEmpty) {
+      _email.text = email;
+    }
+    setState(() => _emailLoaded = true);
   }
 
   @override
   void dispose() {
     _server.dispose();
+    _email.dispose();
     _token.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
     if (!(_formKey.currentState?.validate() ?? false)) {
+      if (_server.text.trim().isEmpty && !_advancedOpen) {
+        setState(() => _advancedOpen = true);
+      }
       return;
     }
     FocusScope.of(context).unfocus();
     await widget.controller.signIn(
       server: _server.text,
-      staticToken: _token.text,
+      email: _email.text,
+      password: _token.text,
     );
   }
 
@@ -67,7 +81,8 @@ class _PlatformLoginPageState extends State<PlatformLoginPage> {
     return LoginShell(
       icon: Icons.admin_panel_settings_outlined,
       title: '登录运营后台',
-      subtitle: '管理企业、套餐与平台运行状态',
+      subtitle: '管理企业、套餐与平台状态',
+      badgeLabel: '平台运营',
       child: ListenableBuilder(
         listenable: widget.controller,
         builder: (context, _) {
@@ -78,70 +93,78 @@ class _PlatformLoginPageState extends State<PlatformLoginPage> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                TextFormField(
+                LoginFieldSection(
+                  label: '管理员凭证',
+                  child: Column(
+                    children: [
+                      TextFormField(
+                        controller: _email,
+                        enabled: !busy && _emailLoaded,
+                        keyboardType: TextInputType.text,
+                        decoration: const InputDecoration(
+                          labelText: '账号',
+                          prefixIcon: Icon(Icons.person_outline),
+                        ),
+                        validator: (value) => (value ?? '').trim().isEmpty
+                            ? '请填写管理员用户名'
+                            : null,
+                      ),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        controller: _token,
+                        enabled: !busy,
+                        obscureText: _obscure,
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        textInputAction: TextInputAction.done,
+                        onFieldSubmitted: (_) => busy ? null : _submit(),
+                        decoration: InputDecoration(
+                          labelText: '密码',
+                          hintText: '请输入管理员密码',
+                          prefixIcon: const Icon(Icons.lock_outline),
+                          suffixIcon: IconButton(
+                            tooltip: _obscure ? '显示密码' : '隐藏密码',
+                            icon: Icon(
+                              _obscure
+                                  ? Icons.visibility_outlined
+                                  : Icons.visibility_off_outlined,
+                            ),
+                            onPressed: () =>
+                                setState(() => _obscure = !_obscure),
+                          ),
+                        ),
+                        validator: (value) => (value ?? '').trim().isEmpty
+                            ? '请填写登录密码'
+                            : null,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                LoginAdvancedServerField(
                   controller: _server,
                   enabled: !busy,
-                  keyboardType: TextInputType.url,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: '服务器地址',
-                    hintText: 'chat.example.com 或 http://localhost:8080',
-                    prefixIcon: Icon(Icons.dns_outlined),
-                  ),
-                  validator: (value) =>
-                      (value ?? '').trim().isEmpty ? '请填写服务器地址' : null,
-                ),
-                const SizedBox(height: 14),
-                TextFormField(
-                  controller: _token,
-                  enabled: !busy,
-                  obscureText: _obscure,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  textInputAction: TextInputAction.done,
-                  onFieldSubmitted: (_) => busy ? null : _submit(),
-                  decoration: InputDecoration(
-                    labelText: '平台管理令牌',
-                    hintText: '部署时配置的 PLATFORM_ADMIN_TOKEN',
-                    prefixIcon: const Icon(Icons.key_outlined),
-                    suffixIcon: IconButton(
-                      tooltip: _obscure ? '显示令牌' : '隐藏令牌',
-                      icon: Icon(
-                        _obscure
-                            ? Icons.visibility_outlined
-                            : Icons.visibility_off_outlined,
-                      ),
-                      onPressed: () => setState(() => _obscure = !_obscure),
-                    ),
-                  ),
-                  validator: (value) =>
-                      (value ?? '').trim().isEmpty ? '请填写平台管理令牌' : null,
+                  expanded: _advancedOpen,
+                  onExpansionChanged: (open) =>
+                      setState(() => _advancedOpen = open),
                 ),
                 if (widget.controller.error != null) ...<Widget>[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   ErrorBanner(
                     message: widget.controller.error!,
                     onDismiss: widget.controller.clearError,
                   ),
                 ],
-                const SizedBox(height: 22),
-                FilledButton(
-                  onPressed: busy ? null : _submit,
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(46),
-                  ),
-                  child: busy
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('进入运营后台'),
+                const SizedBox(height: 18),
+                LoginSubmitButton(
+                  label: '进入运营后台',
+                  busy: busy,
+                  onPressed: _submit,
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 4),
                 TextButton(
                   onPressed: busy ? null : widget.onAgentLogin,
-                  child: const Text('返回客服工作台登录'),
+                  child: const Text('切换到客服登录'),
                 ),
               ],
             ),
@@ -152,6 +175,5 @@ class _PlatformLoginPageState extends State<PlatformLoginPage> {
   }
 }
 
-/// The console's own address, prefilled when a server has been used before.
 String platformServerHint(String stored) =>
     stored.isEmpty ? '' : RelayDeskApi.normalizeServer(stored);

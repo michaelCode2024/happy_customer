@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:relaydesk_agent_console/src/ui/workspace_layout.dart';
 
 import 'package:relaydesk_agent_console/src/api/api_exception.dart';
 import 'package:relaydesk_agent_console/src/state/session_controller.dart';
@@ -143,7 +144,15 @@ class _SettingsPageState extends State<SettingsPage> {
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        title: const Text('设置'),
+        title: const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('个人设置'),
+              SizedBox(height: 3),
+              Text('管理你的工作状态、个人资料与外观',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF71817E)))
+            ]),
+        toolbarHeight: 76,
         backgroundColor: Colors.transparent,
       ),
       body: ListenableBuilder(
@@ -151,15 +160,20 @@ class _SettingsPageState extends State<SettingsPage> {
         builder: (context, _) {
           final session = widget.session;
           final agent = session.agent;
-          return ListView(
+          return WorkspaceGrid(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
             children: <Widget>[
               _Section(
                 title: '账号',
                 children: <Widget>[
-                  _InfoRow(label: '登录邮箱', value: agent?.email ?? '—'),
+                  _InfoRow(label: '登录用户名', value: agent?.email ?? '—'),
                   _InfoRow(label: '企业', value: session.tenant?.name ?? '—'),
-                  _InfoRow(label: '企业标识', value: session.tenant?.id ?? '—'),
+                  _InfoRow(
+                      label: '登录企业标识',
+                      value: session.tenant?.slug.isNotEmpty == true
+                          ? session.tenant!.slug
+                          : '请向企业管理员确认'),
+                  _InfoRow(label: '企业 ID', value: session.tenant?.id ?? '—'),
                   _InfoRow(label: '角色', value: _roleLabel(agent?.role ?? '')),
                   _InfoRow(label: '服务器', value: session.serverHint),
                 ],
@@ -186,7 +200,8 @@ class _SettingsPageState extends State<SettingsPage> {
                         ButtonSegment<String>(
                           value: 'OFFLINE',
                           label: Text('离线'),
-                          icon: Icon(Icons.do_not_disturb_on_outlined, size: 16),
+                          icon:
+                              Icon(Icons.do_not_disturb_on_outlined, size: 16),
                         ),
                       ],
                       selected: <String>{agent?.presence ?? 'ONLINE'},
@@ -351,7 +366,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const SizedBox(height: 10),
               Text(
-                '版本信息：连语客服工作台 · 协议版本 v1',
+                '版本信息：通语工作台 · 协议版本 v1',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: theme.colorScheme.outline,
@@ -409,8 +424,9 @@ class _Section extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: theme.colorScheme.outlineVariant.withAlpha(120)),
+        borderRadius: BorderRadius.circular(8),
+        border:
+            Border.all(color: theme.colorScheme.outlineVariant.withAlpha(120)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

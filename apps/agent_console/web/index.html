@@ -18,18 +18,18 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="连语客服工作台与平台运营后台">
+  <meta name="description" content="通语工作台与平台运营后台">
 
   <!-- iOS meta tags & icons -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="连语客服">
-  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <meta name="apple-mobile-web-app-title" content="通语客服">
+
 
   <!-- Favicon -->
-  <link rel="icon" type="image/png" href="favicon.png"/>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg"/>
 
-  <title>连语客服</title>
+  <title>通语客服</title>
   <link rel="manifest" href="manifest.json">
   <!-- HTML 渲染器下由浏览器绘制中文；避免缺字变成方框 -->
   <style>
@@ -42,6 +42,13 @@
   </style>
 </head>
 <body>
-  <script src="flutter_bootstrap.js" async></script>
+  <script>
+    // Flutter 离线缓存可能锁住旧的引导文件，导致拿不到新版 worker 的版本号。
+    // 引导文件每次从网络检查，业务资源仍由新版 worker 按内容哈希缓存。
+    const bootstrap = document.createElement('script');
+    bootstrap.src = 'flutter_bootstrap.js?release=' + Date.now();
+    bootstrap.async = true;
+    document.body.appendChild(bootstrap);
+  </script>
 </body>
 </html>

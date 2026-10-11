@@ -1,3 +1,4 @@
+import 'package:relaydesk_agent_console/src/ui/error_banner.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -158,18 +159,21 @@ class _ChatPanelState extends State<ChatPanel> {
     });
   }
 
-  Future<void> _pickImage() async {
+  Future<void> _pickImage({bool document = false}) async {
+    final conversationId = widget.workbench.selectedId;
+    if (conversationId == null || _uploading) return;
     setState(() {
       _uploading = true;
       _uploadError = null;
     });
     try {
-      final picked = await widget.picker.pickImage();
+      final picked = document
+          ? await widget.picker.pickFile()
+          : await widget.picker.pickImage();
       if (picked == null) {
         return;
       }
-      final conversationId = widget.workbench.selectedId;
-      if (conversationId == null) {
+      if (!mounted || widget.workbench.selectedId != conversationId) {
         return;
       }
       final uploaded = await widget.workbench.api.upload(
@@ -178,6 +182,7 @@ class _ChatPanelState extends State<ChatPanel> {
         bytes: picked.bytes,
         contentType: picked.contentType,
       );
+      if (!mounted || widget.workbench.selectedId != conversationId) return;
       setState(() {
         _pending.add(
           Attachment(
@@ -190,7 +195,7 @@ class _ChatPanelState extends State<ChatPanel> {
         );
       });
     } catch (error) {
-      setState(() => _uploadError = '上传失败：$error');
+      if (mounted) setState(() => _uploadError = '上传失败：$error');
     } finally {
       if (mounted) {
         setState(() => _uploading = false);
@@ -333,6 +338,7 @@ class _ChatPanelState extends State<ChatPanel> {
   }
 
   void _toggleSearch() {
+    _searchDebounce?.cancel();
     setState(() => _searchOpen = !_searchOpen);
     if (!_searchOpen) {
       _searchField.clear();
@@ -474,7 +480,8 @@ class _ChatPanelState extends State<ChatPanel> {
             if (workbench.pins.isNotEmpty)
               _PinBar(
                 pins: workbench.pins,
-                onJump: (message) => _scrollToMessage(workbench, message.sequence),
+                onJump: (message) =>
+                    _scrollToMessage(workbench, message.sequence),
                 onUnpin: workbench.togglePin,
               ),
             const Divider(height: 1),
@@ -510,7 +517,8 @@ class _ChatPanelState extends State<ChatPanel> {
               quote: workbench.replyTo,
               onChanged: _onComposerChanged,
               onToggleNote: (value) => setState(() => _noteMode = value),
-              onPickImage: _pickImage,
+              onPickImage: () => _pickImage(),
+              onPickFile: () => _pickImage(document: true),
               onClearQuote: () => workbench.quote(null),
               onRemovePending: (id) => setState(
                 () => _pending.removeWhere((item) => item.id == id),
@@ -526,7 +534,8 @@ class _ChatPanelState extends State<ChatPanel> {
   /// Scrolls to a message the agent picked out of the search panel or the pin
   /// bar and flashes it, which is what makes a hit in a long thread findable.
   void _scrollToMessage(WorkbenchController workbench, int sequence) {
-    final index = workbench.messages.indexWhere((item) => item.sequence == sequence);
+    final index =
+        workbench.messages.indexWhere((item) => item.sequence == sequence);
     if (index < 0) {
       // The message is outside the retained window. Older history is loaded on
       // demand, so the honest answer is that it is not loaded yet rather than
@@ -545,9 +554,8 @@ class _ChatPanelState extends State<ChatPanel> {
       // Rows are laid out lazily, so an estimate is used only to get close; the
       // highlight is what confirms the right row was reached.
       final position = _scroll.position;
-      final fraction = workbench.messages.isEmpty
-          ? 0.0
-          : index / workbench.messages.length;
+      final fraction =
+          workbench.messages.isEmpty ? 0.0 : index / workbench.messages.length;
       _scroll.jumpTo((position.maxScrollExtent * fraction).clamp(
         0.0,
         position.maxScrollExtent,
@@ -572,22 +580,104 @@ class _EmptyThread extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Icon(
-            Icons.forum_outlined,
-            size: 52,
-            color: theme.colorScheme.outlineVariant,
+    final scheme = theme.colorScheme;
+    return Container(
+      color: scheme.surface,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 88,
+                  height: 88,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        scheme.primary,
+                        Color.lerp(scheme.primary, const Color(0xFF22D3EE), 0.4)!,
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(28),
+                    boxShadow: [
+                      BoxShadow(
+                        color: scheme.primary.withOpacity(0.25),
+                        blurRadius: 28,
+                        offset: const Offset(0, 12),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(Icons.forum_rounded,
+                      color: Colors.white, size: 42),
+                ),
+                const SizedBox(height: 28),
+                Text(
+                  '欢迎使用通语',
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.4,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '从左侧选择会话开始接待。客户消息会实时进入收件箱，已读、送达与发送状态都会显示在气泡下方。',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                    height: 1.55,
+                  ),
+                ),
+                const SizedBox(height: 28),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  alignment: WrapAlignment.center,
+                  children: const [
+                    _WelcomeChip(Icons.mark_chat_read_outlined, '已读回执'),
+                    _WelcomeChip(Icons.bolt_outlined, '实时同步'),
+                    _WelcomeChip(Icons.support_agent_outlined, '团队协作'),
+                  ],
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 14),
-          Text('选择一个会话开始回复', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 6),
+        ),
+      ),
+    );
+  }
+}
+
+class _WelcomeChip extends StatelessWidget {
+  const _WelcomeChip(this.icon, this.label);
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: scheme.primary),
+          const SizedBox(width: 6),
           Text(
-            '左侧列表按优先级与最近消息排序。',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: scheme.onSurfaceVariant,
             ),
           ),
         ],
@@ -617,8 +707,13 @@ class _ThreadHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      color: theme.colorScheme.surface,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.fromLTRB(16, 12, 10, 12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        border: Border(
+          bottom: BorderSide(color: theme.colorScheme.outlineVariant),
+        ),
+      ),
       child: Row(
         children: <Widget>[
           Expanded(
@@ -633,7 +728,9 @@ class _ThreadHeader extends StatelessWidget {
                         conversation.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleSmall,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -661,8 +758,15 @@ class _ThreadHeader extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                   '会话 ${shortId(conversation.id)} · 来源 ${conversationSourceLabel(conversation.source)} · '
-                  '开始于 ${fullTime(conversation.createdAt)}',
+                  [
+                    '会话 ${shortId(conversation.id)}',
+                    '来源 ${conversationSourceLabel(conversation.source)}',
+                    '开始于 ${fullTime(conversation.createdAt)}',
+                    if (conversation.visitorUnread > 0)
+                      '访客未读 ${conversation.visitorUnread}',
+                    if (conversation.agentUnread > 0)
+                      '我方未读 ${conversation.agentUnread}',
+                  ].join(' · '),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.labelSmall?.copyWith(
@@ -678,9 +782,14 @@ class _ThreadHeader extends StatelessWidget {
               child: FilledButton.tonalIcon(
                 onPressed: workbench.claim,
                 icon: const Icon(Icons.pan_tool_alt_outlined, size: 18),
-                label: const Text('认领'),
+                label: const Text('开始接待'),
               ),
             ),
+          IconButton(
+            tooltip: conversation.isUnassigned ? '分配给客服' : '转派客服',
+            onPressed: () => _showTransfer(context),
+            icon: const Icon(Icons.support_agent),
+          ),
           if (onOpenProfile != null)
             IconButton(
               tooltip: '客户资料',
@@ -714,10 +823,7 @@ class _ThreadHeader extends StatelessWidget {
                 case 'tags':
                   _showTags(context);
                 case 'copy':
-                  Clipboard.setData(ClipboardData(text: conversation.id));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('会话 ID 已复制')),
-                  );
+                  copyToClipboard(context, conversation.id, '会话 ID');
               }
             },
             itemBuilder: (context) => <PopupMenuEntry<String>>[
@@ -793,12 +899,12 @@ class _ThreadHeader extends StatelessWidget {
   }
 
   Future<void> _showTransfer(BuildContext context) async {
-    final selected = await showDialog<String>(
+    final selected = await showDialog<(String, String)>(
       context: context,
       builder: (context) => _TransferDialog(workbench: workbench),
     );
     if (selected != null) {
-      await workbench.transfer(selected);
+      await workbench.transfer(selected.$1, note: selected.$2);
     }
   }
 
@@ -921,6 +1027,7 @@ class _MessageList extends StatelessWidget {
           message: message,
           selfId: workbench.selfId,
           fileUrl: workbench.api.fileUrl,
+          receipt: workbench.receiptFor(message),
           flash: flashSequence != null && message.sequence == flashSequence,
           onRetry: () => onRetry(message),
           onQuote: () => onQuote(message),
@@ -1235,7 +1342,7 @@ class _TypingHint extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
         '对方正在输入…',
@@ -1290,6 +1397,7 @@ class _MessageBubble extends StatelessWidget {
     required this.message,
     required this.selfId,
     required this.fileUrl,
+    required this.receipt,
     required this.flash,
     required this.onRetry,
     required this.onQuote,
@@ -1303,6 +1411,7 @@ class _MessageBubble extends StatelessWidget {
   final ChatMessage message;
   final String selfId;
   final String Function(String) fileUrl;
+  final MessageReceipt receipt;
 
   /// True while this message is the target of a jump, which draws a brief
   /// highlight so the agent can see where they landed.
@@ -1331,7 +1440,8 @@ class _MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    if (message.isSystem || (message.messageType == 'EVENT' && !message.isPrivate)) {
+    if (message.isSystem ||
+        (message.messageType == 'EVENT' && !message.isPrivate)) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Center(
@@ -1346,7 +1456,12 @@ class _MessageBubble extends StatelessWidget {
       );
     }
     if (message.isPrivate) {
-      return _NoteBubble(message: message, flash: flash);
+      return _NoteBubble(
+        message: message,
+        flash: flash,
+        receipt: receipt,
+        onRetry: onRetry,
+      );
     }
 
     final isAgent = message.isFromAgent;
@@ -1366,22 +1481,18 @@ class _MessageBubble extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 if (message.isAi) ...<Widget>[
-                  Icon(Icons.auto_awesome, size: 12, color: theme.colorScheme.primary),
+                  Icon(Icons.auto_awesome,
+                      size: 12, color: theme.colorScheme.primary),
                   const SizedBox(width: 4),
                 ],
                 Text(
                   isAgent
                       ? (message.senderName.isEmpty ? '我' : message.senderName)
-                      : (message.senderName.isEmpty ? '访客' : message.senderName),
+                      : (message.senderName.isEmpty
+                          ? '访客'
+                          : message.senderName),
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  clockTime(message.createdAt),
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.outline,
                   ),
                 ),
                 if (message.isAi) ...<Widget>[
@@ -1413,7 +1524,8 @@ class _MessageBubble extends StatelessWidget {
                 ],
                 if (message.isPinned) ...<Widget>[
                   const SizedBox(width: 6),
-                  Icon(Icons.push_pin, size: 11, color: theme.colorScheme.primary),
+                  Icon(Icons.push_pin,
+                      size: 11, color: theme.colorScheme.primary),
                 ],
               ],
             ),
@@ -1467,12 +1579,23 @@ class _MessageBubble extends StatelessWidget {
                       ),
                       child: SelectableText(
                         message.content,
-                        style:
-                            theme.textTheme.bodyMedium?.copyWith(color: textColor),
+                        style: theme.textTheme.bodyMedium
+                            ?.copyWith(color: textColor),
                       ),
                     ),
                 ],
               ],
+            ),
+          ),
+          // 气泡下方固定展示发送时间；坐席消息再跟投递/已读状态。
+          Padding(
+            padding: const EdgeInsets.only(top: 4, left: 2, right: 2),
+            child: _MessageStatusRow(
+              sentAt: message.createdAt,
+              receipt: receipt,
+              alignEnd: isAgent,
+              error: message.error,
+              onRetry: receipt == MessageReceipt.failed ? onRetry : null,
             ),
           ),
           if (message.reactions.isNotEmpty)
@@ -1489,11 +1612,6 @@ class _MessageBubble extends StatelessWidget {
               onForward: onForward,
               onEdit: _canEdit ? onEdit : null,
               onRecall: _canRecall ? onRecall : null,
-            ),
-          if (message.delivery != DeliveryState.sent)
-            Padding(
-              padding: const EdgeInsets.only(top: 4, right: 2),
-              child: _DeliveryFooter(message: message, onRetry: onRetry),
             ),
         ],
       ),
@@ -1527,18 +1645,22 @@ class _BubbleShell extends StatelessWidget {
         alignment: isAgent ? Alignment.centerRight : Alignment.centerLeft,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 250),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
             color: bubbleColor,
             borderRadius: BorderRadius.only(
-              topLeft: const Radius.circular(12),
-              topRight: const Radius.circular(12),
-              bottomLeft: Radius.circular(isAgent ? 12 : 3),
-              bottomRight: Radius.circular(isAgent ? 3 : 12),
+              topLeft: const Radius.circular(16),
+              topRight: const Radius.circular(16),
+              bottomLeft: Radius.circular(isAgent ? 16 : 4),
+              bottomRight: Radius.circular(isAgent ? 4 : 16),
             ),
             border: flash
                 ? Border.all(color: theme.colorScheme.primary, width: 2)
-                : null,
+                : (!isAgent
+                    ? Border.all(
+                        color: theme.colorScheme.outlineVariant.withOpacity(0.7),
+                      )
+                    : null),
           ),
           child: child,
         ),
@@ -1672,7 +1794,10 @@ class _BubbleActions extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           _MiniAction(icon: Icons.reply, tooltip: '引用回复', onPressed: onQuote),
-          _MiniAction(icon: Icons.add_reaction_outlined, tooltip: '添加回应', onPressed: onReact),
+          _MiniAction(
+              icon: Icons.add_reaction_outlined,
+              tooltip: '添加回应',
+              onPressed: onReact),
           _MiniAction(
             icon: Icons.push_pin_outlined,
             tooltip: '置顶',
@@ -1684,7 +1809,8 @@ class _BubbleActions extends StatelessWidget {
             onPressed: onForward,
           ),
           if (onEdit != null)
-            _MiniAction(icon: Icons.edit_outlined, tooltip: '编辑', onPressed: onEdit),
+            _MiniAction(
+                icon: Icons.edit_outlined, tooltip: '编辑', onPressed: onEdit),
           if (onRecall != null)
             _MiniAction(
               icon: Icons.delete_outline,
@@ -1727,56 +1853,107 @@ class _MiniAction extends StatelessWidget {
   }
 }
 
-/// The delivery state under an outgoing bubble: sending, or failed with a retry.
-class _DeliveryFooter extends StatelessWidget {
-  const _DeliveryFooter({required this.message, required this.onRetry});
+/// 消息时间 + 投递回执：发送中 / 未读 / 已送达 / 已读 / 发送失败。
+class _MessageStatusRow extends StatelessWidget {
+  const _MessageStatusRow({
+    required this.sentAt,
+    required this.receipt,
+    required this.alignEnd,
+    this.error,
+    this.onRetry,
+  });
 
-  final ChatMessage message;
-  final VoidCallback onRetry;
+  final DateTime sentAt;
+  final MessageReceipt receipt;
+  final bool alignEnd;
+  final String? error;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    if (message.delivery == DeliveryState.sending) {
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          const SizedBox(
-            width: 10,
-            height: 10,
-            child: CircularProgressIndicator(strokeWidth: 1.6),
+    final mute = theme.colorScheme.outline;
+    final children = <Widget>[
+      Text(
+        clockTime(sentAt),
+        style: theme.textTheme.labelSmall?.copyWith(color: mute),
+      ),
+    ];
+
+    if (receipt == MessageReceipt.sending) {
+      children.addAll([
+        const SizedBox(width: 6),
+        SizedBox(
+          width: 10,
+          height: 10,
+          child: CircularProgressIndicator(
+            strokeWidth: 1.6,
+            color: mute,
           ),
-          const SizedBox(width: 6),
-          Text(
-            '发送中',
+        ),
+        const SizedBox(width: 4),
+        Text(
+          MessageReceipt.sending.label,
+          style: theme.textTheme.labelSmall?.copyWith(color: mute),
+        ),
+      ]);
+    } else if (receipt == MessageReceipt.failed) {
+      children.addAll([
+        const SizedBox(width: 6),
+        Icon(Icons.error_outline, size: 13, color: theme.colorScheme.error),
+        const SizedBox(width: 4),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 180),
+          child: Text(
+            error?.isNotEmpty == true ? error! : MessageReceipt.failed.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: theme.textTheme.labelSmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
+              color: theme.colorScheme.error,
             ),
           ),
-        ],
-      );
-    }
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Icon(Icons.error_outline, size: 14, color: theme.colorScheme.error),
+        ),
+        if (onRetry != null)
+          TextButton(
+            onPressed: onRetry,
+            style: TextButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              minimumSize: const Size(0, 26),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text('重试'),
+          ),
+      ]);
+    } else if (receipt != MessageReceipt.none) {
+      final color = receipt == MessageReceipt.read
+          ? theme.colorScheme.primary
+          : mute;
+      children.addAll([
         const SizedBox(width: 6),
+        Icon(
+          receipt == MessageReceipt.read
+              ? Icons.done_all
+              : receipt == MessageReceipt.delivered
+                  ? Icons.done_all
+                  : Icons.done,
+          size: 14,
+          color: color,
+        ),
+        const SizedBox(width: 3),
         Text(
-          message.error ?? '发送失败',
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: theme.colorScheme.error,
-          ),
+          receipt.label,
+          style: theme.textTheme.labelSmall?.copyWith(color: color),
         ),
-        TextButton(
-          onPressed: onRetry,
-          style: TextButton.styleFrom(
-            visualDensity: VisualDensity.compact,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            minimumSize: const Size(0, 28),
-          ),
-          child: const Text('重试'),
-        ),
-      ],
+      ]);
+    }
+
+    return Align(
+      alignment: alignEnd ? Alignment.centerRight : Alignment.centerLeft,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: children,
+      ),
     );
   }
 }
@@ -1784,10 +1961,17 @@ class _DeliveryFooter extends StatelessWidget {
 /// An internal note. Rendered full width in a warning tone, because the one
 /// mistake that matters here is an agent thinking they replied to the customer.
 class _NoteBubble extends StatelessWidget {
-  const _NoteBubble({required this.message, this.flash = false});
+  const _NoteBubble({
+    required this.message,
+    this.flash = false,
+    this.receipt = MessageReceipt.none,
+    this.onRetry,
+  });
 
   final ChatMessage message;
   final bool flash;
+  final MessageReceipt receipt;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -1795,52 +1979,70 @@ class _NoteBubble extends StatelessWidget {
     final color = theme.colorScheme.tertiary;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-        decoration: BoxDecoration(
-          color: color.withAlpha(theme.brightness == Brightness.dark ? 36 : 24),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: flash ? theme.colorScheme.primary : color.withAlpha(80),
-            width: flash ? 2 : 1,
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 250),
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+            decoration: BoxDecoration(
+              color:
+                  color.withAlpha(theme.brightness == Brightness.dark ? 36 : 24),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: flash ? theme.colorScheme.primary : color.withAlpha(80),
+                width: flash ? 2 : 1,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Icon(Icons.sticky_note_2_outlined, size: 14, color: color),
-                const SizedBox(width: 6),
-                Text(
-                  '内部备注',
-                  style: theme.textTheme.labelSmall?.copyWith(color: color),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  '${message.senderName.isEmpty ? '同事' : message.senderName} · '
-                  '${clockTime(message.createdAt)}',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                if (message.isEdited) ...<Widget>[
-                  const SizedBox(width: 6),
-                  Text(
-                    '已编辑',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+                Row(
+                  children: <Widget>[
+                    Icon(Icons.sticky_note_2_outlined, size: 14, color: color),
+                    const SizedBox(width: 6),
+                    Text(
+                      '内部备注',
+                      style: theme.textTheme.labelSmall?.copyWith(color: color),
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 8),
+                    Text(
+                      message.senderName.isEmpty ? '同事' : message.senderName,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    if (message.isEdited) ...<Widget>[
+                      const SizedBox(width: 6),
+                      Text(
+                        '已编辑',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 6),
+                SelectableText(message.content,
+                    style: theme.textTheme.bodySmall),
               ],
             ),
-            const SizedBox(height: 6),
-            SelectableText(message.content, style: theme.textTheme.bodySmall),
-          ],
-        ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: _MessageStatusRow(
+              sentAt: message.createdAt,
+              receipt: receipt == MessageReceipt.none
+                  ? MessageReceipt.none
+                  : receipt,
+              alignEnd: false,
+              error: message.error,
+              onRetry: receipt == MessageReceipt.failed ? onRetry : null,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1880,7 +2082,8 @@ class _Attachments extends StatelessWidget {
                 ? ClipRRect(
                     borderRadius: BorderRadius.circular(8),
                     child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 260, maxHeight: 260),
+                      constraints:
+                          const BoxConstraints(maxWidth: 260, maxHeight: 260),
                       child: Image.network(
                         fileUrl(attachment.url),
                         fit: BoxFit.cover,
@@ -1888,15 +2091,17 @@ class _Attachments extends StatelessWidget {
                           attachment: attachment,
                           url: fileUrl(attachment.url),
                         ),
-                        loadingBuilder: (context, child, progress) => progress == null
-                            ? child
-                            : const SizedBox(
-                                width: 180,
-                                height: 120,
-                                child: Center(
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                ),
-                              ),
+                        loadingBuilder: (context, child, progress) =>
+                            progress == null
+                                ? child
+                                : const SizedBox(
+                                    width: 180,
+                                    height: 120,
+                                    child: Center(
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2),
+                                    ),
+                                  ),
                       ),
                     ),
                   )
@@ -2029,7 +2234,9 @@ class _VoiceNoteState extends State<_VoiceNote> {
                   Icon(
                     !canPlay
                         ? Icons.download_outlined
-                        : (_playing ? Icons.stop_circle_outlined : Icons.play_circle_outline),
+                        : (_playing
+                            ? Icons.stop_circle_outlined
+                            : Icons.play_circle_outline),
                     size: 18,
                     color: color,
                   ),
@@ -2045,7 +2252,8 @@ class _VoiceNoteState extends State<_VoiceNote> {
                             label,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.labelSmall?.copyWith(color: color),
+                            style: theme.textTheme.labelSmall
+                                ?.copyWith(color: color),
                           ),
                   ),
                 ],
@@ -2122,7 +2330,7 @@ class _FileChip extends StatelessWidget {
             iconSize: 16,
             visualDensity: VisualDensity.compact,
             onPressed: () {
-              Clipboard.setData(ClipboardData(text: url));
+              copyToClipboard(context, url, '下载链接');
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('下载链接已复制（含访问令牌）')),
               );
@@ -2152,6 +2360,7 @@ class _Composer extends StatelessWidget {
     required this.onChanged,
     required this.onToggleNote,
     required this.onPickImage,
+    required this.onPickFile,
     required this.onClearQuote,
     required this.onRemovePending,
     required this.onSend,
@@ -2174,6 +2383,7 @@ class _Composer extends StatelessWidget {
   final ValueChanged<String> onChanged;
   final ValueChanged<bool> onToggleNote;
   final Future<void> Function() onPickImage;
+  final Future<void> Function() onPickFile;
   final VoidCallback onClearQuote;
   final ValueChanged<String> onRemovePending;
   final Future<void> Function() onSend;
@@ -2181,226 +2391,189 @@ class _Composer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final compact = MediaQuery.sizeOf(context).width < 760;
+    void insert(String text) {
+      final selection = controller.selection;
+      final start =
+          selection.start < 0 ? controller.text.length : selection.start;
+      final end = selection.end < 0 ? start : selection.end;
+      controller.text = controller.text.replaceRange(start, end, text);
+      controller.selection =
+          TextSelection.collapsed(offset: start + text.length);
+      onChanged(controller.text);
+      focusNode.requestFocus();
+    }
+
     return Container(
-      color: theme.colorScheme.surface,
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          if (uploadError != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text(
-                uploadError!,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.colorScheme.error,
-                ),
-              ),
-            ),
-          if (quote != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(10, 6, 4, 6),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border(
-                    left: BorderSide(color: theme.colorScheme.primary, width: 3),
-                  ),
-                ),
-                child: Row(
-                  children: <Widget>[
-                    Icon(Icons.reply, size: 15, color: theme.colorScheme.primary),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: <Widget>[
-                          Text(
-                            '回复 ${quote!.senderName.isEmpty ? (quote!.isFromVisitor ? '访客' : '客服') : quote!.senderName}',
-                            style: theme.textTheme.labelSmall,
-                          ),
-                          Text(
-                            quote!.content.isEmpty
-                                ? '[${messageTypeLabel(quote!.messageType)}]'
-                                : quote!.content,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: '取消引用',
-                      onPressed: onClearQuote,
-                      visualDensity: VisualDensity.compact,
-                      iconSize: 16,
-                      icon: const Icon(Icons.close),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          if (pending.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: <Widget>[
+        color: scheme.surface,
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+        child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (uploadError != null)
+                Text(uploadError!,
+                    style: TextStyle(color: scheme.error, fontSize: 12)),
+              if (quote != null)
+                Container(
+                    margin: const EdgeInsets.only(bottom: 6),
+                    padding: const EdgeInsets.fromLTRB(10, 6, 4, 6),
+                    decoration: BoxDecoration(
+                        color: scheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(6)),
+                    child: Row(children: [
+                      Icon(Icons.reply, size: 15, color: scheme.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                          child: Text(
+                              '回复 ${quote!.senderName.isEmpty ? '访客' : quote!.senderName}：${quote!.content}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall)),
+                      IconButton(
+                          tooltip: '取消引用',
+                          onPressed: onClearQuote,
+                          iconSize: 16,
+                          icon: const Icon(Icons.close))
+                    ])),
+              if (pending.isNotEmpty)
+                Wrap(spacing: 6, runSpacing: 6, children: [
                   for (final attachment in pending)
                     InputChip(
-                      avatar: Icon(
-                        attachment.isImage
-                            ? Icons.image_outlined
-                            : Icons.attach_file,
-                        size: 16,
-                      ),
-                      label: Text(
-                        '${attachment.fileName} · ${fileSize(attachment.sizeBytes)}',
-                      ),
-                      onDeleted: () => onRemovePending(attachment.id),
-                    ),
-                ],
-              ),
-            ),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: <Widget>[
-              Expanded(
-                child: Shortcuts(
-                  shortcuts: const <ShortcutActivator, Intent>{
-                    // Enter sends and Shift+Enter breaks the line, which is what
-                    // a chat client is expected to do on desktop.
-                    SingleActivator(LogicalKeyboardKey.enter): _SendIntent(),
-                    SingleActivator(LogicalKeyboardKey.numpadEnter): _SendIntent(),
-                  },
-                  child: Actions(
-                    actions: <Type, Action<Intent>>{
-                      _SendIntent: CallbackAction<_SendIntent>(
-                        onInvoke: (_) {
-                          onSend();
-                          return null;
-                        },
-                      ),
-                    },
-                    child: TextField(
-                      controller: controller,
-                      focusNode: focusNode,
-                      minLines: 1,
-                      maxLines: 6,
-                      onChanged: onChanged,
-                      textInputAction: TextInputAction.newline,
-                      keyboardType: TextInputType.multiline,
-                      decoration: InputDecoration(
-                        hintText: noteMode
-                            ? '写一条内部备注，访客看不到'
-                            : (visitorTyping ? '对方正在输入…' : '输入回复，Enter 发送，Shift+Enter 换行'),
-                        hintStyle: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(
-                            color: noteMode
-                                ? theme.colorScheme.tertiary
-                                : theme.colorScheme.outlineVariant,
-                          ),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(
-                            color: noteMode
-                                ? theme.colorScheme.tertiary
-                                : theme.colorScheme.outlineVariant,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 6),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Row(
-                    children: <Widget>[
-                      Tooltip(
-                        message: noteMode ? '切换到回复访客' : '切换为内部备注',
-                        child: IconButton(
-                          onPressed: () => onToggleNote(!noteMode),
-                          isSelected: noteMode,
-                          color: noteMode ? theme.colorScheme.tertiary : null,
-                          icon: Icon(
-                            noteMode
-                                ? Icons.sticky_note_2
-                                : Icons.sticky_note_2_outlined,
-                          ),
-                        ),
-                      ),
-                      Tooltip(
-                        message: '发送图片',
-                        child: IconButton(
-                          onPressed: uploading ? null : onPickImage,
-                          icon: uploading
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.image_outlined),
-                        ),
-                      ),
-                      if (canned.isNotEmpty)
-                        _CannedMenu(
+                        avatar: Icon(
+                            attachment.isImage
+                                ? Icons.image_outlined
+                                : Icons.attach_file,
+                            size: 16),
+                        label: Text(
+                            '${attachment.fileName} · ${fileSize(attachment.sizeBytes)}'),
+                        onDeleted: () => onRemovePending(attachment.id))
+                ]),
+              Wrap(
+                  spacing: 2,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    PopupMenuButton<String>(
+                        tooltip: '表情',
+                        icon: const Icon(Icons.sentiment_satisfied_alt_outlined,
+                            size: 21),
+                        onSelected: insert,
+                        itemBuilder: (_) => [
+                              for (final emoji in [
+                                '😊',
+                                '👍',
+                                '🙏',
+                                '🎉',
+                                '❤️',
+                                '🤔',
+                                '✅',
+                                '😄'
+                              ])
+                                PopupMenuItem(
+                                    value: emoji,
+                                    child: Text(emoji,
+                                        style: const TextStyle(fontSize: 22)))
+                            ]),
+                    IconButton(
+                        tooltip: '发送图片',
+                        onPressed: uploading ? null : onPickImage,
+                        icon: const Icon(Icons.image_outlined, size: 21)),
+                    if (supportsFiles)
+                      IconButton(
+                          tooltip: '发送文件',
+                          onPressed: uploading ? null : onPickFile,
+                          icon: const Icon(Icons.attach_file, size: 21)),
+                    if (canned.isNotEmpty)
+                      _CannedMenu(
                           canned: canned,
                           onPick: (content) {
                             controller.text = content;
-                            controller.selection = TextSelection.collapsed(
-                              offset: content.length,
-                            );
+                            controller.selection =
+                                TextSelection.collapsed(offset: content.length);
+                            onChanged(content);
                             focusNode.requestFocus();
-                          },
-                        ),
-                    ],
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: FilledButton.icon(
-                      onPressed: sending ? null : onSend,
-                      icon: sending
-                          ? const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Icon(noteMode ? Icons.note_add_outlined : Icons.send, size: 18),
-                      label: Text(noteMode ? '记备注' : '发送'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          if (!supportsFiles)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                '当前客户端支持发送图片；其他文件类型可通过开放接口发送。',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.colorScheme.outline,
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
+                          }),
+                    const SizedBox(width: 8),
+                    TextButton.icon(
+                        onPressed: () => onToggleNote(!noteMode),
+                        icon: Icon(
+                            noteMode
+                                ? Icons.lock_outline
+                                : Icons.sticky_note_2_outlined,
+                            size: 16),
+                        label: Text(noteMode ? '内部备注' : '回复访客'),
+                        style: TextButton.styleFrom(
+                            foregroundColor: noteMode
+                                ? scheme.tertiary
+                                : scheme.onSurfaceVariant)),
+                    if (uploading)
+                      const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2)),
+                  ]),
+              Shortcuts(
+                  shortcuts: const <ShortcutActivator, Intent>{
+                    SingleActivator(LogicalKeyboardKey.enter): _SendIntent(),
+                    SingleActivator(LogicalKeyboardKey.numpadEnter):
+                        _SendIntent()
+                  },
+                  child: Actions(
+                      actions: <Type, Action<Intent>>{
+                        _SendIntent: CallbackAction<_SendIntent>(onInvoke: (_) {
+                          onSend();
+                          return null;
+                        })
+                      },
+                      child: TextField(
+                          controller: controller,
+                          focusNode: focusNode,
+                          minLines: compact ? 1 : 3,
+                          maxLines: compact ? 4 : 6,
+                          onChanged: onChanged,
+                          textInputAction: TextInputAction.newline,
+                          keyboardType: TextInputType.multiline,
+                          decoration: InputDecoration(
+                              hintText: noteMode
+                                  ? '写一条内部备注，访客看不到'
+                                  : visitorTyping
+                                      ? '对方正在输入…'
+                                      : '输入回复内容…',
+                              filled: true,
+                              fillColor: noteMode
+                                  ? scheme.tertiaryContainer.withAlpha(35)
+                                  : scheme.surface,
+                              border: InputBorder.none,
+                              enabledBorder: InputBorder.none,
+                              focusedBorder: InputBorder.none,
+                              contentPadding: const EdgeInsets.symmetric(
+                                  vertical: 10, horizontal: 4),
+                              hintStyle: theme.textTheme.bodyMedium
+                                  ?.copyWith(color: scheme.outline))))),
+              Row(children: [
+                Expanded(
+                    child: Text(
+                        noteMode
+                            ? '仅团队成员可见'
+                            : compact
+                                ? 'Shift + Enter 换行'
+                                : 'Enter 发送，Shift + Enter 换行',
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: scheme.outline))),
+                FilledButton(
+                    onPressed: sending ? null : onSend,
+                    child: sending
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : Text(noteMode ? '保存备注' : '发送'))
+              ]),
+              if (!supportsFiles)
+                Text('当前客户端支持发送图片；其他文件可通过开放接口发送。',
+                    style: theme.textTheme.bodySmall),
+            ]));
   }
 }
 
@@ -2488,7 +2661,8 @@ class _TransferDialogState extends State<_TransferDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('转接会话'),
+      title: Text(
+          widget.workbench.selected?.isUnassigned == true ? '分配会话' : '转派会话'),
       content: SizedBox(
         width: 380,
         child: ListenableBuilder(
@@ -2505,12 +2679,12 @@ class _TransferDialogState extends State<_TransferDialog> {
                 if (candidates.isEmpty)
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 12),
-                    child: Text('没有其他可转接的坐席。'),
+                    child: Text('没有可分配的客服，请先给团队成员分配此客服入口。'),
                   )
                 else
                   DropdownButtonFormField<String>(
                     value: _agentId,
-                    decoration: const InputDecoration(labelText: '选择坐席'),
+                    decoration: const InputDecoration(labelText: '选择接待客服'),
                     items: <DropdownMenuItem<String>>[
                       for (final agent in candidates)
                         DropdownMenuItem<String>(
@@ -2545,8 +2719,8 @@ class _TransferDialogState extends State<_TransferDialog> {
         FilledButton(
           onPressed: _agentId == null
               ? null
-              : () => Navigator.of(context).pop(_agentId),
-          child: const Text('转接'),
+              : () => Navigator.of(context).pop((_agentId!, _note.text.trim())),
+          child: const Text('确认分配'),
         ),
       ],
     );
@@ -2572,7 +2746,8 @@ class _TagDialogState extends State<_TagDialog> {
   void initState() {
     super.initState();
     _input = TextEditingController();
-    _selected = List<String>.of(widget.workbench.selected?.tags ?? const <String>[]);
+    _selected =
+        List<String>.of(widget.workbench.selected?.tags ?? const <String>[]);
     if (widget.workbench.tags.isEmpty) {
       widget.workbench.loadTags();
     }
