@@ -73,11 +73,11 @@ export class VisitorSocket {
     this.#send({ type: 'typing', conversationId });
   }
 
-  sendRead(conversationId: string): void {
-    this.#send({ type: 'read', conversationId });
+  sendRead(conversationId: string, sequence: number): void {
+    this.#send({ type: 'read', conversationId, sequence });
   }
 
-  #send(frame: Record<string, string>): void {
+  #send(frame: Record<string, string | number>): void {
     if (this.#socket?.readyState === WebSocket.OPEN) {
       this.#socket.send(JSON.stringify(frame));
     }

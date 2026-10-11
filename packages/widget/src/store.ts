@@ -1041,13 +1041,19 @@ export class ChatStore {
         this.#typingTimer = setTimeout(() => this.#patch({ agentTyping: false }), TYPING_TTL_MS);
         break;
       }
-      case 'conversation.read': {
+      case 'conversation.read':
+      case 'conversation.delivered': {
+        void this.#resync();
+        break;
+      }
+      case 'agent.presence': {
+        // 入口频道推送坐席状态；重拉会话列表即可刷新 agentsOnline 副标题。
         void this.#resync();
         break;
       }
       default:
         break;
-    }
+      }
   }
 
   #resolveAttachments(saved: Message, optimistic: ChatMessage): Message['attachments'] {

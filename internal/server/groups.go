@@ -651,6 +651,11 @@ func (a *API) groupSocket(w http.ResponseWriter, r *http.Request) {
 		fail(w, 401, "登录已失效")
 		return
 	}
+	// 与 HTTP 群接口同一套餐门槛，避免降级后旧 token 仍能挂着群聊长连接。
+	if !a.tenantHasFeature(r.Context(), p.TenantID, "groups") {
+		failCode(w, 403, "PLAN_FEATURE_REQUIRED", "当前套餐未开通群聊")
+		return
+	}
 	if p.Kind == auth.KindAgent && !a.authn.SessionValid(r.Context(), p.SessionID, p.AgentID) {
 		fail(w, 401, "登录已失效")
 		return

@@ -46,6 +46,14 @@ void main() {
             },
           '/api/v1/admin/api-keys' => {'items': []},
           '/api/v1/admin/webhooks' => {'items': [], 'availableEvents': []},
+          '/api/v1/console/entitlements' => {
+              'plan': 'ENTERPRISE',
+              'features': {
+                'identity': true,
+                'integrations': true,
+                'groups': true,
+              },
+            },
           _ => throw StateError('unexpected $path'),
         };
         return http.Response.bytes(utf8.encode(jsonEncode(data)), 200);
@@ -53,6 +61,8 @@ void main() {
     )..token = 'test-session';
     addTearDown(api.close);
     await tester.pumpWidget(MaterialApp(home: IntegrationPage(api: api)));
+    await settleRequests(tester);
+    await tester.tap(find.text('接入入口'));
     await settleRequests(tester);
     expect(find.text('site-one'), findsOneWidget);
 
@@ -70,6 +80,11 @@ void main() {
       server: 'https://chat.example.com',
       client: MockClient((request) async {
         final path = request.url.path;
+        if (path == '/api/v1/console/entitlements') {
+          return http.Response(
+              '{"plan":"GROWTH","features":{"integrations":true,"identity":false,"groups":true}}',
+              200);
+        }
         if (path == '/api/v1/admin/inboxes') {
           return http.Response('{"items":[]}', 200);
         }
@@ -131,6 +146,14 @@ void main() {
         server: 'https://chat.example.com',
         client: MockClient((request) async {
           final body = switch (request.url.path) {
+            '/api/v1/console/entitlements' => {
+                'plan': 'GROWTH',
+                'features': {
+                  'integrations': true,
+                  'identity': false,
+                  'groups': true,
+                },
+              },
             '/api/v1/admin/inboxes' => {'items': []},
             '/api/v1/admin/api-keys' => {
                 'items': [
@@ -170,5 +193,66 @@ void main() {
       expect(tester.takeException(), isNull);
     }
     expect(find.text('https://example.com/webhook'), findsOneWidget);
+  });
+  testWidgets('回调校验和服务端错误留在表单，修正后可重试', (tester) async {
+    var posts = 0;
+    final api = RelayDeskApi(server: 'http://localhost', client: MockClient((request) async {
+      if (request.url.path.endsWith('/entitlements')) {
+        return http.Response(
+            '{"plan":"GROWTH","features":{"integrations":true,"identity":false,"groups":true}}',
+            200);
+      }
+      if (request.url.path.endsWith('/webhooks') && request.method == 'POST') {
+        posts++;
+        return posts == 1 ? http.Response('{"message":"retry error"}', 500) : http.Response('{"secret":"test-secret"}', 201);
+      }
+      if (request.url.path.endsWith('/webhooks')) return http.Response('{"items":[],"availableEvents":["conversation.read","conversation.delivered"]}',200);
+      return http.Response('{"items":[]}',200);
+    }))..token = 'test';
+    addTearDown(api.close);
+    await tester.pumpWidget(MaterialApp(home: IntegrationPage(api:api)));
+    await settleRequests(tester);
+    await tester.tap(find.text('事件回调')); await settleRequests(tester);
+    await tester.tap(find.text('新增回调')); await settleRequests(tester);
+    await tester.tap(find.text('创建')); await settleRequests(tester);
+    expect(find.text('请填写有效的 HTTP/HTTPS 地址并选择至少一个事件'),findsOneWidget);
+    expect(posts,0);
+    await tester.enterText(find.byType(TextFormField),'http://localhost:8099/receipt');
+    await tester.tap(find.text('conversation.read')); await tester.pump();
+    await tester.tap(find.text('创建')); await settleRequests(tester);
+    expect(find.text('retry error'),findsOneWidget);
+    expect(find.text('http://localhost:8099/receipt'),findsOneWidget);
+    await tester.tap(find.text('创建')); await settleRequests(tester);
+    expect(posts,2); expect(find.text('回调签名密钥'),findsOneWidget);
+  });
+
+  testWidgets('旗舰版接入指南展示 member-token 进群，不伪装企业版身份票据',
+      (tester) async {
+    final api = RelayDeskApi(
+      server: 'https://chat.example.com',
+      client: MockClient((request) async {
+        final data = switch (request.url.path) {
+          '/api/v1/console/entitlements' => {
+              'plan': 'GROWTH',
+              'features': {
+                'integrations': true,
+                'identity': false,
+                'groups': true,
+              },
+            },
+          '/api/v1/admin/inboxes' => {'items': []},
+          '/api/v1/admin/api-keys' => {'items': []},
+          '/api/v1/admin/webhooks' => {'items': [], 'availableEvents': []},
+          _ => throw StateError('unexpected ${request.url.path}'),
+        };
+        return http.Response.bytes(utf8.encode(jsonEncode(data)), 200);
+      }),
+    )..token = 'test-session';
+    addTearDown(api.close);
+    await tester.pumpWidget(MaterialApp(home: IntegrationPage(api: api)));
+    await settleRequests(tester);
+    expect(find.textContaining('member-token'), findsWidgets);
+    expect(find.textContaining('liaoqiao-group-'), findsOneWidget);
+    expect(find.textContaining('visitor-identity'), findsNothing);
   });
 }

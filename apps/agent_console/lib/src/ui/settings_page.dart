@@ -1,3 +1,5 @@
+import 'package:relaydesk_agent_console/src/util/message_alert_stub.dart'
+    if (dart.library.html) 'package:relaydesk_agent_console/src/util/message_alert_web.dart';
 import 'package:flutter/material.dart';
 import 'package:relaydesk_agent_console/src/ui/workspace_layout.dart';
 
@@ -211,7 +213,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    '状态会同步给主管与其他同事；离线时不会自动分配新会话。',
+                    '在线时客户组件显示有人接待；离开/离线时组件显示留言。状态同步给同事，离线不会自动分配新会话。',
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
@@ -365,6 +367,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 label: const Text('退出登录'),
               ),
               const SizedBox(height: 10),
+              messageAlertSettings(),
               Text(
                 '版本信息：通语工作台 · 协议版本 v1',
                 textAlign: TextAlign.center,

@@ -13,6 +13,7 @@ import (
 )
 
 func (a *API) registerConsole(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/v1/console/entitlements", a.requireAgent(a.consoleEntitlements))
 	// Authentication
 	mux.HandleFunc("POST /api/v1/console/login", a.limit(a.loginRate, a.consoleLogin))
 	mux.HandleFunc("POST /api/v1/console/logout", a.requireAgent(a.consoleLogout))
@@ -72,6 +73,7 @@ func (a *API) registerConsole(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/console/agents", a.requireAgent(a.consoleAgents))
 
 	// Knowledge base (the AI reads from the same tables)
+	mux.HandleFunc("GET /api/v1/console/knowledge-categories", a.requireAgent(a.adminKnowledgeCategories))
 	mux.HandleFunc("GET /api/v1/console/knowledge", a.requireAgent(a.consoleKnowledgeList))
 	mux.HandleFunc("POST /api/v1/console/knowledge", a.requireRole([]string{auth.RoleOwner, auth.RoleAdmin, auth.RoleSupervisor}, a.consoleKnowledgeCreate))
 	mux.HandleFunc("PATCH /api/v1/console/knowledge/{id}", a.requireRole([]string{auth.RoleOwner, auth.RoleAdmin, auth.RoleSupervisor}, a.consoleKnowledgeUpdate))
@@ -96,7 +98,7 @@ func (a *API) consoleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.TrimSpace(in.Email) == "" || in.Password == "" {
-		fail(w, 400, "请输入邮箱和密码")
+		fail(w, 400, "请输入用户名和密码")
 		return
 	}
 	account, err := a.authn.Login(r.Context(), in.Email, in.Password, in.TenantSlug)
@@ -126,16 +128,17 @@ func (a *API) consoleLogin(w http.ResponseWriter, r *http.Request) {
 		on conflict (agent_id) do update set status='ONLINE', last_seen_at = now()`, account.ID)
 	a.recordAudit(r.Context(), account.TenantID, "AGENT", account.ID, "agent.login", "agent", account.ID, nil)
 
-	var tenantName string
-	_ = a.db.QueryRow(r.Context(), `select name from tenant where id=$1`, account.TenantID).Scan(&tenantName)
+	var tenantName, tenantSlug string
+	_ = a.db.QueryRow(r.Context(), `select name, slug from tenant where id=$1`, account.TenantID).Scan(&tenantName, &tenantSlug)
 	inboxes, _ := a.agentInboxes(r.Context(), account.TenantID, account.ID)
 	respond(w, 200, map[string]any{
 		"token":     token,
 		"expiresIn": int(a.cfg.AgentSessionTTL.Seconds()),
 		"agent": map[string]any{
 			"id": account.ID, "email": account.Email, "displayName": account.DisplayName, "role": account.Role,
+			"presence": "ONLINE",
 		},
-		"tenant":  map[string]any{"id": account.TenantID, "name": tenantName},
+		"tenant":  map[string]any{"id": account.TenantID, "name": tenantName, "slug": tenantSlug},
 		"inboxes": inboxes,
 	})
 }
@@ -144,6 +147,7 @@ func (a *API) consoleLogout(w http.ResponseWriter, r *http.Request, p auth.Princ
 	_ = a.authn.RevokeSession(r.Context(), p.SessionID)
 	_, _ = a.db.Exec(r.Context(), `insert into agent_presence(agent_id, status, last_seen_at) values($1,'OFFLINE', now())
 		on conflict (agent_id) do update set status='OFFLINE', last_seen_at = now()`, p.AgentID)
+	a.publishAgentPresence(r.Context(), p.TenantID, p.AgentID, "OFFLINE")
 	respond(w, 200, map[string]any{"status": "OK"})
 }
 
@@ -161,11 +165,14 @@ func (a *API) consoleMe(w http.ResponseWriter, r *http.Request, p auth.Principal
 	}
 	inboxes, _ := a.agentInboxes(r.Context(), p.TenantID, p.AgentID)
 	var openConversations int
+	var tenantName, tenantSlug string
+	_ = a.db.QueryRow(r.Context(), `select name, slug from tenant where id=$1`, p.TenantID).Scan(&tenantName, &tenantSlug)
 	_ = a.db.QueryRow(r.Context(), `select count(*)::int from conversation
 		where tenant_id=$1 and assignee_id=$2 and status <> 'RESOLVED'`, p.TenantID, p.AgentID).Scan(&openConversations)
 	respond(w, 200, map[string]any{
 		"id": p.AgentID, "email": email, "displayName": displayName, "role": role,
 		"presence": presence, "maxConcurrent": maxConcurrent, "openConversations": openConversations,
+		"tenant":  map[string]any{"id": p.TenantID, "name": tenantName, "slug": tenantSlug},
 		"inboxes": inboxes,
 	})
 }
@@ -234,10 +241,7 @@ func (a *API) consolePresence(w http.ResponseWriter, r *http.Request, p auth.Pri
 		fail(w, 500, "更新状态失败")
 		return
 	}
-	a.publish(r.Context(), []string{realtime.TenantChannel(p.TenantID.String())}, realtime.Event{
-		Type: "agent.presence", TenantID: p.TenantID.String(),
-		Data: map[string]any{"agentId": p.AgentID, "status": status},
-	})
+	a.publishAgentPresence(r.Context(), p.TenantID, p.AgentID, status)
 	respond(w, 200, map[string]any{"status": "OK"})
 }
 
@@ -304,10 +308,10 @@ func (a *API) consoleConversations(w http.ResponseWriter, r *http.Request, p aut
 		args = append(args, p.AgentID)
 		conditions = append(conditions, "c.assignee_id = $"+itoa(len(args)))
 	}
-	if status != "" {
+	if status != "" && status != "ALL" {
 		args = append(args, status)
 		conditions = append(conditions, "c.status = $"+itoa(len(args)))
-	} else {
+	} else if status != "ALL" {
 		conditions = append(conditions, "c.status <> 'RESOLVED'")
 	}
 	if inboxID != "" {
@@ -319,7 +323,7 @@ func (a *API) consoleConversations(w http.ResponseWriter, r *http.Request, p aut
 	if search != "" {
 		args = append(args, search)
 		index := itoa(len(args))
-		conditions = append(conditions, "(coalesce(v.display_name,'') ilike '%' || $"+index+" || '%' or coalesce(c.last_message_preview,'') ilike '%' || $"+index+" || '%')")
+		conditions = append(conditions, "(coalesce(v.display_name,'') ilike '%' || $"+index+" || '%' or coalesce(c.subject,'') ilike '%' || $"+index+" || '%' or exists (select 1 from message sm where sm.tenant_id=c.tenant_id and sm.conversation_id=c.id and sm.deleted_at is null and sm.content ilike '%' || $"+index+" || '%'))")
 	}
 	// Agents only see conversations from inboxes they belong to.
 	args = append(args, p.AgentID)
@@ -335,7 +339,7 @@ func (a *API) consoleConversations(w http.ResponseWriter, r *http.Request, p aut
 		  join visitor v on v.id = c.visitor_id
 		  left join agent ag on ag.id = c.assignee_id
 		 where ` + strings.Join(conditions, " and ") + `
-		 order by c.priority desc, coalesce(c.last_message_at, c.created_at) desc
+		 order by coalesce(c.last_message_at, c.created_at) desc, c.priority desc, c.id desc
 		 limit $` + itoa(len(args))
 
 	rows, err := a.db.Query(r.Context(), query, args...)
@@ -356,7 +360,8 @@ func (a *API) consoleConversations(w http.ResponseWriter, r *http.Request, p aut
 	}
 	var queued int
 	_ = a.db.QueryRow(r.Context(), `select count(*)::int from conversation
-		where tenant_id=$1 and assignee_id is null and status <> 'RESOLVED'`, p.TenantID).Scan(&queued)
+		where tenant_id=$1 and assignee_id is null and status <> 'RESOLVED'
+		and exists (select 1 from agent_inbox ai where ai.inbox_id=conversation.inbox_id and ai.agent_id=$2)`, p.TenantID, p.AgentID).Scan(&queued)
 	respond(w, 200, map[string]any{"items": items, "queued": queued})
 }
 
@@ -417,15 +422,23 @@ func (a *API) consoleMessages(w http.ResponseWriter, r *http.Request, p auth.Pri
 	if page.LastSequence == 0 {
 		page.LastSequence = lastSequence
 	}
-	// The read cursor of the assigned agent is the "new messages" divider
-	// position: everything after it is what this agent has not seen yet.
+	// 坐席自己的已读游标：用来画「以下为新消息」。
 	var lastRead int64
 	_ = a.db.QueryRow(r.Context(), `select coalesce(last_read_sequence,0) from conversation_read
 		where conversation_id=$1 and reader_type='AGENT' and reader_id=$2`, id, p.AgentID).Scan(&lastRead)
+	// 访客侧游标：坐席气泡上的「已送达 / 已读」依赖这两个最大值。
+	var visitorLastRead, visitorLastDelivered int64
+	_ = a.db.QueryRow(r.Context(), `
+		select coalesce(max(last_read_sequence),0), coalesce(max(last_delivered_sequence),0)
+		from conversation_read
+		where conversation_id=$1 and reader_type='VISITOR'`, id).
+		Scan(&visitorLastRead, &visitorLastDelivered)
 	respond(w, 200, map[string]any{
 		"items": page.Items, "hasMore": page.HasMore, "hasOlder": page.HasOlder,
 		"firstSequence": page.FirstSequence, "lastSequence": page.LastSequence,
 		"agentUnread": agentUnread, "visitorUnread": visitorUnread, "lastReadSequence": lastRead,
+		"visitorLastReadSequence":      visitorLastRead,
+		"visitorLastDeliveredSequence": visitorLastDelivered,
 	})
 }
 
@@ -464,8 +477,8 @@ func (a *API) consoleSend(w http.ResponseWriter, r *http.Request, p auth.Princip
 			return
 		}
 		var exists bool
-		_ = a.db.QueryRow(r.Context(), `select exists(select 1 from message where id=$1 and conversation_id=$2)`,
-			parsed, id).Scan(&exists)
+		_ = a.db.QueryRow(r.Context(), `select exists(select 1 from message where id=$1 and conversation_id=$2 and ($3 or not is_private))`,
+			parsed, id, in.Private).Scan(&exists)
 		if !exists {
 			fail(w, 400, "引用的消息不存在")
 			return
@@ -480,13 +493,17 @@ func (a *API) consoleSend(w http.ResponseWriter, r *http.Request, p auth.Princip
 		// visitor.
 		view, err := a.appendMessage(r.Context(), p.TenantID, id, messageInput{
 			SenderType: "AGENT", SenderID: &p.AgentID, MessageType: "EVENT",
-			Content: in.Content, Metadata: in.Metadata, Private: true, ReplyToID: replyTo,
+			// 内部备注同样需要去重标识，避免实时事件和发送响应各显示一条。
+			ClientMessageID: in.ClientMessageID,
+			Content:         in.Content, Metadata: in.Metadata, Private: true, ReplyToID: replyTo,
 		})
 		if err != nil {
 			fail(w, 500, "发送内部备注失败")
 			return
 		}
-		view.SenderName = p.Name
+		if view.SenderName == "" {
+			view.SenderName = p.Name
+		}
 		respond(w, 201, view)
 		return
 	}
@@ -510,13 +527,18 @@ func (a *API) consoleSend(w http.ResponseWriter, r *http.Request, p auth.Princip
 	})
 	if err != nil {
 		a.logger.Error("agent message failed", "error", err)
+		if failServiceError(w, err) {
+			return
+		}
 		fail(w, 500, "发送消息失败")
 		return
 	}
 	// Sending an answer clears the draft: keeping it would hand the agent a
 	// stale copy of text they already sent the next time they open the thread.
 	_, _ = a.db.Exec(r.Context(), `delete from message_draft where conversation_id=$1 and agent_id=$2`, id, p.AgentID)
-	view.SenderName = p.Name
+	if view.SenderName == "" {
+		view.SenderName = p.Name
+	}
 	respond(w, 201, view)
 }
 
@@ -568,8 +590,9 @@ func (a *API) consoleTransfer(w http.ResponseWriter, r *http.Request, p auth.Pri
 	}
 	var targetName string
 	var sameTenant bool
-	err = a.db.QueryRow(r.Context(), `select display_name, tenant_id = $3 from agent
-		where id = $1 and status = 'ACTIVE'`, target, target, p.TenantID).Scan(&targetName, &sameTenant)
+	err = a.db.QueryRow(r.Context(), `select display_name, tenant_id = $2 from agent
+		where id = $1 and status = 'ACTIVE'
+		and exists (select 1 from agent_inbox ai join conversation c on c.inbox_id=ai.inbox_id where ai.agent_id=agent.id and c.id=$3)`, target, p.TenantID, id).Scan(&targetName, &sameTenant)
 	if err != nil || !sameTenant {
 		fail(w, 404, "目标坐席不存在")
 		return
@@ -651,7 +674,14 @@ func (a *API) consoleRead(w http.ResponseWriter, r *http.Request, p auth.Princip
 	if !decode(w, r, &in) {
 		return
 	}
-	a.markRead(r.Context(), id, p.TenantID, "AGENT", p.AgentID, in.Sequence)
+	if in.Sequence <= 0 {
+		fail(w, 400, "sequence 必须大于零")
+		return
+	}
+	if err := a.markRead(r.Context(), id, p.TenantID, "AGENT", p.AgentID, in.Sequence); err != nil {
+		fail(w, 500, "更新回执失败")
+		return
+	}
 	respond(w, 200, map[string]any{"status": "OK"})
 }
 
@@ -667,7 +697,14 @@ func (a *API) consoleDelivered(w http.ResponseWriter, r *http.Request, p auth.Pr
 	if !decode(w, r, &in) {
 		return
 	}
-	a.markDelivered(r.Context(), id, p.TenantID, "AGENT", p.AgentID, in.Sequence)
+	if in.Sequence <= 0 {
+		fail(w, 400, "sequence 必须大于零")
+		return
+	}
+	if err := a.markDelivered(r.Context(), id, p.TenantID, "AGENT", p.AgentID, in.Sequence); err != nil {
+		fail(w, 500, "更新回执失败")
+		return
+	}
 	respond(w, 200, map[string]any{"status": "OK"})
 }
 

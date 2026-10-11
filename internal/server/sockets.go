@@ -9,6 +9,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/relaydesk/relaydesk/internal/auth"
 	"github.com/relaydesk/relaydesk/internal/realtime"
@@ -24,6 +25,7 @@ var errWSCapacity = errors.New("websocket capacity reached")
 type inbound struct {
 	Type           string `json:"type"`
 	ConversationID string `json:"conversationId"`
+	Sequence       int64  `json:"sequence"`
 }
 
 func (a *API) widgetSocket(w http.ResponseWriter, r *http.Request) {
@@ -45,9 +47,14 @@ func (a *API) widgetSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	channels := []string{realtime.VisitorChannel(principal.VisitorID.String())}
+	// 订阅所在入口，才能收到坐席在线/离开，避免组件副标题卡在「离线」。
+	if principal.InboxID != uuid.Nil {
+		channels = append(channels, realtime.InboxChannel(principal.InboxID.String()))
+	}
 	channels = append(channels, a.openConversationChannels(r.Context(), principal.VisitorID)...)
 	subscriber := a.hub.Subscribe(conn, channels)
 	defer a.hub.Unsubscribe(subscriber)
+	a.guardSocket(r.Context(), subscriber, principal)
 	a.touchVisitor(r.Context(), principal.VisitorID)
 
 	a.socketHello(subscriber, map[string]any{
@@ -72,7 +79,7 @@ func (a *API) widgetSocket(w http.ResponseWriter, r *http.Request) {
 			}
 		case "read":
 			if id, err := uuid.Parse(frame.ConversationID); err == nil && a.visitorOwnsConversation(r, principal, id) {
-				a.markRead(r.Context(), id, principal.TenantID, "VISITOR", principal.VisitorID, 0)
+				a.markRead(r.Context(), id, principal.TenantID, "VISITOR", principal.VisitorID, frame.Sequence)
 			}
 		}
 	})
@@ -92,6 +99,12 @@ func (a *API) consoleSocket(w http.ResponseWriter, r *http.Request) {
 		failCode(w, 401, "AGENT_SESSION_REVOKED", "登录状态已被注销，请重新登录")
 		return
 	}
+	var active bool
+	principal, active = a.currentAgent(r.Context(), principal)
+	if !active {
+		fail(w, 401, "登录已失效")
+		return
+	}
 	conn, err := a.accept(r, w)
 	if err != nil {
 		return
@@ -108,14 +121,19 @@ func (a *API) consoleSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	subscriber := a.hub.Subscribe(conn, channels)
 	defer a.hub.Unsubscribe(subscriber)
+	a.guardSocket(r.Context(), subscriber, principal)
 
+	// 在线状态以 REST /console/me/presence 为准：套接字只负责心跳。
+	// 断线不得把「离开」抹成离线，重连也不得在仍为离开时广播 ONLINE，否则组件会闪「离线」。
 	_, _ = a.db.Exec(r.Context(), `insert into agent_presence(agent_id, status, last_seen_at) values($1,'ONLINE', now())
 		on conflict (agent_id) do update set status = case when agent_presence.status = 'OFFLINE' then 'ONLINE' else agent_presence.status end,
 		                                    last_seen_at = now()`, principal.AgentID)
-	a.publish(r.Context(), []string{realtime.TenantChannel(principal.TenantID.String())}, realtime.Event{
-		Type: "agent.presence", TenantID: principal.TenantID.String(),
-		Data: map[string]any{"agentId": principal.AgentID, "status": "ONLINE"},
-	})
+	var presence string
+	_ = a.db.QueryRow(r.Context(), `select coalesce(status,'ONLINE') from agent_presence where agent_id=$1`, principal.AgentID).Scan(&presence)
+	if presence == "" {
+		presence = "ONLINE"
+	}
+	a.publishAgentPresence(r.Context(), principal.TenantID, principal.AgentID, presence)
 
 	a.socketHello(subscriber, map[string]any{
 		"kind": "console", "agentId": principal.AgentID, "role": principal.Role, "serverTime": nowUTC(),
@@ -139,17 +157,14 @@ func (a *API) consoleSocket(w http.ResponseWriter, r *http.Request) {
 			}
 		case "read":
 			if id, err := uuid.Parse(frame.ConversationID); err == nil && a.agentCanSee(r, principal, id) {
-				a.markRead(r.Context(), id, principal.TenantID, "AGENT", principal.AgentID, 0)
+				a.markRead(r.Context(), id, principal.TenantID, "AGENT", principal.AgentID, frame.Sequence)
 			}
 		case "presence":
 			// Handled over REST so the status survives a socket drop.
 		}
 	})
-	_, _ = a.db.Exec(context.WithoutCancel(r.Context()), `update agent_presence set status='OFFLINE', last_seen_at = now() where agent_id=$1`, principal.AgentID)
-	a.publish(context.WithoutCancel(r.Context()), []string{realtime.TenantChannel(principal.TenantID.String())}, realtime.Event{
-		Type: "agent.presence", TenantID: principal.TenantID.String(),
-		Data: map[string]any{"agentId": principal.AgentID, "status": "OFFLINE"},
-	})
+	// 仅刷新心跳；显式离线/离开仍走 REST，避免刷新页或瞬时断线把离开打成离线。
+	_, _ = a.db.Exec(context.WithoutCancel(r.Context()), `update agent_presence set last_seen_at = now() where agent_id=$1`, principal.AgentID)
 }
 
 func (a *API) platformSocket(w http.ResponseWriter, r *http.Request) {
@@ -158,8 +173,8 @@ func (a *API) platformSocket(w http.ResponseWriter, r *http.Request) {
 		token = bearer(r)
 	}
 	principal, err := a.tokens.Verify(token)
-	if err != nil || principal.Kind != auth.KindPlatform {
-		failCode(w, 401, "PLATFORM_TOKEN_INVALID", "平台管理令牌无效")
+	if err != nil || !a.platformSessionValid(r.Context(), principal) {
+		failCode(w, 401, "PLATFORM_SESSION_INVALID", "平台登录已失效")
 		return
 	}
 	conn, err := a.accept(r, w)
@@ -168,6 +183,25 @@ func (a *API) platformSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	subscriber := a.hub.Subscribe(conn, []string{realtime.PlatformChannel})
 	defer a.hub.Unsubscribe(subscriber)
+	a.guardSocket(r.Context(), subscriber, principal)
+	// 已打开的实时连接也必须跟随账号退出、密码变更与到期撤销。
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if !a.platformSessionValid(ctx, principal) {
+					conn.CloseNow()
+					return
+				}
+			}
+		}
+	}()
 	a.socketHello(subscriber, map[string]any{
 		"kind": "platform", "instance": a.bus.InstanceID(), "serverTime": nowUTC(),
 	})
@@ -265,6 +299,16 @@ func (a *API) openConversationChannels(ctx context.Context, visitorID uuid.UUID)
 	return channels
 }
 
+// publishAgentPresence 同步给企业频道与坐席所属入口，组件才能即时刷新 agentsOnline。
+func (a *API) publishAgentPresence(ctx context.Context, tenantID, agentID uuid.UUID, status string) {
+	channels := []string{realtime.TenantChannel(tenantID.String())}
+	channels = append(channels, a.inboxChannels(ctx, tenantID, agentID)...)
+	a.publish(ctx, channels, realtime.Event{
+		Type: "agent.presence", TenantID: tenantID.String(),
+		Data: map[string]any{"agentId": agentID, "status": status},
+	})
+}
+
 // inboxChannels gives agents a queue-level stream. A nil agentID means every
 // inbox in the tenant, which supervisors are allowed to watch.
 func (a *API) inboxChannels(ctx context.Context, tenantID, agentID uuid.UUID) []string {
@@ -310,46 +354,79 @@ func (a *API) agentCanSee(r *http.Request, p auth.Principal, conversationID uuid
 // markRead is the shared read-cursor update used by the REST and socket paths.
 // tenantID is passed explicitly so the emitted event can carry it without a
 // second lookup: every caller already has it on its principal.
-func (a *API) markRead(ctx context.Context, conversationID uuid.UUID, tenantID uuid.UUID, readerType string, readerID uuid.UUID, sequence int64) {
-	if sequence == 0 {
-		_ = a.db.QueryRow(ctx, `select last_sequence from conversation where id = $1`, conversationID).Scan(&sequence)
-	}
-	_, _ = a.db.Exec(ctx, `
-		insert into conversation_read(conversation_id, reader_type, reader_id, last_read_sequence, updated_at)
-		values($1,$2,$3,$4, now())
-		on conflict (conversation_id, reader_type, reader_id)
-		do update set last_read_sequence = greatest(conversation_read.last_read_sequence, excluded.last_read_sequence),
-		              updated_at = now()`, conversationID, readerType, readerID, sequence)
-	if readerType == "VISITOR" {
-		_, _ = a.db.Exec(ctx, `update conversation set visitor_unread = 0 where id = $1`, conversationID)
-	} else {
-		_, _ = a.db.Exec(ctx, `update conversation set agent_unread = 0 where id = $1`, conversationID)
-	}
-	a.publish(ctx, a.conversationChannels(ctx, conversationID), realtime.Event{
-		Type: "conversation.read", TenantID: tenantID.String(), ConversationID: conversationID.String(),
-		Data: map[string]any{"readerType": readerType, "readerId": readerID, "sequence": sequence},
-	})
+func (a *API) markRead(ctx context.Context, conversationID, tenantID uuid.UUID, readerType string, readerID uuid.UUID, sequence int64) error {
+	return a.advanceReceipt(ctx, conversationID, tenantID, readerType, readerID, sequence, true)
 }
-
-// markDelivered advances the delivery cursor. It is deliberately separate from
-// markRead: "the device received it" and "the person read it" are different
-// facts, and a chat product that merges them cannot render the single tick that
-// tells an agent the visitor's page is actually open. Delivery is recorded for
-// agents only — a visitor has nobody to reassure.
-func (a *API) markDelivered(ctx context.Context, conversationID uuid.UUID, tenantID uuid.UUID, readerType string, readerID uuid.UUID, sequence int64) {
-	if sequence == 0 {
-		return
+func (a *API) markDelivered(ctx context.Context, conversationID, tenantID uuid.UUID, readerType string, readerID uuid.UUID, sequence int64) error {
+	return a.advanceReceipt(ctx, conversationID, tenantID, readerType, readerID, sequence, false)
+}
+func (a *API) advanceReceipt(ctx context.Context, conversationID, tenantID uuid.UUID, readerType string, readerID uuid.UUID, sequence int64, read bool) error {
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		return err
 	}
-	_, _ = a.db.Exec(ctx, `
-		insert into conversation_read(conversation_id, reader_type, reader_id, last_delivered_sequence, updated_at)
-		values($1,$2,$3,$4, now())
-		on conflict (conversation_id, reader_type, reader_id)
-		do update set last_delivered_sequence = greatest(conversation_read.last_delivered_sequence, excluded.last_delivered_sequence),
-		              updated_at = now()`, conversationID, readerType, readerID, sequence)
-	a.publish(ctx, []string{realtime.ConversationChannel(conversationID.String())}, realtime.Event{
-		Type: "conversation.delivered", TenantID: tenantID.String(), ConversationID: conversationID.String(),
-		Data: map[string]any{"readerType": readerType, "readerId": readerID, "sequence": sequence},
-	})
+	defer tx.Rollback(ctx)
+	var last int64
+	if err = tx.QueryRow(ctx, `select last_sequence from conversation where id=$1 and tenant_id=$2 for update`, conversationID, tenantID).Scan(&last); err != nil {
+		return err
+	}
+	if sequence <= 0 {
+		return errors.New("sequence must be positive")
+	}
+	if sequence > last {
+		sequence = last
+	}
+	var oldRead, oldDelivered int64
+	err = tx.QueryRow(ctx, `select last_read_sequence,last_delivered_sequence from conversation_read where conversation_id=$1 and reader_type=$2 and reader_id=$3`, conversationID, readerType, readerID).Scan(&oldRead, &oldDelivered)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	boundary := oldDelivered
+	if read {
+		boundary = oldRead
+	}
+	if sequence <= boundary {
+		return tx.Commit(ctx)
+	}
+	column := "last_delivered_sequence"
+	eventType := "conversation.delivered"
+	if read {
+		column = "last_read_sequence"
+		eventType = "conversation.read"
+	}
+	_, err = tx.Exec(ctx, `insert into conversation_read(conversation_id,reader_type,reader_id,`+column+`) values($1,$2,$3,$4) on conflict(conversation_id,reader_type,reader_id) do update set `+column+`=greatest(conversation_read.`+column+`,excluded.`+column+`),updated_at=now()`, conversationID, readerType, readerID, sequence)
+	if err != nil {
+		return err
+	}
+	if read {
+		unreadColumn := "agent_unread"
+		predicate := "sender_type='VISITOR'"
+		if readerType == "VISITOR" {
+			unreadColumn = "visitor_unread"
+			predicate = "sender_type<>'VISITOR' and not is_private"
+		}
+		_, err = tx.Exec(ctx, `update conversation set `+unreadColumn+`=(select count(*) from message where conversation_id=$1 and sequence>(select coalesce(max(last_read_sequence),0) from conversation_read where conversation_id=$1 and reader_type=$2) and `+predicate+`),updated_at=now() where id=$1 and tenant_id=$3`, conversationID, readerType, tenantID)
+		if err != nil {
+			return err
+		}
+	}
+	data := map[string]any{"conversationId": conversationID, "readerType": readerType, "readerId": readerID, "sequence": sequence}
+	if a.webhooks != nil {
+		payload, _ := json.Marshal(data)
+		_, err = tx.Exec(ctx, `insert into webhook_delivery(id,endpoint_id,tenant_id,event_type,payload,status,next_attempt_at)
+   select gen_random_uuid(),e.id,$1,$2::varchar(60),$3,'PENDING',now() from webhook_endpoint e
+   where e.tenant_id=$1 and e.status='ACTIVE' and $4::text=any(e.events)
+   and exists(select 1 from tenant_subscription where tenant_id=$1 and status='ACTIVE' and plan in ('STARTER','GROWTH','ENTERPRISE'))`, tenantID, eventType, payload, eventType)
+		if err != nil {
+			return err
+		}
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return err
+	}
+	data = map[string]any{"conversationId": conversationID, "readerType": readerType, "readerId": readerID, "sequence": sequence}
+	a.publish(ctx, a.conversationChannels(ctx, conversationID), realtime.Event{Type: eventType, TenantID: tenantID.String(), ConversationID: conversationID.String(), Data: data})
+	return nil
 }
 
 // markReadRequest is the shared REST read-cursor endpoint body. Both the visitor

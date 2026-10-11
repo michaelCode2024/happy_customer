@@ -551,7 +551,7 @@ export class WidgetView {
       return snapshot.error ?? '连接失败';
     }
     if (snapshot.offline) {
-      return '当前离线，留言稍后回复';
+      return snapshot.offlineMessage || this.#options.offlineMessage || '当前离线，留言稍后回复';
     }
     if (snapshot.agentTyping) {
       return '客服正在输入…';
@@ -562,7 +562,7 @@ export class WidgetView {
     if (snapshot.agentsOnline > 0) {
       return snapshot.aiEnabled ? `在线 ${snapshot.agentsOnline} · 可自动应答` : `在线 ${snapshot.agentsOnline}`;
     }
-    return this.#options.offlineMessage || '离线 · 请留言';
+    return snapshot.offlineMessage || this.#options.offlineMessage || '离线 · 请留言';
   }
 
   #renderConversationList(snapshot: Snapshot): void {
