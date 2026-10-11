@@ -31,6 +31,15 @@
 
   <title>连语客服</title>
   <link rel="manifest" href="manifest.json">
+  <!-- HTML 渲染器下由浏览器绘制中文；避免缺字变成方框 -->
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC",
+        "Noto Sans SC", "Segoe UI", sans-serif;
+    }
+  </style>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>

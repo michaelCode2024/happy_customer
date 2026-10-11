@@ -33,11 +33,30 @@ class RelayTheme {
     return _base(scheme);
   }
 
+  // CanvasKit 默认 Roboto 不含汉字；HTML 渲染器会走系统字体。两端都挂上 CJK 回退。
+  static const List<String> _cjkFallback = <String>[
+    'Microsoft YaHei UI',
+    'Microsoft YaHei',
+    'PingFang SC',
+    'Noto Sans SC',
+    'Source Han Sans SC',
+    'WenQuanYi Micro Hei',
+    'sans-serif',
+  ];
+
   static ThemeData _base(ColorScheme scheme) {
     final isDark = scheme.brightness == Brightness.dark;
+    final textTheme = ThemeData(
+      brightness: scheme.brightness,
+      useMaterial3: true,
+      colorScheme: scheme,
+    ).textTheme.apply(fontFamilyFallback: _cjkFallback);
     return ThemeData(
       useMaterial3: true,
       colorScheme: scheme,
+      textTheme: textTheme,
+      primaryTextTheme: textTheme,
+      fontFamilyFallback: _cjkFallback,
       scaffoldBackgroundColor:
           isDark ? const Color(0xFF151B1A) : const Color(0xFFF5F7F6),
       appBarTheme: AppBarTheme(
@@ -48,6 +67,7 @@ class RelayTheme {
           color: scheme.onSurface,
           fontSize: 17,
           fontWeight: FontWeight.w600,
+          fontFamilyFallback: _cjkFallback,
         ),
       ),
       navigationRailTheme: NavigationRailThemeData(
