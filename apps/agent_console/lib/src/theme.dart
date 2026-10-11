@@ -116,9 +116,9 @@ class RelayTheme {
         backgroundColor: scheme.surfaceContainerHighest,
       ),
       fontFamilyFallback: _cjkFallback,
-      // 外层浅灰画布，内层面板保持纯白，形成参考图那种浮层感。
+      // 外层略冷灰画布，内层纯白浮层；避免脏灰或发紫底。
       scaffoldBackgroundColor:
-          isDark ? const Color(0xFF0F1218) : const Color(0xFFEEF1F6),
+          isDark ? const Color(0xFF0F1218) : const Color(0xFFF3F5F9),
       appBarTheme: AppBarTheme(
         toolbarHeight: 56,
         scrolledUnderElevation: 0,

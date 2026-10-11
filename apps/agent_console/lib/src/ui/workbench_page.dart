@@ -74,7 +74,8 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
   late final WorkbenchController _workbench;
   late final AttachmentPicker _picker;
 
-  WorkbenchSection _section = WorkbenchSection.overview;
+  /// 登录后直接进客户消息，避免首页绕一圈才开始干活。
+  WorkbenchSection _section = WorkbenchSection.conversations;
 
   /// True while the customer record is open as a pushed page on a narrow window.
   bool _profileOpen = false;
@@ -221,77 +222,149 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     super.dispose();
   }
 
-  /// Sections an agent may open. Reports and the knowledge base are gated on the
-  /// role the server reported, and the server enforces the same rule, so hiding
-  /// the entry point is a courtesy rather than the control.
+  /// 菜单按「接待 → 开通 → 账号」分组，文案用白话，避免一排看不懂的功能名。
   List<_SectionSpec> _sections(AgentProfile? agent) {
     final canReport = agent?.canViewReports ?? false;
+    final admin = agent?.role == 'OWNER' || agent?.role == 'ADMIN';
     return <_SectionSpec>[
-      if (_has('groups'))
-        const _SectionSpec(
-            section: WorkbenchSection.groups,
-            label: '群聊',
-            icon: Icons.groups_outlined,
-            selectedIcon: Icons.groups),
-      const _SectionSpec(
-          section: WorkbenchSection.overview,
-          label: '工作概览',
-          icon: Icons.space_dashboard_outlined,
-          selectedIcon: Icons.space_dashboard),
       const _SectionSpec(
         section: WorkbenchSection.conversations,
-        label: '收件箱',
+        label: '客户消息',
+        group: '接待',
         icon: Icons.forum_outlined,
         selectedIcon: Icons.forum,
+      ),
+      if (_has('groups'))
+        const _SectionSpec(
+          section: WorkbenchSection.groups,
+          label: '群聊',
+          group: '接待',
+          icon: Icons.groups_outlined,
+          selectedIcon: Icons.groups,
+        ),
+      const _SectionSpec(
+        section: WorkbenchSection.overview,
+        label: '今天待办',
+        group: '接待',
+        icon: Icons.home_outlined,
+        selectedIcon: Icons.home_rounded,
+      ),
+      const _SectionSpec(
+        section: WorkbenchSection.knowledge,
+        label: '知识库',
+        group: '接待',
+        icon: Icons.menu_book_outlined,
+        selectedIcon: Icons.menu_book,
       ),
       if (canReport)
         const _SectionSpec(
           section: WorkbenchSection.stats,
           label: '数据统计',
+          group: '接待',
           icon: Icons.insights_outlined,
           selectedIcon: Icons.insights,
         ),
-      const _SectionSpec(
-        section: WorkbenchSection.knowledge,
-        label: '知识库',
-        icon: Icons.menu_book_outlined,
-        selectedIcon: Icons.menu_book,
-      ),
-      if (_has('integrations') &&
-          (agent?.role == 'OWNER' || agent?.role == 'ADMIN'))
+      if (admin && _has('integrations'))
         const _SectionSpec(
           section: WorkbenchSection.integrations,
-          label: '应用接入',
-          icon: Icons.integration_instructions_outlined,
-          selectedIcon: Icons.integration_instructions,
+          label: '接入网站',
+          group: '开通',
+          icon: Icons.code_rounded,
+          selectedIcon: Icons.code,
         ),
-      if (agent?.role == 'OWNER' || agent?.role == 'ADMIN') ...[
-        if (_has('automation'))
-          const _SectionSpec(
-              section: WorkbenchSection.automation,
-              label: '自动回复',
-              icon: Icons.auto_awesome_outlined,
-              selectedIcon: Icons.auto_awesome),
-        if (_has('channels'))
-          const _SectionSpec(
-              section: WorkbenchSection.channels,
-              label: '渠道管理',
-              icon: Icons.hub_outlined,
-              selectedIcon: Icons.hub),
-      ],
+      if (admin && _has('automation'))
+        const _SectionSpec(
+          section: WorkbenchSection.automation,
+          label: '自动接待',
+          group: '开通',
+          icon: Icons.auto_awesome_outlined,
+          selectedIcon: Icons.auto_awesome,
+        ),
+      if (admin && _has('channels'))
+        const _SectionSpec(
+          section: WorkbenchSection.channels,
+          label: '渠道入口',
+          group: '开通',
+          icon: Icons.hub_outlined,
+          selectedIcon: Icons.hub,
+        ),
+      if (admin)
+        const _SectionSpec(
+          section: WorkbenchSection.enterprise,
+          label: '同事账号',
+          group: '开通',
+          icon: Icons.people_outline,
+          selectedIcon: Icons.people,
+        ),
       const _SectionSpec(
         section: WorkbenchSection.settings,
-        label: '个人设置',
+        label: '我的设置',
+        group: '账号',
         icon: Icons.settings_outlined,
         selectedIcon: Icons.settings,
       ),
-      if (agent?.role == 'OWNER' || agent?.role == 'ADMIN')
-        const _SectionSpec(
-            section: WorkbenchSection.enterprise,
-            label: '企业管理',
-            icon: Icons.people_outline,
-            selectedIcon: Icons.people),
     ];
+  }
+
+  /// 手机底栏只留 3～4 个主入口，其余进「更多」，避免十几个 Tab 挤成一团。
+  List<_SectionSpec> _phoneDestinations(List<_SectionSpec> sections) {
+    final primary = <WorkbenchSection>[
+      WorkbenchSection.conversations,
+      if (sections.any((s) => s.section == WorkbenchSection.groups))
+        WorkbenchSection.groups,
+      WorkbenchSection.overview,
+    ];
+    return [
+      for (final section in primary)
+        sections.firstWhere((s) => s.section == section),
+    ];
+  }
+
+  Future<void> _openMoreSections(List<_SectionSpec> sections) async {
+    final extras = sections
+        .where((s) =>
+            s.section != WorkbenchSection.conversations &&
+            s.section != WorkbenchSection.groups &&
+            s.section != WorkbenchSection.overview)
+        .toList();
+    if (extras.isEmpty) return;
+    final picked = await showModalBottomSheet<WorkbenchSection>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        final scheme = Theme.of(ctx).colorScheme;
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                child: Text(
+                  '更多功能',
+                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+              ),
+              for (final spec in extras)
+                ListTile(
+                  leading: Icon(spec.icon, color: scheme.primary),
+                  title: Text(spec.label),
+                  subtitle: Text(
+                    spec.group,
+                    style: TextStyle(color: scheme.onSurfaceVariant),
+                  ),
+                  onTap: () => Navigator.pop(ctx, spec.section),
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+    if (picked != null && mounted) {
+      setState(() => _section = picked);
+    }
   }
 
   @override
@@ -313,6 +386,9 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
             final useRail = width >= 900;
             final body = _bodyFor(width);
             if (!useRail) {
+              final phone = _phoneDestinations(sections);
+              final phoneIndex =
+                  phone.indexWhere((spec) => spec.section == _section);
               return Scaffold(
                 // 这两个页面已有自己的工具栏，窄屏不再重复占用一行标题。
                 appBar: _section == WorkbenchSection.integrations ||
@@ -323,19 +399,26 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                     : _compactAppBar(agent),
                 body: body,
                 bottomNavigationBar: NavigationBar(
-                  labelBehavior:
-                      NavigationDestinationLabelBehavior.onlyShowSelected,
-                  selectedIndex:
-                      sections.indexWhere((spec) => spec.section == _section),
-                  onDestinationSelected: (index) =>
-                      setState(() => _section = sections[index].section),
+                  selectedIndex: phoneIndex >= 0 ? phoneIndex : phone.length,
+                  onDestinationSelected: (index) {
+                    if (index >= phone.length) {
+                      unawaited(_openMoreSections(sections));
+                      return;
+                    }
+                    setState(() => _section = phone[index].section);
+                  },
                   destinations: <Widget>[
-                    for (final spec in sections)
+                    for (final spec in phone)
                       NavigationDestination(
                         icon: Icon(spec.icon),
                         selectedIcon: Icon(spec.selectedIcon),
                         label: spec.label,
                       ),
+                    const NavigationDestination(
+                      icon: Icon(Icons.more_horiz),
+                      selectedIcon: Icon(Icons.more_horiz),
+                      label: '更多',
+                    ),
                   ],
                 ),
               );
@@ -362,9 +445,13 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                             _section == spec.section
                                 ? spec.selectedIcon
                                 : spec.icon,
+                            group: spec.group,
                             count:
                                 spec.section == WorkbenchSection.conversations
-                                    ? _workbench.queued
+                                    ? (_workbench.queued > 0
+                                        ? _workbench.queued
+                                        : _workbench.conversations.fold<int>(
+                                            0, (n, c) => n + c.agentUnread))
                                     : 0,
                           ),
                       ],
@@ -418,13 +505,26 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
       case WorkbenchSection.groups:
         return GroupsPage(session: widget.session);
       case WorkbenchSection.overview:
+        final admin = widget.session.agent?.role == 'OWNER' ||
+            widget.session.agent?.role == 'ADMIN';
         return OverviewPage(
-            workbench: _workbench,
-            name: widget.session.agent?.displayName ?? '',
-            onInbox: () =>
-                setState(() => _section = WorkbenchSection.conversations),
-            onKnowledge: () =>
-                setState(() => _section = WorkbenchSection.knowledge));
+          workbench: _workbench,
+          name: widget.session.agent?.displayName ?? '',
+          isAdmin: admin,
+          onInbox: () =>
+              setState(() => _section = WorkbenchSection.conversations),
+          onKnowledge: () =>
+              setState(() => _section = WorkbenchSection.knowledge),
+          onIntegrations: admin && _has('integrations')
+              ? () => setState(() => _section = WorkbenchSection.integrations)
+              : null,
+          onAutomation: admin && _has('automation')
+              ? () => setState(() => _section = WorkbenchSection.automation)
+              : null,
+          onEnterprise: admin
+              ? () => setState(() => _section = WorkbenchSection.enterprise)
+              : null,
+        );
       case WorkbenchSection.automation:
         return AutomationPage(
             key: const ValueKey('automation'), api: widget.session.api);
@@ -449,7 +549,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
       case WorkbenchSection.enterprise:
         return TenantAdminPage(
             api: widget.session.api,
-            tenantSlug: widget.session.tenant?.slug ?? '');
+            tenantSlug: widget.session.tenant?.slug ?? '', onMemberSaved: () async { await widget.session.refreshProfile(); await _workbench.loadAgents(); });
       case WorkbenchSection.conversations:
         return _conversations(width);
     }
@@ -535,11 +635,11 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
           listenable: _workbench,
           builder: (context, _) => Row(
             children: <Widget>[
-              const Text('会话'),
+              const Text('客户消息'),
               const SizedBox(width: 10),
               if (_workbench.queued > 0)
                 Text(
-                  '${_workbench.queued} 个待分配',
+                  '${_workbench.queued} 位待领取',
                   style: Theme.of(context).textTheme.labelSmall,
                 ),
               const Spacer(),
@@ -554,15 +654,15 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
 
   static String _sectionTitle(WorkbenchSection section) => switch (section) {
         WorkbenchSection.groups => '群聊',
-        WorkbenchSection.overview => '工作概览',
-        WorkbenchSection.conversations => '收件箱',
+        WorkbenchSection.overview => '今天待办',
+        WorkbenchSection.conversations => '客户消息',
         WorkbenchSection.stats => '数据统计',
         WorkbenchSection.knowledge => '知识库',
-        WorkbenchSection.integrations => '应用接入',
-        WorkbenchSection.settings => '个人设置',
-        WorkbenchSection.enterprise => '企业管理',
-        WorkbenchSection.automation => '自动回复',
-        WorkbenchSection.channels => '渠道管理',
+        WorkbenchSection.integrations => '接入网站',
+        WorkbenchSection.settings => '我的设置',
+        WorkbenchSection.enterprise => '同事账号',
+        WorkbenchSection.automation => '自动接待',
+        WorkbenchSection.channels => '渠道入口',
       };
 }
 
@@ -572,10 +672,12 @@ class _SectionSpec {
     required this.label,
     required this.icon,
     required this.selectedIcon,
+    this.group = '',
   });
 
   final WorkbenchSection section;
   final String label;
+  final String group;
   final IconData icon;
   final IconData selectedIcon;
 }
@@ -597,36 +699,31 @@ class _WorkbenchChromeBar extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     return Container(
-      height: 54,
-      padding: const EdgeInsets.symmetric(horizontal: 18),
+      height: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
       decoration: BoxDecoration(
+        color: scheme.surface,
         border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
       ),
       child: Row(
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: scheme.primaryContainer.withOpacity(0.7),
-              borderRadius: BorderRadius.circular(999),
-            ),
+          Flexible(
             child: Text(
-              tenantName,
+              sectionTitle,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.labelLarge?.copyWith(
-                fontWeight: FontWeight.w600,
-                color: scheme.primary,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
               ),
             ),
           ),
-          const SizedBox(width: 10),
-          Icon(Icons.chevron_right, size: 16, color: scheme.outline),
-          const SizedBox(width: 4),
+          const SizedBox(width: 12),
           Text(
-            sectionTitle,
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w700,
+            tenantName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: scheme.onSurfaceVariant,
             ),
           ),
           const Spacer(),

@@ -154,13 +154,22 @@ class _TongYuMarkPainter extends CustomPainter {
 }
 
 class WorkspaceNavItem {
-  const WorkspaceNavItem(this.label, this.icon, {this.count = 0});
+  const WorkspaceNavItem(
+    this.label,
+    this.icon, {
+    this.count = 0,
+    this.group = '',
+  });
+
   final String label;
   final IconData icon;
   final int count;
+
+  /// 侧栏分组标题；相邻项相同则只显示一次，空串表示不分组。
+  final String group;
 }
 
-/// 同一套导航覆盖平台、企业后台；选中态使用轻底色，减少长时间接待的视觉负担。
+/// 同一套导航覆盖平台、企业后台；分组 + 左侧色条选中，降低「菜单很多」的压迫感。
 class WorkspaceSidebar extends StatelessWidget {
   const WorkspaceSidebar({
     super.key,
@@ -184,26 +193,28 @@ class WorkspaceSidebar extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final dark = scheme.brightness == Brightness.dark;
     return Container(
-      width: 232,
+      width: 240,
       decoration: BoxDecoration(
-        color: dark ? const Color(0xFF171B24) : Colors.white,
+        color: dark ? const Color(0xFF151922) : const Color(0xFFFAFBFD),
         border: Border(right: BorderSide(color: scheme.outlineVariant)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 22, 16, 16),
+            padding: const EdgeInsets.fromLTRB(20, 22, 16, 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const TongYuBrand(),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
                 Text(
                   subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 12,
-                    height: 1.4,
+                    height: 1.35,
                     color: scheme.onSurfaceVariant,
                   ),
                 ),
@@ -212,112 +223,130 @@ class WorkspaceSidebar extends StatelessWidget {
           ),
           if (leading != null)
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 14),
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
               child: Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: scheme.surfaceContainerHighest.withOpacity(0.65),
+                  color: dark
+                      ? scheme.surfaceContainerHighest.withOpacity(0.45)
+                      : Colors.white,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: scheme.outlineVariant.withOpacity(0.7),
-                  ),
+                  border: Border.all(color: scheme.outlineVariant.withOpacity(0.8)),
                 ),
                 child: leading!,
               ),
             ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 4, 16, 8),
-            child: Text(
-              '工作空间',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.6,
-                color: scheme.outline,
-              ),
-            ),
-          ),
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
+              padding: const EdgeInsets.fromLTRB(10, 4, 10, 8),
               children: [
-                for (var i = 0; i < items.length; i++)
+                for (var i = 0; i < items.length; i++) ...[
+                  if (items[i].group.isNotEmpty &&
+                      (i == 0 || items[i].group != items[i - 1].group))
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(10, i == 0 ? 4 : 14, 8, 6),
+                      child: Text(
+                        items[i].group,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.4,
+                          color: scheme.outline,
+                        ),
+                      ),
+                    ),
                   Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
+                    padding: const EdgeInsets.only(bottom: 2),
                     child: Material(
                       color: i == selectedIndex
-                          ? scheme.primaryContainer
+                          ? scheme.primaryContainer.withOpacity(0.85)
                           : Colors.transparent,
                       borderRadius: BorderRadius.circular(10),
                       child: InkWell(
                         borderRadius: BorderRadius.circular(10),
                         onTap: () => onSelected(i),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 11,
+                        child: Ink(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(10),
+                            border: i == selectedIndex
+                                ? Border(
+                                    left: BorderSide(
+                                      color: scheme.primary,
+                                      width: 3,
+                                    ),
+                                  )
+                                : null,
                           ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                items[i].icon,
-                                size: 20,
-                                color: i == selectedIndex
-                                    ? scheme.primary
-                                    : scheme.onSurfaceVariant,
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  items[i].label,
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: i == selectedIndex
-                                        ? scheme.primary
-                                        : scheme.onSurface,
-                                    fontWeight: i == selectedIndex
-                                        ? FontWeight.w600
-                                        : FontWeight.w400,
-                                  ),
+                          child: Padding(
+                            padding: EdgeInsets.fromLTRB(
+                              i == selectedIndex ? 9 : 12,
+                              11,
+                              12,
+                              11,
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  items[i].icon,
+                                  size: 20,
+                                  color: i == selectedIndex
+                                      ? scheme.primary
+                                      : scheme.onSurfaceVariant,
                                 ),
-                              ),
-                              if (items[i].count > 0)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 7,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: i == selectedIndex
-                                        ? scheme.primary
-                                        : scheme.error,
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
+                                const SizedBox(width: 12),
+                                Expanded(
                                   child: Text(
-                                    '${items[i].count}',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w700,
+                                    items[i].label,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: i == selectedIndex
+                                          ? scheme.primary
+                                          : scheme.onSurface,
+                                      fontWeight: i == selectedIndex
+                                          ? FontWeight.w600
+                                          : FontWeight.w400,
                                     ),
                                   ),
                                 ),
-                            ],
+                                if (items[i].count > 0)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 7,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: i == selectedIndex
+                                          ? scheme.primary
+                                          : const Color(0xFFE11D48),
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: Text(
+                                      '${items[i].count}',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
+                ],
               ],
             ),
           ),
           if (footer != null)
-            Padding(padding: const EdgeInsets.all(16), child: footer!),
+            Padding(padding: const EdgeInsets.fromLTRB(14, 4, 14, 8), child: footer!),
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 16, 18),
+            padding: const EdgeInsets.fromLTRB(20, 0, 16, 16),
             child: Text(
-              '${ProductBrand.nameZh} · ${ProductBrand.tagline}',
-              style: TextStyle(fontSize: 11, color: scheme.outline),
+              '不会用？先点「客户消息」接待',
+              style: TextStyle(fontSize: 11, color: scheme.outline, height: 1.35),
             ),
           ),
         ],
