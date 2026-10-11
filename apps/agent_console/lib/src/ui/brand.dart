@@ -326,7 +326,9 @@ class WorkspaceSidebar extends StatelessWidget {
   }
 }
 
-/// 客服工作台左侧图标轨：参考主流 IM，只放图标与角标，把横向空间留给会话与聊天。
+/// 客服工作台左侧导航轨。
+///
+/// 定稿为「图标 + 中文名」展开态（约 88px），不再只露图标；窄屏仍走底部 NavigationBar。
 class ConsoleIconRail extends StatelessWidget {
   const ConsoleIconRail({
     super.key,
@@ -335,6 +337,7 @@ class ConsoleIconRail extends StatelessWidget {
     required this.onSelected,
     this.avatar,
     this.footer,
+    this.expanded = true,
   });
 
   final List<WorkspaceNavItem> items;
@@ -343,12 +346,15 @@ class ConsoleIconRail extends StatelessWidget {
   final Widget? avatar;
   final Widget? footer;
 
+  /// true：图标下显示菜单名；false：仅图标（兼容极窄布局）。
+  final bool expanded;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final dark = scheme.brightness == Brightness.dark;
     return Container(
-      width: 72,
+      width: expanded ? 88 : 72,
       decoration: BoxDecoration(
         color: dark ? const Color(0xFF141820) : const Color(0xFFF5F6F8),
         border: Border(right: BorderSide(color: scheme.outlineVariant)),
@@ -365,67 +371,97 @@ class ConsoleIconRail extends StatelessWidget {
             ],
             Expanded(
               child: ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
                 children: [
                   for (var i = 0; i < items.length; i++)
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Tooltip(
-                        message: items[i].label,
-                        child: Material(
-                          color: i == selectedIndex
-                              ? scheme.primaryContainer
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(14),
-                          child: InkWell(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Builder(
+                        builder: (context) {
+                          // 展开态文案已可见，不必再挂 Tooltip；收起态才用悬停提示。
+                          final tile = Material(
+                            color: i == selectedIndex
+                                ? scheme.primaryContainer
+                                : Colors.transparent,
                             borderRadius: BorderRadius.circular(14),
-                            onTap: () => onSelected(i),
-                            child: SizedBox(
-                              height: 46,
-                              child: Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  Icon(
-                                    items[i].icon,
-                                    size: 22,
-                                    color: i == selectedIndex
-                                        ? scheme.primary
-                                        : scheme.onSurfaceVariant,
-                                  ),
-                                  if (items[i].count > 0)
-                                    Positioned(
-                                      top: 6,
-                                      right: 6,
-                                      child: Container(
-                                        constraints:
-                                            const BoxConstraints(minWidth: 16),
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 4,
-                                          vertical: 1,
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(14),
+                              onTap: () => onSelected(i),
+                              child: SizedBox(
+                                height: expanded ? 58 : 46,
+                                child: Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          items[i].icon,
+                                          size: 22,
+                                          color: i == selectedIndex
+                                              ? scheme.primary
+                                              : scheme.onSurfaceVariant,
                                         ),
-                                        decoration: BoxDecoration(
-                                          color: scheme.error,
-                                          borderRadius:
-                                              BorderRadius.circular(999),
-                                        ),
-                                        child: Text(
-                                          items[i].count > 99
-                                              ? '99+'
-                                              : '${items[i].count}',
-                                          textAlign: TextAlign.center,
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 9,
-                                            fontWeight: FontWeight.w700,
+                                        if (expanded) ...[
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            // 四字菜单缩成短名，避免轨宽被撑破。
+                                            _railLabel(items[i].label),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              height: 1.1,
+                                              fontWeight: i == selectedIndex
+                                                  ? FontWeight.w700
+                                                  : FontWeight.w500,
+                                              color: i == selectedIndex
+                                                  ? scheme.primary
+                                                  : scheme.onSurfaceVariant,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                    if (items[i].count > 0)
+                                      Positioned(
+                                        top: 4,
+                                        right: expanded ? 10 : 6,
+                                        child: Container(
+                                          constraints: const BoxConstraints(
+                                              minWidth: 16),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 4,
+                                            vertical: 1,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: scheme.error,
+                                            borderRadius:
+                                                BorderRadius.circular(999),
+                                          ),
+                                          child: Text(
+                                            items[i].count > 99
+                                                ? '99+'
+                                                : '${items[i].count}',
+                                            textAlign: TextAlign.center,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 9,
+                                              fontWeight: FontWeight.w700,
+                                            ),
                                           ),
                                         ),
                                       ),
-                                    ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                        ),
+                          );
+                          if (expanded) return tile;
+                          return Tooltip(
+                              message: items[i].label, child: tile);
+                        },
                       ),
                     ),
                 ],
@@ -440,5 +476,33 @@ class ConsoleIconRail extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// 侧轨宽度有限：优先保留定稿里的短名，长名截到前两字。
+String _railLabel(String label) {
+  switch (label) {
+    case '工作概览':
+      return '概览';
+    case '收件箱':
+      return '收件箱';
+    case '数据统计':
+      return '统计';
+    case '知识库':
+      return '知识库';
+    case '应用接入':
+      return '接入';
+    case '自动回复':
+      return '自动';
+    case '渠道管理':
+      return '渠道';
+    case '个人设置':
+      return '设置';
+    case '企业管理':
+      return '企业';
+    case '群聊':
+      return '群聊';
+    default:
+      return label.length <= 3 ? label : label.substring(0, 2);
   }
 }
