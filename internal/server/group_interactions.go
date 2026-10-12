@@ -76,6 +76,10 @@ func (a *API) groupDissolve(w http.ResponseWriter, r *http.Request, p auth.Princ
 		return
 	}
 	defer tx.Rollback(r.Context())
+	if !groupOwnerLocked(r, tx, id, p) {
+		fail(w, 403, "仅当前群主可管理群")
+		return
+	}
 	if _, e = tx.Exec(r.Context(), `update chat_group set dissolved_at=coalesce(dissolved_at,now()),archived=true,updated_at=now() where id=$1`, id); e != nil {
 		fail(w, 500, "解散失败")
 		return

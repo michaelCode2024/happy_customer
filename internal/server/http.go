@@ -211,7 +211,7 @@ func (a *API) requireAgent(next func(http.ResponseWriter, *http.Request, auth.Pr
 func (a *API) requireRole(role []string, next func(http.ResponseWriter, *http.Request, auth.Principal)) http.HandlerFunc {
 	return a.requireAgent(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		for _, candidate := range role {
-			if candidate == p.Role {
+			if candidate == auth.NormalizeRole(p.Role) {
 				next(w, r, p)
 				return
 			}
@@ -240,6 +240,18 @@ func (a *API) platformSessionValid(ctx context.Context, principal auth.Principal
 	var valid bool
 	err := a.db.QueryRow(ctx, `select exists(select 1 from platform_session s join platform_admin a on a.id=s.admin_id where s.id=$1 and s.admin_id=$2 and s.revoked_at is null and s.expires_at>now() and a.status='ACTIVE')`, principal.SessionID, principal.PlatformAdminID).Scan(&valid)
 	return err == nil && valid
+}
+
+// Read the live role rather than a cached JWT claim: revocation is immediate.
+func (a *API) requireSuperAdmin(next func(http.ResponseWriter, *http.Request, auth.Principal)) http.HandlerFunc {
+	return a.requirePlatform(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
+		var role string
+		if a.db.QueryRow(r.Context(), `select role from platform_admin where id=$1 and status='ACTIVE'`, p.PlatformAdminID).Scan(&role) != nil || role != "SUPER_ADMIN" {
+			failCode(w, 403, "SUPER_ADMIN_REQUIRED", "只有超级管理员可以分配和调整额度")
+			return
+		}
+		next(w, r, p)
+	})
 }
 
 func bearer(r *http.Request) string {

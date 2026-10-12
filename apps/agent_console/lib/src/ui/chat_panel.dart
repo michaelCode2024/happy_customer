@@ -1,13 +1,17 @@
 import 'package:relaydesk_agent_console/src/ui/error_banner.dart';
+import 'package:relaydesk_agent_console/src/ui/ai_assist_panel.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/rendering.dart';
 
 import 'package:relaydesk_agent_console/src/api/models.dart';
 import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
 import 'package:relaydesk_agent_console/src/theme.dart';
 import 'package:relaydesk_agent_console/src/util/attachment_picker.dart';
+import '../util/voice_recording.dart';
+import 'voice_recorder_button.dart';
 import 'package:relaydesk_agent_console/src/util/format.dart';
 import 'package:relaydesk_agent_console/src/util/labels.dart';
 import 'package:relaydesk_agent_console/src/util/voice_player.dart';
@@ -23,6 +27,8 @@ class ChatPanel extends StatefulWidget {
     required this.workbench,
     required this.picker,
     this.onOpenProfile,
+    this.assistDraft,
+    this.showInlineAssist = true,
   });
 
   final WorkbenchController workbench;
@@ -31,6 +37,8 @@ class ChatPanel extends StatefulWidget {
   /// Opens the customer sidebar; null hides the affordance on layouts that
   /// always show it.
   final VoidCallback? onOpenProfile;
+  final ValueNotifier<String>? assistDraft;
+  final bool showInlineAssist;
 
   @override
   State<ChatPanel> createState() => _ChatPanelState();
@@ -50,6 +58,28 @@ class _ChatPanelState extends State<ChatPanel> {
   bool _sending = false;
   bool _uploading = false;
   String? _uploadError;
+  final Map<String, int> _voiceDurations = {};
+
+  Future<void> _attachVoice(RecordedVoice voice) async {
+    final conversationId = widget.workbench.selectedId;
+    if (conversationId == null) throw StateError('请先选择会话');
+    final uploaded = await widget.workbench.api.upload(
+        conversationId: conversationId,
+        fileName: voice.fileName,
+        bytes: voice.bytes,
+        contentType: voice.contentType);
+    if (!mounted || widget.workbench.selectedId != conversationId)
+      throw StateError('会话已切换，请重新录制');
+    setState(() {
+      _pending.add(Attachment(
+          id: uploaded.id,
+          fileName: uploaded.fileName,
+          contentType: uploaded.contentType,
+          sizeBytes: uploaded.sizeBytes,
+          url: uploaded.url));
+      _voiceDurations[uploaded.id] = voice.duration.inMilliseconds;
+    });
+  }
 
   /// The conversation whose draft is currently in the composer, and whether the
   /// server's copy has been read yet. Until it has, an empty composer means "not
@@ -72,6 +102,10 @@ class _ChatPanelState extends State<ChatPanel> {
   /// Set while the thread is being re-laid out, so the auto-scroll does not
   /// fight the agent's own scrolling.
   bool _stickToBottom = true;
+  bool _userScrolling = false;
+  bool _bottomScrollQueued = false;
+  String? _scrollConversationId;
+  String? _lastMessageId;
   Timer? _readTimer;
 
   @override
@@ -84,6 +118,29 @@ class _ChatPanelState extends State<ChatPanel> {
     });
     _scroll.addListener(_onScroll);
     widget.workbench.addListener(_onWorkbenchChanged);
+    widget.assistDraft?.addListener(_adoptAssist);
+    _onWorkbenchChanged();
+  }
+
+  void _adoptAssist() {
+    final text = widget.assistDraft?.value;
+    if (text == null || text.isEmpty) return;
+    setState(() {
+      _noteMode = false;
+      _composer.text = text;
+      _composer.selection = TextSelection.collapsed(offset: text.length);
+    });
+    _onComposerChanged(text);
+    _composerFocus.requestFocus();
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.assistDraft != widget.assistDraft) {
+      oldWidget.assistDraft?.removeListener(_adoptAssist);
+      widget.assistDraft?.addListener(_adoptAssist);
+    }
   }
 
   @override
@@ -93,6 +150,7 @@ class _ChatPanelState extends State<ChatPanel> {
     _flashTimer?.cancel();
     _searchDebounce?.cancel();
     widget.workbench.removeListener(_onWorkbenchChanged);
+    widget.assistDraft?.removeListener(_adoptAssist);
     _composer.dispose();
     _composerFocus.dispose();
     _scroll.dispose();
@@ -107,6 +165,19 @@ class _ChatPanelState extends State<ChatPanel> {
   /// is where the two are joined.
   void _onWorkbenchChanged() {
     final id = widget.workbench.selectedId;
+    final messages = widget.workbench.messages;
+    final lastId = messages.isEmpty ? null : messages.last.id;
+    if (id != _scrollConversationId) {
+      _scrollConversationId = id;
+      _lastMessageId = null;
+      _stickToBottom = true;
+      _userScrolling = false;
+      _scrollToBottom();
+    }
+    if (lastId != _lastMessageId) {
+      _lastMessageId = lastId;
+      _scrollToBottom();
+    }
     if (id == _draftConversationId) {
       return;
     }
@@ -144,26 +215,46 @@ class _ChatPanelState extends State<ChatPanel> {
   }
 
   void _onScroll() {
-    if (!_scroll.hasClients) {
+    if (!_userScrolling || !_scroll.hasClients) {
       return;
     }
     final distance = _scroll.position.maxScrollExtent - _scroll.position.pixels;
-    _stickToBottom = distance < 80;
+    final stick = distance < 80;
+    if (stick != _stickToBottom) setState(() => _stickToBottom = stick);
   }
 
   /// Advances the thread to the newest message, but only when the agent was
   /// already at the bottom: reading history must not be interrupted by an
   /// incoming message.
+  bool _onThreadNotification(Notification notification) {
+    if (notification is UserScrollNotification && notification.depth == 0) {
+      // 仅用户操作改变跟随状态；消息增高、图片加载和窗口缩放不会误判为翻历史。
+      _userScrolling = true;
+      _onScroll();
+      _userScrolling = notification.direction != ScrollDirection.idle;
+    }
+    if (notification is ScrollMetricsNotification &&
+        notification.depth == 0 &&
+        _stickToBottom) {
+      _scrollToBottom();
+    }
+    return false;
+  }
+
   void _scrollToBottom({bool force = false}) {
+    if (force && !_stickToBottom) setState(() => _stickToBottom = true);
+    if (!_stickToBottom || _bottomScrollQueued) return;
+    _bottomScrollQueued = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scroll.hasClients) {
-        return;
+      _bottomScrollQueued = false;
+      if (!mounted || !_scroll.hasClients || !_stickToBottom) return;
+      final position = _scroll.position;
+      if ((position.maxScrollExtent - position.pixels).abs() > 0.5) {
+        _scroll.jumpTo(position.maxScrollExtent);
       }
-      if (!force && !_stickToBottom) {
-        return;
-      }
-      _scroll.jumpTo(_scroll.position.maxScrollExtent);
     });
+    // 滚动后懒加载列表可能重新估算高度；尺寸通知会继续追到真实底部。
+    WidgetsBinding.instance.scheduleFrame();
   }
 
   Future<void> _pickImage({bool document = false}) async {
@@ -235,6 +326,10 @@ class _ChatPanelState extends State<ChatPanel> {
       attachments: attachments,
       private: _noteMode,
       quote: quote,
+      metadata: attachments.length == 1 &&
+              _voiceDurations.containsKey(attachments.first.id)
+          ? {'durationMs': _voiceDurations[attachments.first.id]}
+          : null,
     );
     if (!mounted) {
       return;
@@ -494,25 +589,41 @@ class _ChatPanelState extends State<ChatPanel> {
             Expanded(
               // 消息区浅灰底：对齐微信 / 腾讯 IM，和白底列表、白底输入区分层。
               child: ColoredBox(
-                color: RelayTheme.chatCanvas(
-                    Theme.of(context).colorScheme),
-                child: _MessageList(
-                  key: ValueKey<String>(conversation.id),
-                  workbench: workbench,
-                  scroll: _scroll,
-                  flashSequence: _flashSequence,
-                  onRetry: workbench.retry,
-                  onLoadOlder: workbench.loadOlder,
-                  onQuote: workbench.quote,
-                  onEdit: _editMessage,
-                  onRecall: _recallMessage,
-                  onReact: _pickReaction,
-                  onPin: workbench.togglePin,
-                  onForward: _forwardMessage,
-                  onJumpToBottom: () => _scrollToBottom(force: true),
-                ),
+                color: RelayTheme.chatCanvas(Theme.of(context).colorScheme),
+                child: NotificationListener<Notification>(
+                    onNotification: _onThreadNotification,
+                    child: _MessageList(
+                      key: ValueKey<String>(conversation.id),
+                      workbench: workbench,
+                      scroll: _scroll,
+                      flashSequence: _flashSequence,
+                      onRetry: workbench.retry,
+                      onLoadOlder: workbench.loadOlder,
+                      onQuote: workbench.quote,
+                      onEdit: _editMessage,
+                      onRecall: _recallMessage,
+                      onReact: _pickReaction,
+                      onPin: workbench.togglePin,
+                      onForward: _forwardMessage,
+                      showJumpToBottom: !_stickToBottom,
+                      onJumpToBottom: () => _scrollToBottom(force: true),
+                    )),
               ),
             ),
+            if (widget.showInlineAssist && workbench.messages.isNotEmpty)
+              AiAssistPanel(
+                api: workbench.api,
+                conversationId: conversation.id,
+                messages: workbench.messages,
+                onAdopt: (text) {
+                  setState(() {
+                    _composer.text = text;
+                    _composer.selection =
+                        TextSelection.collapsed(offset: text.length);
+                  });
+                  _composerFocus.requestFocus();
+                },
+              ),
             _Composer(
               controller: _composer,
               focusNode: _composerFocus,
@@ -529,6 +640,10 @@ class _ChatPanelState extends State<ChatPanel> {
               onToggleNote: (value) => setState(() => _noteMode = value),
               onPickImage: () => _pickImage(),
               onPickFile: () => _pickImage(document: true),
+              voiceControl: VoiceRecorderButton(
+                  key: ValueKey(conversation.id),
+                  enabled: !_sending && !_uploading && !_noteMode,
+                  onRecorded: _attachVoice),
               onClearQuote: () => workbench.quote(null),
               onRemovePending: (id) => setState(
                 () => _pending.removeWhere((item) => item.id == id),
@@ -650,8 +765,8 @@ class _ThreadHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      height: 56,
-      padding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
+      height: 76,
+      padding: const EdgeInsets.fromLTRB(24, 0, 12, 0),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         border: Border(
@@ -660,6 +775,12 @@ class _ThreadHeader extends StatelessWidget {
       ),
       child: Row(
         children: <Widget>[
+          if (MediaQuery.sizeOf(context).width < 760)
+            IconButton(
+              tooltip: '返回会话列表',
+              onPressed: workbench.clearSelection,
+              icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
+            ),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -674,16 +795,20 @@ class _ThreadHeader extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
                         ),
                       ),
                     ),
                     const SizedBox(width: 8),
                     if (conversation.isResolved)
                       const _HeaderChip(label: '已解决', tone: _ChipTone.neutral)
-                    else if (conversation.isUnassigned)
-                      const _HeaderChip(label: '待接待', tone: _ChipTone.warn)
+                    else if (conversation.isUnassigned ||
+                        conversation.needsAcceptance)
+                      _HeaderChip(
+                          label:
+                              conversation.needsAcceptance ? '等待确认接单' : '待接待',
+                          tone: _ChipTone.warn)
                     else
                       _HeaderChip(
                         label: conversation.assigneeName.isEmpty
@@ -719,32 +844,44 @@ class _ThreadHeader extends StatelessWidget {
               ],
             ),
           ),
-          if (conversation.isUnassigned)
+          if (!conversation.isUnassigned &&
+              !conversation.needsAcceptance &&
+              MediaQuery.sizeOf(context).width >= 760)
+            Padding(
+                padding: const EdgeInsets.only(left: 8),
+                child: FilledButton(
+                  onPressed: () => workbench
+                      .setStatus(conversation.isResolved ? 'OPEN' : 'RESOLVED'),
+                  child: Text(conversation.isResolved ? '重新接待' : '完成会话'),
+                )),
+          if (conversation.isUnassigned || conversation.needsAcceptance)
             Padding(
               padding: const EdgeInsets.only(left: 8),
               child: FilledButton.tonalIcon(
                 onPressed: workbench.claim,
                 icon: const Icon(Icons.pan_tool_alt_outlined, size: 18),
-                label: const Text('开始接待'),
+                label: Text(conversation.needsAcceptance ? '确认接单' : '开始接待'),
               ),
             ),
-          IconButton(
-            tooltip: conversation.isUnassigned ? '分配给客服' : '转派客服',
-            onPressed: () => _showTransfer(context),
-            icon: const Icon(Icons.support_agent),
-          ),
+          if (MediaQuery.sizeOf(context).width >= 760)
+            IconButton(
+              tooltip: conversation.isUnassigned ? '分配给客服' : '转派客服',
+              onPressed: () => _showTransfer(context),
+              icon: const Icon(Icons.support_agent),
+            ),
           if (onOpenProfile != null)
             IconButton(
               tooltip: '客户资料',
               onPressed: onOpenProfile,
               icon: const Icon(Icons.person_outline),
             ),
-          IconButton(
-            tooltip: searchOpen ? '关闭搜索' : '搜索会话内容',
-            onPressed: onToggleSearch,
-            isSelected: searchOpen,
-            icon: Icon(searchOpen ? Icons.search_off : Icons.search),
-          ),
+          if (MediaQuery.sizeOf(context).width >= 760)
+            IconButton(
+              tooltip: searchOpen ? '关闭搜索' : '搜索会话内容',
+              onPressed: onToggleSearch,
+              isSelected: searchOpen,
+              icon: Icon(searchOpen ? Icons.search_off : Icons.search),
+            ),
           PopupMenuButton<String>(
             tooltip: '更多操作',
             onSelected: (value) {
@@ -767,9 +904,13 @@ class _ThreadHeader extends StatelessWidget {
                   _showTags(context);
                 case 'copy':
                   copyToClipboard(context, conversation.id, '会话 ID');
+                case 'search':
+                  onToggleSearch();
               }
             },
             itemBuilder: (context) => <PopupMenuEntry<String>>[
+              if (MediaQuery.sizeOf(context).width < 760)
+                const PopupMenuItem(value: 'search', child: Text('搜索会话内容')),
               if (!conversation.isResolved)
                 const PopupMenuItem<String>(
                   value: 'resolve',
@@ -907,6 +1048,7 @@ class _MessageList extends StatelessWidget {
     required this.onPin,
     required this.onForward,
     required this.onJumpToBottom,
+    required this.showJumpToBottom,
   });
 
   final WorkbenchController workbench;
@@ -924,6 +1066,7 @@ class _MessageList extends StatelessWidget {
   final Future<void> Function(ChatMessage) onPin;
   final Future<void> Function(ChatMessage) onForward;
   final VoidCallback onJumpToBottom;
+  final bool showJumpToBottom;
 
   @override
   Widget build(BuildContext context) {
@@ -962,9 +1105,12 @@ class _MessageList extends StatelessWidget {
         rows.add(_DaySeparator(label: dayLabel(message.createdAt)));
         lastDay = day;
       }
-      if (lastTime == null || message.createdAt.difference(lastTime).inMinutes >= 5) {
+      if (lastTime == null ||
+          message.createdAt.difference(lastTime).inMinutes >= 5) {
         final local = message.createdAt.toLocal();
-        rows.add(_DaySeparator(label: '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}'));
+        rows.add(_DaySeparator(
+            label:
+                '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}'));
       }
       lastTime = message.createdAt;
       if (!dividerPlaced && message.sequence > workbench.readBoundary) {
@@ -1016,6 +1162,15 @@ class _MessageList extends StatelessWidget {
             return rows[offset];
           },
         ),
+        if (showJumpToBottom)
+          Positioned(
+              right: 16,
+              bottom: 12,
+              child: FilledButton.tonalIcon(
+                onPressed: onJumpToBottom,
+                icon: const Icon(Icons.arrow_downward, size: 16),
+                label: const Text('回到最新消息'),
+              )),
         if (workbench.visitorTyping)
           Positioned(
             left: 20,
@@ -1415,12 +1570,12 @@ class _MessageBubble extends StatelessWidget {
 
     final isAgent = message.isFromAgent;
     // 坐席实心蓝气泡用白字；访客白气泡用正文色（腾讯 IM / 云信习惯）。
-    final textColor =
-        isAgent && theme.brightness == Brightness.dark
-            ? Colors.white : theme.colorScheme.onSurface;
+    final textColor = isAgent && theme.brightness == Brightness.dark
+        ? Colors.white
+        : theme.colorScheme.onSurface;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 10),
       child: Column(
         crossAxisAlignment:
             isAgent ? CrossAxisAlignment.end : CrossAxisAlignment.start,
@@ -1596,35 +1751,22 @@ class _BubbleShell extends StatelessWidget {
         alignment: isAgent ? Alignment.centerRight : Alignment.centerLeft,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 250),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
           decoration: BoxDecoration(
             color: bubbleColor,
-            // 小圆角+尖角侧，贴近国内 IM 气泡形态。
             borderRadius: BorderRadius.only(
-              topLeft: const Radius.circular(8),
-              topRight: const Radius.circular(8),
-              bottomLeft: Radius.circular(isAgent ? 8 : 2),
-              bottomRight: Radius.circular(isAgent ? 2 : 8),
+              topLeft: Radius.circular(isAgent ? 10 : 2),
+              topRight: Radius.circular(isAgent ? 2 : 10),
+              bottomLeft: const Radius.circular(10),
+              bottomRight: const Radius.circular(10),
             ),
-            border: flash
-                ? Border.all(color: scheme.primary, width: 2)
-                : (!isAgent
-                    ? Border.all(color: scheme.outlineVariant)
-                    : null),
-            boxShadow: isAgent
-                ? null
-                : [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.04),
-                      blurRadius: 4,
-                      offset: const Offset(0, 1),
-                    ),
-                  ],
+            border: flash ? Border.all(color: scheme.primary, width: 2) : null,
           ),
           child: DefaultTextStyle.merge(
             style: TextStyle(
               color: isAgent && scheme.brightness == Brightness.dark
-                  ? Colors.white : scheme.onSurface,
+                  ? Colors.white
+                  : scheme.onSurface,
             ),
             child: child,
           ),
@@ -2011,7 +2153,6 @@ class _NoteBubble extends StatelessWidget {
   }
 }
 
-
 /// 坐席端图片全屏预览：双指缩放 + 点遮罩/关闭退出。
 void _openImagePreview(BuildContext context, String url) {
   showDialog<void>(
@@ -2386,6 +2527,7 @@ class _Composer extends StatelessWidget {
     required this.onToggleNote,
     required this.onPickImage,
     required this.onPickFile,
+    required this.voiceControl,
     required this.onClearQuote,
     required this.onRemovePending,
     required this.onSend,
@@ -2409,6 +2551,7 @@ class _Composer extends StatelessWidget {
   final ValueChanged<bool> onToggleNote;
   final Future<void> Function() onPickImage;
   final Future<void> Function() onPickFile;
+  final Widget voiceControl;
   final VoidCallback onClearQuote;
   final ValueChanged<String> onRemovePending;
   final Future<void> Function() onSend;
@@ -2436,12 +2579,30 @@ class _Composer extends StatelessWidget {
           border: Border.all(color: scheme.outlineVariant),
           borderRadius: BorderRadius.circular(12),
         ),
-        margin: const EdgeInsets.all(12),
-        padding: const EdgeInsets.fromLTRB(10, 6, 12, 10),
+        margin:
+            EdgeInsets.fromLTRB(compact ? 12 : 24, 8, compact ? 12 : 24, 20),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
         child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
+              Row(children: [
+                TextButton(
+                    onPressed: () => onToggleNote(false),
+                    style: TextButton.styleFrom(
+                        foregroundColor: noteMode
+                            ? scheme.onSurfaceVariant
+                            : scheme.primary),
+                    child: const Text('回复客户')),
+                TextButton(
+                    onPressed: () => onToggleNote(true),
+                    style: TextButton.styleFrom(
+                        foregroundColor: noteMode
+                            ? scheme.primary
+                            : scheme.onSurfaceVariant),
+                    child: const Text('内部备注')),
+              ]),
+              const Divider(),
               if (uploadError != null)
                 Text(uploadError!,
                     style: TextStyle(color: scheme.error, fontSize: 12)),
@@ -2482,9 +2643,10 @@ class _Composer extends StatelessWidget {
                 ]),
               Shortcuts(
                   shortcuts: const <ShortcutActivator, Intent>{
-                    SingleActivator(LogicalKeyboardKey.enter): _SendIntent(),
-                    SingleActivator(LogicalKeyboardKey.numpadEnter):
-                        _SendIntent()
+                    SingleActivator(LogicalKeyboardKey.enter, control: true):
+                        _SendIntent(),
+                    SingleActivator(LogicalKeyboardKey.numpadEnter,
+                        control: true): _SendIntent()
                   },
                   child: Actions(
                       actions: <Type, Action<Intent>>{
@@ -2506,7 +2668,7 @@ class _Composer extends StatelessWidget {
                                   ? '写一条内部备注，访客看不到'
                                   : visitorTyping
                                       ? '对方正在输入…'
-                                      : '输入消息，Enter 发送',
+                                      : '输入回复内容，Ctrl + Enter 发送',
                               filled: true,
                               fillColor: noteMode
                                   ? scheme.tertiaryContainer.withAlpha(35)
@@ -2521,73 +2683,65 @@ class _Composer extends StatelessWidget {
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(6),
-                                borderSide: BorderSide(
-                                    color: scheme.primary, width: 1),
+                                borderSide:
+                                    BorderSide(color: scheme.primary, width: 1),
                               ),
                               contentPadding: const EdgeInsets.symmetric(
                                   vertical: 10, horizontal: 12),
                               hintStyle: theme.textTheme.bodyMedium
                                   ?.copyWith(color: scheme.outline))))),
               // 输入区在上、工具栏在下，保持原有发送与附件回调。
-              Row(
-                  children: [
-                    PopupMenuButton<String>(
-                        tooltip: '表情',
-                        icon: Icon(Icons.sentiment_satisfied_alt_outlined,
-                            size: 22, color: scheme.onSurfaceVariant),
-                        onSelected: insert,
-                        itemBuilder: (_) => [
-                              for (final emoji in [
-                                '😊',
-                                '👍',
-                                '🙏',
-                                '🎉',
-                                '❤️',
-                                '🤔',
-                                '✅',
-                                '😄'
-                              ])
-                                PopupMenuItem(
-                                    value: emoji,
-                                    child: Text(emoji,
-                                        style: const TextStyle(fontSize: 22)))
-                            ]),
-                    IconButton(
-                        tooltip: '发送图片',
-                        onPressed: uploading ? null : onPickImage,
-                        icon: Icon(Icons.image_outlined,
-                            size: 22, color: scheme.onSurfaceVariant)),
-                    if (supportsFiles)
-                      IconButton(
-                          tooltip: '发送文件',
-                          onPressed: uploading ? null : onPickFile,
-                          icon: Icon(Icons.folder_open_outlined,
-                              size: 22, color: scheme.onSurfaceVariant)),
-                    if (canned.isNotEmpty)
-                      _CannedMenu(
-                          canned: canned,
-                          onPick: (content) {
-                            controller.text = content;
-                            controller.selection =
-                                TextSelection.collapsed(offset: content.length);
-                            onChanged(content);
-                            focusNode.requestFocus();
-                          }),
-                    const Spacer(),
-                    TextButton(
-                        onPressed: () => onToggleNote(!noteMode),
-                        style: TextButton.styleFrom(
-                            foregroundColor: noteMode
-                                ? scheme.tertiary
-                                : scheme.onSurfaceVariant,
-                            visualDensity: VisualDensity.compact),
-                        child: Text(noteMode ? '内部备注' : '公开回复')),
-                    if (uploading)
-                      const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2)),
-                  ]),
+              Row(children: [
+                PopupMenuButton<String>(
+                    tooltip: '表情',
+                    icon: Icon(Icons.sentiment_satisfied_alt_outlined,
+                        size: 22, color: scheme.onSurfaceVariant),
+                    onSelected: insert,
+                    itemBuilder: (_) => [
+                          for (final emoji in [
+                            '😊',
+                            '👍',
+                            '🙏',
+                            '🎉',
+                            '❤️',
+                            '🤔',
+                            '✅',
+                            '😄'
+                          ])
+                            PopupMenuItem(
+                                value: emoji,
+                                child: Text(emoji,
+                                    style: const TextStyle(fontSize: 22)))
+                        ]),
+                IconButton(
+                    tooltip: '发送图片',
+                    onPressed: uploading ? null : onPickImage,
+                    icon: Icon(Icons.image_outlined,
+                        size: 22, color: scheme.onSurfaceVariant)),
+                if (supportsFiles)
+                  IconButton(
+                      tooltip: '发送文件',
+                      onPressed: uploading ? null : onPickFile,
+                      icon: Icon(Icons.folder_open_outlined,
+                          size: 22, color: scheme.onSurfaceVariant)),
+                voiceControl,
+                if (canned.isNotEmpty)
+                  _CannedMenu(
+                      canned: canned,
+                      onPick: (content) {
+                        controller.text = content;
+                        controller.selection =
+                            TextSelection.collapsed(offset: content.length);
+                        onChanged(content);
+                        focusNode.requestFocus();
+                      }),
+                const Spacer(),
+                if (uploading)
+                  const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2)),
+              ]),
               const SizedBox(height: 6),
               Row(children: [
                 Expanded(
@@ -2595,8 +2749,8 @@ class _Composer extends StatelessWidget {
                         noteMode
                             ? '仅团队成员可见'
                             : compact
-                                ? 'Shift+Enter 换行'
-                                : 'Enter 发送 · Shift+Enter 换行',
+                                ? 'Ctrl + Enter 发送'
+                                : 'Ctrl + Enter 发送 · Enter 换行',
                         style: theme.textTheme.bodySmall
                             ?.copyWith(color: scheme.outline))),
                 FilledButton(

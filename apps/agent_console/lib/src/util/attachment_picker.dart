@@ -1,5 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:relaydesk_agent_console/src/util/document_picker_stub.dart'
+    if (dart.library.html) 'package:relaydesk_agent_console/src/util/document_picker_web.dart'
+    as documents;
 
 /// A file the agent chose, already read into memory.
 ///
@@ -48,12 +51,13 @@ abstract class AttachmentPicker {
 /// receipt. Sending an arbitrary document is served by the API and will be
 /// wired to a platform file chooser when the console ships that build.
 class ImageAttachmentPicker implements AttachmentPicker {
-  ImageAttachmentPicker({ImagePicker? picker}) : _picker = picker ?? ImagePicker();
+  ImageAttachmentPicker({ImagePicker? picker})
+      : _picker = picker ?? ImagePicker();
 
   final ImagePicker _picker;
 
   @override
-  bool get supportsArbitraryFiles => false;
+  bool get supportsArbitraryFiles => kIsWeb;
 
   @override
   Future<PickedAttachment?> pickImage() async {
@@ -73,6 +77,10 @@ class ImageAttachmentPicker implements AttachmentPicker {
 
   @override
   Future<PickedAttachment?> pickFile() async {
+    if (kIsWeb) {
+      final file = await documents.pickDocument();
+      return file == null ? null : _read(file);
+    }
     // `image_picker` has no document mode on the mobile platforms; falling back
     // to the media library is still useful (a saved PDF appears there on
     // Android), and the composer keeps its text input available either way.
@@ -135,7 +143,17 @@ String _contentTypeFor(String fileName, String? reported) {
       return 'video/mp4';
     case 'mov':
       return 'video/quicktime';
+    case 'zip':
+      return 'application/zip';
+    case 'doc':
+      return 'application/msword';
+    case 'docx':
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    case 'xls':
+      return 'application/vnd.ms-excel';
+    case 'xlsx':
+      return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     default:
-      return 'image/jpeg';
+      return 'application/octet-stream';
   }
 }

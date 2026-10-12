@@ -1,3 +1,5 @@
+import 'package:relaydesk_agent_console/src/util/labels.dart';
+import 'package:relaydesk_agent_console/src/ui/support_assets_page.dart';
 import 'package:flutter/material.dart';
 
 import 'package:relaydesk_agent_console/src/api/models.dart';
@@ -16,10 +18,12 @@ class KnowledgePage extends StatefulWidget {
     super.key,
     required this.session,
     required this.workbench,
+    this.canAI = true,
   });
 
   final SessionController session;
   final WorkbenchController workbench;
+  final bool canAI;
 
   @override
   State<KnowledgePage> createState() => _KnowledgePageState();
@@ -29,6 +33,14 @@ class _KnowledgePageState extends State<KnowledgePage> {
   final _search = TextEditingController();
   final _question = TextEditingController();
 
+  List<Map<String, dynamic>> _categories = [];
+  String _categoryFilter = '';
+  String _statusFilter = '';
+  int _tab = 0;
+  bool _mobileBench = false;
+  String? _expandedEntry;
+  int _loadGeneration = 0;
+  final List<String> _testHistory = [];
   List<KnowledgeEntry> _entries = const <KnowledgeEntry>[];
   bool _loading = true;
   String? _error;
@@ -52,12 +64,19 @@ class _KnowledgePageState extends State<KnowledgePage> {
   }
 
   Future<void> _load() async {
+    final generation = ++_loadGeneration;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final entries = await widget.workbench.api.knowledge(query: _search.text);
+      final values = await Future.wait<Object>([
+        widget.workbench.api.knowledge(query: _search.text),
+        widget.workbench.api.knowledgeCategories()
+      ]);
+      final entries = values[0] as List<KnowledgeEntry>;
+      if (generation != _loadGeneration) return;
+      _categories = values[1] as List<Map<String, dynamic>>;
       if (!mounted) {
         return;
       }
@@ -69,6 +88,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
       if (!mounted) {
         return;
       }
+      if (generation != _loadGeneration) return;
       setState(() {
         _error = '$error';
         _loading = false;
@@ -84,7 +104,10 @@ class _KnowledgePageState extends State<KnowledgePage> {
     if (question.isEmpty) {
       return;
     }
+    _rememberQuestion(question);
     setState(() {
+      _hits = null;
+      _answer = null;
       _testing = true;
       _testError = null;
       _answer = null;
@@ -116,18 +139,24 @@ class _KnowledgePageState extends State<KnowledgePage> {
     if (question.isEmpty) {
       return;
     }
+    _rememberQuestion(question);
     setState(() {
+      _hits = null;
+      _answer = null;
       _testing = true;
       _testError = null;
     });
     try {
       final answer = await widget.workbench.api.previewAnswer(question);
+      final hits = answer.reason == 'AI_DISABLED'
+          ? await widget.workbench.api.previewRetrieval(question)
+          : answer.sources;
       if (!mounted) {
         return;
       }
       setState(() {
         _answer = answer;
-        _hits = answer.sources;
+        _hits = hits;
         _testing = false;
       });
     } catch (error) {
@@ -141,38 +170,42 @@ class _KnowledgePageState extends State<KnowledgePage> {
     }
   }
 
-  Future<void> _edit({KnowledgeEntry? existing}) async {
-    final result = await showDialog<_KnowledgeDraft>(
-      context: context,
-      builder: (context) => _KnowledgeDialog(existing: existing),
-    );
-    if (result == null) {
+  Future<void> _edit(
+      {KnowledgeEntry? existing, String initialQuestion = ''}) async {
+    List<Map<String, dynamic>> categories;
+    try {
+      categories = await widget.workbench.api.knowledgeCategories();
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text("读取分类失败：$error")));
       return;
     }
-    try {
-      if (existing == null) {
-        await widget.workbench.api.createKnowledge(
-          title: result.title,
-          content: result.content,
-          questionExamples: result.examples,
-        );
-      } else {
-        await widget.workbench.api.updateKnowledge(
-          id: existing.id,
-          title: result.title,
-          content: result.content,
-          questionExamples: result.examples,
-        );
-      }
-      await _load();
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('保存失败：$error')),
-      );
-    }
+    if (!mounted) return;
+    final saved = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => _KnowledgeDialog(
+            existing: existing,
+            initialQuestion: initialQuestion,
+            categories: categories,
+            onSave: (draft) async {
+              if (existing == null) {
+                await widget.workbench.api.createKnowledge(
+                    title: draft.title,
+                    content: draft.content,
+                    questionExamples: draft.examples,
+                    categoryId: draft.categoryId);
+              } else {
+                await widget.workbench.api.updateKnowledge(
+                    id: existing.id,
+                    title: draft.title,
+                    content: draft.content,
+                    questionExamples: draft.examples,
+                    categoryId: draft.categoryId);
+              }
+            }));
+    if (saved == true && mounted) await _load();
   }
 
   Future<void> _delete(KnowledgeEntry entry) async {
@@ -209,67 +242,176 @@ class _KnowledgePageState extends State<KnowledgePage> {
     }
   }
 
+  void _rememberQuestion(String question) {
+    _testHistory.remove(question);
+    _testHistory.insert(0, question);
+    if (_testHistory.length > 5) _testHistory.removeLast();
+  }
+
+  List<KnowledgeEntry> get _visibleEntries => _entries
+      .where((e) =>
+          (_categoryFilter.isEmpty ||
+              (_categoryFilter == 'uncategorized'
+                  ? e.categoryId.isEmpty
+                  : e.categoryId == _categoryFilter)) &&
+          (_statusFilter.isEmpty || e.status == _statusFilter))
+      .toList();
+  String _categoryLabel(String id) {
+    for (final c in _categories) {
+      if (c['id'] == id) return asString(c['name']);
+    }
+    return '未分类';
+  }
+
+  Future<void> _toggleEntry(KnowledgeEntry e) async {
+    try {
+      await widget.workbench.api.updateKnowledge(
+          id: e.id, status: e.status == 'ACTIVE' ? 'DISABLED' : 'ACTIVE');
+      await _load();
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('更新失败：$error')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final canEdit = widget.session.agent?.canManageKnowledge ?? false;
     return Scaffold(
-      backgroundColor: Colors.transparent,
-      appBar: AppBar(
-        title: const Text('AI 知识库'),
         backgroundColor: Colors.transparent,
-        actions: <Widget>[
-          if (canEdit)
+        body: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
+              child: Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  spacing: 16,
+                  runSpacing: 12,
+                  children: [
+                    Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('AI 知识中心', style: theme.textTheme.headlineSmall),
+                          const SizedBox(height: 4),
+                          Text('维护知识 → 检验回答 → 补齐未解决问题',
+                              style: theme.textTheme.bodySmall)
+                        ]),
+                    Wrap(spacing: 8, children: [
+                      OutlinedButton.icon(
+                          onPressed: _load,
+                          icon: const Icon(Icons.refresh, size: 18),
+                          label: const Text('刷新')),
+                      if (canEdit)
+                        FilledButton.icon(
+                            onPressed: () => _edit(),
+                            icon: const Icon(Icons.add, size: 18),
+                            label: const Text('新增知识'))
+                    ])
+                  ])),
+          Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(children: [
+                    for (final item in <(int, String)>[
+                      (0, '知识与回答测试'),
+                      if (canEdit) (1, '分类与批量导入'),
+                      if (canEdit) (2, '未解决问题')
+                    ])
+                      Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                              label: Text(item.$2),
+                              selected: _tab == item.$1,
+                              onSelected: (_) {
+                                setState(() => _tab = item.$1);
+                                if (item.$1 == 0) _load();
+                              }))
+                  ]))),
+          if (_tab == 0)
             Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: FilledButton.tonalIcon(
-                onPressed: () => _edit(),
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('新增条目'),
-              ),
-            ),
-        ],
-      ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final wide = constraints.maxWidth > 980;
-          final list = _buildList(theme, canEdit);
-          final bench = _buildBench(theme);
-          if (!wide) {
-            return ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-              children: <Widget>[
-                SizedBox(height: 420, child: list),
-                const SizedBox(height: 24),
-                bench,
-              ],
-            );
-          }
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Expanded(flex: 3, child: list),
-                const SizedBox(width: 16),
-                Expanded(
-                  flex: 2,
-                  child: SingleChildScrollView(child: bench),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
+                padding: const EdgeInsets.all(20),
+                child: Wrap(spacing: 10, runSpacing: 8, children: [
+                  _summary(theme, '本次加载', '${_entries.length} 条'),
+                  _summary(theme, '已启用',
+                      '${_entries.where((e) => e.status == 'ACTIVE').length} 条'),
+                  _summary(theme, '缺少相似问法',
+                      '${_entries.where((e) => e.questionExamples.isEmpty).length} 条'),
+                  _summary(theme, '内容分类', '${_categories.length} 类')
+                ])),
+          Expanded(
+              child: _tab != 0
+                  ? SupportAssetsPage(
+                      key: ValueKey(_tab),
+                      api: widget.workbench.api,
+                      knowledge: true,
+                      embedded: true,
+                      onGapAdd: (q) => _edit(initialQuestion: q),
+                      initialKnowledgeTab: _tab == 2 ? 1 : 0)
+                  : LayoutBuilder(builder: (context, c) {
+                      final list = _buildList(theme, canEdit),
+                          bench = _buildBench(theme);
+                      if (c.maxWidth < 1000) {
+                        return Column(children: [
+                          Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                              child: Row(children: [
+                                ChoiceChip(
+                                    label: const Text('知识管理'),
+                                    selected: !_mobileBench,
+                                    onSelected: (_) =>
+                                        setState(() => _mobileBench = false)),
+                                const SizedBox(width: 8),
+                                ChoiceChip(
+                                    label: const Text('回答测试'),
+                                    selected: _mobileBench,
+                                    onSelected: (_) =>
+                                        setState(() => _mobileBench = true))
+                              ])),
+                          Expanded(
+                              child: Padding(
+                                  padding:
+                                      const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                                  child: _mobileBench
+                                      ? SingleChildScrollView(child: bench)
+                                      : list))
+                        ]);
+                      }
+                      return Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                          child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(flex: 6, child: list),
+                                const SizedBox(width: 20),
+                                Expanded(
+                                    flex: 4,
+                                    child: SingleChildScrollView(child: bench))
+                              ]));
+                    }))
+        ]));
   }
+
+  Widget _summary(ThemeData theme, String title, String value) => Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: theme.colorScheme.outlineVariant)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Text(title, style: theme.textTheme.bodySmall),
+        const SizedBox(width: 16),
+        Text(value, style: theme.textTheme.titleSmall)
+      ]));
 
   Widget _buildList(ThemeData theme, bool canEdit) {
     return Container(
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: theme.colorScheme.outlineVariant.withAlpha(120)),
+        borderRadius: BorderRadius.circular(8),
+        border:
+            Border.all(color: theme.colorScheme.outlineVariant.withAlpha(120)),
       ),
       child: Column(
         children: <Widget>[
@@ -296,11 +438,37 @@ class _KnowledgePageState extends State<KnowledgePage> {
               ],
             ),
           ),
+          Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(children: [
+                    for (final c in <Map<String, dynamic>>[
+                      {'id': '', 'name': '全部分类'},
+                      {'id': 'uncategorized', 'name': '未分类'},
+                      ..._categories
+                    ])
+                      ChoiceChip(
+                          label: Text(asString(c['name'])),
+                          selected: _categoryFilter == c['id'],
+                          onSelected: (_) => setState(
+                              () => _categoryFilter = asString(c['id']))),
+                    for (final status in [
+                      ('', '全部状态'),
+                      ('ACTIVE', '已启用'),
+                      ('DISABLED', '已停用')
+                    ])
+                      FilterChip(
+                          label: Text(status.$2),
+                          selected: _statusFilter == status.$1,
+                          onSelected: (_) =>
+                              setState(() => _statusFilter = status.$1)),
+                  ]))),
           if (!canEdit)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Text(
-                '仅主管及以上角色可以编辑知识库，你可以浏览并测试。',
+                '客服主管负责维护；坐席可以查看完整知识并测试回答。',
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -315,10 +483,11 @@ class _KnowledgePageState extends State<KnowledgePage> {
                     ? Center(
                         child: Padding(
                           padding: const EdgeInsets.all(20),
-                          child: Text('加载失败：$_error', textAlign: TextAlign.center),
+                          child:
+                              Text('加载失败：$_error', textAlign: TextAlign.center),
                         ),
                       )
-                    : _entries.isEmpty
+                    : _visibleEntries.isEmpty
                         ? Center(
                             child: Padding(
                               padding: const EdgeInsets.all(24),
@@ -348,60 +517,131 @@ class _KnowledgePageState extends State<KnowledgePage> {
                             ),
                           )
                         : ListView.separated(
-                            itemCount: _entries.length,
+                            itemCount: _visibleEntries.length,
                             separatorBuilder: (_, __) =>
                                 const Divider(height: 1, indent: 16),
                             itemBuilder: (context, index) {
-                              final entry = _entries[index];
-                              return ListTile(
-                                title: Text(
-                                  entry.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.bodyMedium?.copyWith(
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                subtitle: Text(
-                                  entry.content,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: theme.colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                                trailing: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: <Widget>[
-                                    Tooltip(
-                                      message: '被命中 ${entry.hitCount} 次',
-                                      child: Text(
-                                        '${entry.hitCount}',
-                                        style: theme.textTheme.labelSmall?.copyWith(
-                                          color: theme.colorScheme.outline,
-                                        ),
-                                      ),
-                                    ),
-                                    if (canEdit) ...<Widget>[
-                                      IconButton(
-                                        tooltip: '编辑',
-                                        iconSize: 18,
-                                        onPressed: () => _edit(existing: entry),
-                                        icon: const Icon(Icons.edit_outlined),
-                                      ),
-                                      IconButton(
-                                        tooltip: '删除',
-                                        iconSize: 18,
-                                        onPressed: () => _delete(entry),
-                                        icon: const Icon(Icons.delete_outline),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                                onTap: canEdit
-                                    ? () => _edit(existing: entry)
-                                    : () => _fillQuestion(entry.title),
-                              );
+                              final entry = _visibleEntries[index];
+                              final expanded = _expandedEntry == entry.id;
+                              return Padding(
+                                  padding: const EdgeInsets.all(14),
+                                  child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        InkWell(
+                                            onTap: () => setState(() =>
+                                                _expandedEntry =
+                                                    expanded ? null : entry.id),
+                                            child: Row(children: [
+                                              Icon(Icons.article_outlined,
+                                                  color:
+                                                      theme.colorScheme.primary,
+                                                  size: 20),
+                                              const SizedBox(width: 10),
+                                              Expanded(
+                                                  child: Text(entry.title,
+                                                      style: theme.textTheme
+                                                          .titleSmall)),
+                                              Icon(expanded
+                                                  ? Icons.expand_less
+                                                  : Icons.expand_more)
+                                            ])),
+                                        const SizedBox(height: 8),
+                                        Wrap(
+                                            spacing: 12,
+                                            runSpacing: 4,
+                                            children: [
+                                              Text(
+                                                  _categoryLabel(
+                                                      entry.categoryId),
+                                                  style: theme
+                                                      .textTheme.labelSmall),
+                                              Text(
+                                                  entry.status == 'ACTIVE'
+                                                      ? '已启用'
+                                                      : '已停用',
+                                                  style: theme
+                                                      .textTheme.labelSmall
+                                                      ?.copyWith(
+                                                          color: entry.status ==
+                                                                  'ACTIVE'
+                                                              ? Colors.green
+                                                              : theme
+                                                                  .colorScheme
+                                                                  .outline)),
+                                              Text('检索命中 ${entry.hitCount} 次',
+                                                  style: theme
+                                                      .textTheme.labelSmall),
+                                              if (entry.updatedAt != null)
+                                                Text(
+                                                    '更新 ${entry.updatedAt!.toLocal().toString().split(' ').first}',
+                                                    style: theme
+                                                        .textTheme.labelSmall)
+                                            ]),
+                                        const SizedBox(height: 8),
+                                        if (expanded)
+                                          SelectableText(entry.content)
+                                        else
+                                          Text(entry.content,
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: theme.textTheme.bodySmall
+                                                  ?.copyWith(
+                                                      color: theme.colorScheme
+                                                          .onSurfaceVariant)),
+                                        if (expanded) ...[
+                                          const SizedBox(height: 12),
+                                          Text('相似问法',
+                                              style:
+                                                  theme.textTheme.labelMedium),
+                                          const SizedBox(height: 6),
+                                          if (entry.questionExamples.isEmpty)
+                                            const Text('尚未填写相似问法，建议补充客户常用表达。'),
+                                          Wrap(
+                                              spacing: 6,
+                                              runSpacing: 6,
+                                              children: [
+                                                for (final q
+                                                    in entry.questionExamples)
+                                                  ActionChip(
+                                                      label: Text(q),
+                                                      onPressed: () =>
+                                                          _fillQuestion(q))
+                                              ])
+                                        ],
+                                        Wrap(spacing: 6, children: [
+                                          TextButton.icon(
+                                              onPressed: () {
+                                                setState(() =>
+                                                    _expandedEntry = entry.id);
+                                                _fillQuestion(entry.title);
+                                              },
+                                              icon: const Icon(
+                                                  Icons.science_outlined,
+                                                  size: 16),
+                                              label: const Text('测试此知识')),
+                                          if (canEdit) ...[
+                                            TextButton(
+                                                onPressed: () =>
+                                                    _edit(existing: entry),
+                                                child: const Text('编辑')),
+                                            TextButton(
+                                                onPressed: () =>
+                                                    _toggleEntry(entry),
+                                                child: Text(
+                                                    entry.status == 'ACTIVE'
+                                                        ? '停用'
+                                                        : '启用')),
+                                            IconButton(
+                                                tooltip: '删除知识',
+                                                onPressed: () => _delete(entry),
+                                                icon: const Icon(
+                                                    Icons.delete_outline,
+                                                    size: 18))
+                                          ]
+                                        ])
+                                      ]));
                             },
                           ),
           ),
@@ -411,8 +651,14 @@ class _KnowledgePageState extends State<KnowledgePage> {
   }
 
   void _fillQuestion(String value) {
+    if (_testing) return;
     _question.text = value;
-    setState(() {});
+    setState(() {
+      _mobileBench = true;
+      _hits = null;
+      _answer = null;
+      _testError = null;
+    });
   }
 
   Widget _buildBench(ThemeData theme) {
@@ -420,15 +666,17 @@ class _KnowledgePageState extends State<KnowledgePage> {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: theme.colorScheme.outlineVariant.withAlpha(120)),
+        borderRadius: BorderRadius.circular(8),
+        border:
+            Border.all(color: theme.colorScheme.outlineVariant.withAlpha(120)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Row(
             children: <Widget>[
-              Icon(Icons.science_outlined, size: 18, color: theme.colorScheme.primary),
+              Icon(Icons.science_outlined,
+                  size: 18, color: theme.colorScheme.primary),
               const SizedBox(width: 8),
               Text('回答测试台', style: theme.textTheme.titleSmall),
             ],
@@ -443,6 +691,12 @@ class _KnowledgePageState extends State<KnowledgePage> {
           const SizedBox(height: 12),
           TextField(
             controller: _question,
+            enabled: !_testing,
+            onChanged: (_) => setState(() {
+              _answer = null;
+              _hits = null;
+              _testError = null;
+            }),
             minLines: 2,
             maxLines: 4,
             decoration: const InputDecoration(
@@ -451,7 +705,9 @@ class _KnowledgePageState extends State<KnowledgePage> {
             ),
           ),
           const SizedBox(height: 10),
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: <Widget>[
               OutlinedButton.icon(
                 onPressed: _testing ? null : _runRetrieval,
@@ -460,7 +716,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
               ),
               const SizedBox(width: 8),
               FilledButton.icon(
-                onPressed: _testing ? null : _runAnswer,
+                onPressed: _testing || !widget.canAI ? null : _runAnswer,
                 icon: _testing
                     ? const SizedBox(
                         width: 14,
@@ -472,6 +728,23 @@ class _KnowledgePageState extends State<KnowledgePage> {
               ),
             ],
           ),
+          const SizedBox(height: 8),
+          Text(
+              widget.canAI
+                  ? '仅检索不会调用模型；生成回答会使用 AI 额度。'
+                  : '当前套餐未开放 AI 生成，可以使用知识检索。',
+              style: theme.textTheme.labelSmall),
+          if (_testHistory.isNotEmpty)
+            Wrap(spacing: 6, runSpacing: 4, children: [
+              for (final q in _testHistory)
+                ActionChip(
+                    label: Text(q),
+                    onPressed: _testing ? null : () => _fillQuestion(q))
+            ]),
+          if (_hits == null && !_testing && _answer == null)
+            const Padding(
+                padding: EdgeInsets.symmetric(vertical: 28),
+                child: Text('输入真实客户问题，检查回答内容和引用来源。')),
           if (_testError != null) ...<Widget>[
             const SizedBox(height: 12),
             Text(
@@ -493,7 +766,9 @@ class _KnowledgePageState extends State<KnowledgePage> {
                 borderRadius: BorderRadius.circular(10),
               ),
               child: SelectableText(
-                _answer!.answer.isEmpty ? '（AI 未生成内容）' : _answer!.answer,
+                _answer!.answer.isEmpty
+                    ? aiReasonLabel(_answer!.reason)
+                    : _answer!.answer,
                 style: theme.textTheme.bodySmall,
               ),
             ),
@@ -520,7 +795,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
                 if (_answer!.reason.isNotEmpty)
                   Chip(
                     visualDensity: VisualDensity.compact,
-                    label: Text(_answer!.reason),
+                    label: Text(aiReasonLabel(_answer!.reason)),
                   ),
               ],
             ),
@@ -545,7 +820,8 @@ class _KnowledgePageState extends State<KnowledgePage> {
                 child: Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest.withAlpha(90),
+                    color:
+                        theme.colorScheme.surfaceContainerHighest.withAlpha(90),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Column(
@@ -562,7 +838,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
                             ),
                           ),
                           Text(
-                            hit.score.toStringAsFixed(2),
+                            '相关度 ${hit.score.toStringAsFixed(2)}',
                             style: theme.textTheme.labelSmall?.copyWith(
                               color: theme.colorScheme.primary,
                             ),
@@ -570,10 +846,8 @@ class _KnowledgePageState extends State<KnowledgePage> {
                         ],
                       ),
                       const SizedBox(height: 4),
-                      Text(
+                      SelectableText(
                         hit.content,
-                        maxLines: 4,
-                        overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
@@ -593,17 +867,25 @@ class _KnowledgePageState extends State<KnowledgePage> {
 class _KnowledgeDraft {
   const _KnowledgeDraft({
     required this.title,
+    this.categoryId = '',
     required this.content,
     required this.examples,
   });
 
-  final String title;
+  final String title, categoryId;
   final String content;
   final List<String> examples;
 }
 
 class _KnowledgeDialog extends StatefulWidget {
-  const _KnowledgeDialog({this.existing});
+  const _KnowledgeDialog(
+      {this.existing,
+      this.initialQuestion = '',
+      required this.onSave,
+      required this.categories});
+  final String initialQuestion;
+  final List<Map<String, dynamic>> categories;
+  final Future<void> Function(_KnowledgeDraft) onSave;
 
   final KnowledgeEntry? existing;
 
@@ -612,6 +894,9 @@ class _KnowledgeDialog extends StatefulWidget {
 }
 
 class _KnowledgeDialogState extends State<_KnowledgeDialog> {
+  bool _busy = false;
+  String? _error;
+  late String _category = widget.existing?.categoryId ?? '';
   late final TextEditingController _title;
   late final TextEditingController _content;
   late final TextEditingController _examples;
@@ -619,10 +904,13 @@ class _KnowledgeDialogState extends State<_KnowledgeDialog> {
   @override
   void initState() {
     super.initState();
-    _title = TextEditingController(text: widget.existing?.title ?? '');
+    _title = TextEditingController(
+        text: widget.existing?.title ?? widget.initialQuestion);
     _content = TextEditingController(text: widget.existing?.content ?? '');
     _examples = TextEditingController(
-      text: (widget.existing?.questionExamples ?? const <String>[]).join('\n'),
+      text: widget.existing == null
+          ? widget.initialQuestion
+          : widget.existing!.questionExamples.join('\n'),
     );
   }
 
@@ -647,6 +935,22 @@ class _KnowledgeDialogState extends State<_KnowledgeDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
+              if (_error != null)
+                Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
+              DropdownButtonFormField<String>(
+                  value: widget.categories.any((c) => c['id'] == _category)
+                      ? _category
+                      : '',
+                  decoration: const InputDecoration(labelText: '知识分类'),
+                  items: [
+                    const DropdownMenuItem(value: '', child: Text('未分类')),
+                    for (final c in widget.categories)
+                      DropdownMenuItem(
+                          value: c['id'].toString(),
+                          child: Text(c['name'].toString()))
+                  ],
+                  onChanged: (v) => setState(() => _category = v ?? '')),
+              const SizedBox(height: 12),
               TextField(
                 controller: _title,
                 decoration: const InputDecoration(
@@ -678,7 +982,7 @@ class _KnowledgeDialogState extends State<_KnowledgeDialog> {
               ),
               const SizedBox(height: 10),
               Text(
-                '标题在同一个企业内唯一，重复标题会覆盖更新同一条内容。',
+                '标题在同一个企业内唯一，重复标题请编辑原条目。',
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -689,28 +993,45 @@ class _KnowledgeDialogState extends State<_KnowledgeDialog> {
       ),
       actions: <Widget>[
         TextButton(
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: _busy ? null : () => Navigator.of(context).pop(),
           child: const Text('取消'),
         ),
         FilledButton(
-          onPressed: () {
-            final title = _title.text.trim();
-            final content = _content.text.trim();
-            if (title.isEmpty || content.isEmpty) {
-              return;
-            }
-            Navigator.of(context).pop(
-              _KnowledgeDraft(
-                title: title,
-                content: content,
-                examples: _examples.text
-                    .split('\n')
-                    .map((line) => line.trim())
-                    .where((line) => line.isNotEmpty)
-                    .toList(growable: false),
-              ),
-            );
-          },
+          onPressed: _busy
+              ? null
+              : () async {
+                  final title = _title.text.trim();
+                  final content = _content.text.trim();
+                  if (title.isEmpty || content.isEmpty) {
+                    setState(() => _error = "请填写标题和内容");
+                    return;
+                  }
+                  setState(() {
+                    _busy = true;
+                    _error = null;
+                  });
+                  try {
+                    await widget.onSave(
+                      _KnowledgeDraft(
+                        title: title,
+                        categoryId: _category,
+                        content: content,
+                        examples: _examples.text
+                            .split('\n')
+                            .map((line) => line.trim())
+                            .where((line) => line.isNotEmpty)
+                            .toList(growable: false),
+                      ),
+                    );
+                    if (mounted) Navigator.of(context).pop(true);
+                  } catch (e) {
+                    if (mounted)
+                      setState(() {
+                        _busy = false;
+                        _error = '保存失败，请修改后重试：$e';
+                      });
+                  }
+                },
           child: const Text('保存'),
         ),
       ],

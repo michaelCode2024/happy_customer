@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
-import 'console_form_dialog.dart';
+import 'package:relaydesk_agent_console/src/ui/console_form_dialog.dart';
+import 'package:relaydesk_agent_console/src/util/channel_preview_stub.dart'
+    if (dart.library.html) 'package:relaydesk_agent_console/src/util/channel_preview_web.dart';
+import 'package:relaydesk_agent_console/src/ui/workspace_layout.dart';
 import 'package:relaydesk_agent_console/src/ui/error_banner.dart';
 
 import 'package:relaydesk_agent_console/src/api/api_exception.dart';
@@ -272,7 +275,7 @@ class _IntegrationPageState extends State<IntegrationPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('接入网站'), actions: [
+      appBar: AppBar(title: const Text('渠道与接入'), actions: [
         IconButton(
             tooltip: '刷新',
             onPressed: _loading ? null : _load,
@@ -315,7 +318,7 @@ class _IntegrationPageState extends State<IntegrationPage> {
                             Center(
                                 child: ConstrainedBox(
                                     constraints:
-                                        const BoxConstraints(maxWidth: 900),
+                                        const BoxConstraints(maxWidth: 1200),
                                     child: switch (_tab) {
                                       0 => _inboxTab(theme),
                                       1 => _keyTab(theme),
@@ -329,6 +332,8 @@ class _IntegrationPageState extends State<IntegrationPage> {
 
   Widget _guide(ThemeData theme) =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const WorkspaceHeading('渠道与接入', '管理语聊在不同渠道的接入方式与集成配置'),
+        if (_snippet != null) _channelGrid(theme),
         Text('让客户从你的产品里直接发起聊天', style: theme.textTheme.headlineSmall),
         const SizedBox(height: 12),
         const Text(
@@ -433,6 +438,7 @@ location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent
 
   Widget _inboxTab(ThemeData theme) =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const WorkspaceHeading('渠道与接入', '管理语聊在不同渠道的接入方式与集成配置'),
         const Text('接入入口',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
         const SizedBox(height: 12),
@@ -459,8 +465,7 @@ location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent
             const LinearProgressIndicator()
           else ...[
             _copyRow('入口公钥', asString(_snippet!['inboxKey'])),
-            _copyRow('网页安装代码', asString(_snippet!['script'])),
-            _copyRow('H5 / iframe 地址', asString(_snippet!['iframe'])),
+            _channelGrid(theme),
             if (asString(_snippet!['iframeHtml']).isNotEmpty)
               _copyRow('业务系统 iframe 片段', asString(_snippet!['iframeHtml'])),
             if (asString(_snippet!['openApiBase']).isNotEmpty)
@@ -498,6 +503,82 @@ location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent
                                 .revokeIntegrationKey(asString(key['id']))))
                     : null),
       ]);
+
+  Widget _channelGrid(ThemeData theme) {
+    final script = asString(_snippet!['script']);
+    final h5 = asString(_snippet!['iframe']);
+    final app = asString(_snippet!['appUrl']).isEmpty
+        ? h5 : asString(_snippet!['appUrl']);
+    final cards = [
+      ('网站组件', '嵌入网站的可对话组件', Icons.language, script, h5),
+      ('H5 链接', '通过 H5 链接访问语聊页面', Icons.link, h5, h5),
+      ('App WebView', '在 App WebView 中接入语聊', Icons.phone_android, app, app),
+    ];
+    final scheme = theme.colorScheme;
+    return LayoutBuilder(builder: (context, box) {
+      final wide = box.maxWidth >= 860;
+      final channels = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('接入渠道', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 8),
+        const Text('选择并管理语聊的接入渠道'),
+        const SizedBox(height: 16),
+        LayoutBuilder(builder: (context, grid) {
+          final columns = grid.maxWidth >= 620 ? 3 : grid.maxWidth >= 420 ? 2 : 1;
+          return Wrap(spacing: 12, runSpacing: 12, children: [
+            for (final item in cards)
+              SizedBox(width: (grid.maxWidth - 12 * (columns - 1)) / columns,
+                child: Card(child: Padding(padding: const EdgeInsets.all(16),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Container(width: 44, height: 44,
+                      decoration: BoxDecoration(color: scheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(10)),
+                      child: Icon(item.$3, color: scheme.primary)),
+                    const SizedBox(height: 14),
+                    Text(item.$1, style: theme.textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    SizedBox(height: 44, child: Text(item.$2,
+                      style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant))),
+                    const SizedBox(height: 12),
+                    Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: item.$4.isEmpty ? const Color(0xFFFFF2E5) : const Color(0xFFE8F8ED),
+                        borderRadius: BorderRadius.circular(20)),
+                      child: Text(item.$4.isEmpty ? '未开通' : '可接入', style: TextStyle(fontSize: 12,
+                        color: item.$4.isEmpty ? const Color(0xFFFF7D00) : const Color(0xFF00B42A)))),
+                    const SizedBox(height: 18),
+                    Wrap(spacing: 8, runSpacing: 8, children: [
+                      OutlinedButton.icon(onPressed: item.$4.isEmpty ? null : () => _copy(item.$4),
+                        icon: const Icon(Icons.copy_outlined, size: 16), label: const Text('复制代码')),
+                      FilledButton(onPressed: item.$5.isEmpty ? null : () {
+                        if (!openChannelPreview(item.$5)) _notice('请在网页版打开渠道预览');
+                      }, child: const Text('预览')),
+                    ]),
+                  ])))),
+          ]);
+        }),
+      ]);
+      final code = Card(child: Padding(padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('网站组件接入代码', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 6),
+          const Text('将以下代码嵌入您的网站中即可使用语聊组件'),
+          const SizedBox(height: 12),
+          Container(width: double.infinity, padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: const Color(0xFF162131), borderRadius: BorderRadius.circular(10)),
+            child: SelectableText(script, style: const TextStyle(
+              fontFamily: 'monospace', fontSize: 12, height: 1.6, color: Color(0xFFE8F0FF)))),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(onPressed: script.isEmpty ? null : () => _copy(script),
+            icon: const Icon(Icons.copy, size: 16), label: const Text('复制安装代码')),
+        ])));
+      return Padding(padding: const EdgeInsets.only(bottom: 20),
+        child: wide ? Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(flex: 3, child: channels), const SizedBox(width: 16), Expanded(flex: 2, child: code),
+        ]) : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          channels, const SizedBox(height: 16), code,
+        ]));
+    });
+  }
 
   Widget _hookTab(ThemeData theme) =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

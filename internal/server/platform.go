@@ -23,19 +23,24 @@ func (a *API) registerPlatform(mux *http.ServeMux) {
 	})
 
 	platform := a.requirePlatform
+	super := a.requireSuperAdmin
 	mux.HandleFunc("GET /api/v1/platform/me", platform(a.platformMe))
 	mux.HandleFunc("POST /api/v1/platform/logout", platform(a.platformLogout))
 	mux.HandleFunc("POST /api/v1/platform/me/password", platform(a.platformPassword))
 	mux.HandleFunc("GET /api/v1/platform/overview", platform(a.platformOverview))
 	mux.HandleFunc("GET /api/v1/platform/tenants", platform(a.platformTenants))
-	mux.HandleFunc("POST /api/v1/platform/tenants", platform(a.platformCreateTenant))
+	mux.HandleFunc("POST /api/v1/platform/tenants", super(a.platformCreateTenant))
 	mux.HandleFunc("GET /api/v1/platform/tenants/{id}", platform(a.platformTenant))
-	mux.HandleFunc("POST /api/v1/platform/tenants/{id}/agents", platform(a.platformCreateAgent))
-	mux.HandleFunc("PATCH /api/v1/platform/tenants/{id}", platform(a.platformUpdateTenant))
-	mux.HandleFunc("POST /api/v1/platform/tenants/{id}/trial", platform(a.platformExtendTrial))
-	mux.HandleFunc("POST /api/v1/platform/tenants/{id}/owner", platform(a.platformResetOwner))
+	mux.HandleFunc("POST /api/v1/platform/tenants/{id}/agents", super(a.platformCreateAgent))
+	mux.HandleFunc("PATCH /api/v1/platform/tenants/{id}", super(a.platformUpdateTenant))
+	mux.HandleFunc("POST /api/v1/platform/tenants/{id}/trial", super(a.platformExtendTrial))
+	mux.HandleFunc("POST /api/v1/platform/tenants/{id}/owner", super(a.platformResetOwner))
 	mux.HandleFunc("GET /api/v1/platform/ai-usage", platform(a.platformAIUsage))
 	mux.HandleFunc("GET /api/v1/platform/release-notes", platform(a.platformMeta))
+	mux.HandleFunc("GET /api/v1/platform/quotas", platform(a.platformQuotas))
+	mux.HandleFunc("GET /api/v1/platform/tenants/{id}/quota", platform(a.platformQuota))
+	mux.HandleFunc("POST /api/v1/platform/tenants/{id}/quota", super(a.platformAssignQuota))
+	mux.HandleFunc("GET /api/v1/platform/quota-adjustments", platform(a.platformQuotaHistory))
 }
 
 func (a *API) platformOverview(w http.ResponseWriter, r *http.Request, _ auth.Principal) {
@@ -224,7 +229,7 @@ func (a *API) platformCreateTenant(w http.ResponseWriter, r *http.Request, _ aut
 	}
 	ownerName := strings.TrimSpace(in.OwnerName)
 	if ownerName == "" {
-		ownerName = "管理员"
+		ownerName = "客服主管"
 	}
 
 	tenantID, ownerID, inboxID := uuid.New(), uuid.New(), uuid.New()
@@ -248,15 +253,15 @@ func (a *API) platformCreateTenant(w http.ResponseWriter, r *http.Request, _ aut
 	// so is trialDays' text form. One placeholder used in two type contexts
 	// makes Postgres deduce two types for it and reject the statement outright
 	// (SQLSTATE 42P08), which is how tenant provisioning broke.
-	if _, err := tx.Exec(r.Context(), `insert into tenant_subscription(tenant_id, plan, status, seat_limit, monthly_message_limit, trial_ends_at)
-		values($1,$2,'ACTIVE',$3,$4, case when $5::text = 'TRIAL' then now() + ($6 || ' days')::interval else null end)`,
-		tenantID, plan, seatLimit, messageLimit, plan, itoa(trialDays)); err != nil {
+	if _, err := tx.Exec(r.Context(), `insert into tenant_subscription(tenant_id, plan, status, seat_limit, monthly_message_limit, trial_ends_at,monthly_ai_limit)
+		values($1,$2,'ACTIVE',$3,$4, case when $5::text = 'TRIAL' then now() + ($6 || ' days')::interval else null end,$7)`,
+		tenantID, plan, seatLimit, messageLimit, plan, itoa(trialDays), map[string]int{"GROWTH": 5000, "ENTERPRISE": 100000}[plan]); err != nil {
 		a.logger.Error("create subscription failed", "error", err, "tenant", tenantID, "plan", plan)
 		fail(w, 500, "创建套餐失败")
 		return
 	}
 	if _, err := tx.Exec(r.Context(), `insert into agent(id, tenant_id, email, display_name, password_hash, role, status, max_concurrent)
-		values($1,$2,$3,$4,$5,'OWNER','ACTIVE',0)`, ownerID, tenantID, email, ownerName, hash); err != nil {
+		values($1,$2,$3,$4,$5,'SUPERVISOR','ACTIVE',0)`, ownerID, tenantID, email, ownerName, hash); err != nil {
 		if isUniqueViolation(err) {
 			failCode(w, 409, "EMAIL_TAKEN", "该用户名已被使用")
 			return
@@ -401,26 +406,45 @@ func (a *API) platformUpdateTenant(w http.ResponseWriter, r *http.Request, _ aut
 	if !decode(w, r, &in) {
 		return
 	}
+	if in.Plan != "" || in.PlanStatus != "" || in.SeatLimit != nil || in.MessageLimit != nil || in.TrialDays != nil {
+		failCode(w, 400, "QUOTA_ENDPOINT_REQUIRED", "请通过额度分配页面调整套餐、额度与服务期限")
+		return
+	}
+	tx, err := a.db.Begin(r.Context())
+	if err != nil {
+		fail(w, 500, "更新失败")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	var exists bool
+	if err = tx.QueryRow(r.Context(), `select exists(select 1 from tenant where id=$1)`, id).Scan(&exists); err != nil || !exists {
+		fail(w, 404, "企业不存在")
+		return
+	}
+	if in.TrialDays != nil && (*in.TrialDays < 1 || *in.TrialDays > 90) {
+		fail(w, 400, "试用天数必须在1到90之间")
+		return
+	}
 	status := strings.ToUpper(strings.TrimSpace(in.Status))
 	if status != "" && status != "ACTIVE" && status != "SUSPENDED" {
 		fail(w, 400, "status 只能是 ACTIVE 或 SUSPENDED")
 		return
 	}
 	if in.Name != "" {
-		if _, err := a.db.Exec(r.Context(), `update tenant set name=$2, updated_at=now() where id=$1`, id, in.Name); err != nil {
+		if _, err := tx.Exec(r.Context(), `update tenant set name=$2, updated_at=now() where id=$1`, id, in.Name); err != nil {
 			fail(w, 500, "更新租户失败")
 			return
 		}
 	}
 	if status != "" {
-		if _, err := a.db.Exec(r.Context(), `update tenant set status=$2, updated_at=now() where id=$1`, id, status); err != nil {
+		if _, err := tx.Exec(r.Context(), `update tenant set status=$2, updated_at=now() where id=$1`, id, status); err != nil {
 			fail(w, 500, "更新租户状态失败")
 			return
 		}
 		if status == "SUSPENDED" {
 			// Suspending a tenant must also cut its live sessions.
-			_, _ = a.db.Exec(r.Context(), `delete from agent_session where agent_id in (select id from agent where tenant_id=$1)`, id)
-			a.publish(r.Context(), []string{realtime.TenantChannel(id.String())}, realtimeEvent("tenant.suspended", id, nil))
+			_, _ = tx.Exec(r.Context(), `delete from agent_session where agent_id in (select id from agent where tenant_id=$1)`, id)
+
 		}
 	}
 	plan := strings.ToUpper(strings.TrimSpace(in.Plan))
@@ -445,7 +469,7 @@ func (a *API) platformUpdateTenant(w http.ResponseWriter, r *http.Request, _ aut
 		var curPlan, curStatus string
 		var curSeat, curMessage int
 		hasSubscription := true
-		if err := a.db.QueryRow(r.Context(), `select plan, status, seat_limit, monthly_message_limit
+		if err := tx.QueryRow(r.Context(), `select plan, status, seat_limit, monthly_message_limit
 			from tenant_subscription where tenant_id=$1`, id).
 			Scan(&curPlan, &curStatus, &curSeat, &curMessage); err != nil {
 			if !errors.Is(err, pgx.ErrNoRows) {
@@ -485,13 +509,13 @@ func (a *API) platformUpdateTenant(w http.ResponseWriter, r *http.Request, _ aut
 			nextStatus = planStatus
 		}
 		if !hasSubscription {
-			if _, err := a.db.Exec(r.Context(), `insert into tenant_subscription(tenant_id, plan, status, seat_limit, monthly_message_limit)
+			if _, err := tx.Exec(r.Context(), `insert into tenant_subscription(tenant_id, plan, status, seat_limit, monthly_message_limit)
 				values($1,$2,$3,$4,$5)`, id, nextPlan, nextStatus, seatLimit, messageLimit); err != nil {
 				a.logger.Error("create subscription failed", "error", err, "tenant", id)
 				fail(w, 500, "更新套餐失败")
 				return
 			}
-		} else if _, err := a.db.Exec(r.Context(), `update tenant_subscription
+		} else if _, err := tx.Exec(r.Context(), `update tenant_subscription
 			set plan=$2, status=$3, seat_limit=$4, monthly_message_limit=$5,
 			trial_ends_at=case when $2::varchar='TRIAL' then coalesce(trial_ends_at,now()+interval '14 days') else null end, updated_at=now()
 			where tenant_id=$1`, id, nextPlan, nextStatus, seatLimit, messageLimit); err != nil {
@@ -501,12 +525,19 @@ func (a *API) platformUpdateTenant(w http.ResponseWriter, r *http.Request, _ aut
 		}
 	}
 	if in.TrialDays != nil && *in.TrialDays > 0 && *in.TrialDays <= 90 {
-		if _, err := a.db.Exec(r.Context(), `update tenant_subscription
+		if _, err := tx.Exec(r.Context(), `update tenant_subscription
 			set trial_ends_at = now() + ($2 || ' days')::interval, updated_at = now() where tenant_id=$1`,
 			id, itoa(*in.TrialDays)); err != nil {
 			fail(w, 500, "更新试用期失败")
 			return
 		}
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		fail(w, 500, "更新失败")
+		return
+	}
+	if status == "SUSPENDED" {
+		a.publish(r.Context(), []string{realtime.TenantChannel(id.String())}, realtimeEvent("tenant.suspended", id, nil))
 	}
 	a.recordAudit(r.Context(), id, "PLATFORM", uuid.Nil, "tenant.update", "tenant", id,
 		map[string]any{"status": status, "plan": plan})
@@ -514,39 +545,9 @@ func (a *API) platformUpdateTenant(w http.ResponseWriter, r *http.Request, _ aut
 }
 
 func (a *API) platformExtendTrial(w http.ResponseWriter, r *http.Request, _ auth.Principal) {
-	id, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		fail(w, 400, "租户 ID 不合法")
-		return
-	}
-	var in struct {
-		Days int `json:"days"`
-	}
-	if !decode(w, r, &in) {
-		return
-	}
-	if in.Days <= 0 || in.Days > 90 {
-		fail(w, 400, "days 必须在 1 到 90 之间")
-		return
-	}
-	result, err := a.db.Exec(r.Context(), `update tenant_subscription
-		set status='ACTIVE', trial_ends_at = greatest(coalesce(trial_ends_at, now()), now()) + ($2 || ' days')::interval,
-		    updated_at = now()
-		where tenant_id=$1 and plan='TRIAL'`, id, itoa(in.Days))
-	if err != nil {
-		fail(w, 500, "延长试用期失败")
-		return
-	}
-	if result.RowsAffected() == 0 {
-		fail(w, 400, "仅试用版企业可以延长试用期")
-		return
-	}
-	a.recordAudit(r.Context(), id, "PLATFORM", uuid.Nil, "tenant.trial.extend", "tenant", id, map[string]any{"days": in.Days})
-	respond(w, 200, map[string]any{"status": "OK", "days": in.Days})
+	failCode(w, 400, "QUOTA_ENDPOINT_REQUIRED", "请通过额度分配页面调整服务期限")
 }
 
-// platformResetOwner is the break-glass path for a locked-out customer: it
-// replaces the owner password without needing the tenant's own credentials.
 func (a *API) platformResetOwner(w http.ResponseWriter, r *http.Request, _ auth.Principal) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
@@ -579,12 +580,10 @@ func (a *API) platformResetOwner(w http.ResponseWriter, r *http.Request, _ auth.
 		fail(w, 400, err.Error())
 		return
 	}
-	// Demote-and-promote in one transaction. Demoting first and discovering the
-	// new address does not exist afterwards would leave the company with no owner
-	// at all — nobody able to manage billing, seats or SSO.
+	// 重置指定主管，保留其他主管权限；目标必须是本企业已有账号。
 	tx, err := a.db.Begin(r.Context())
 	if err != nil {
-		fail(w, 500, "重置所有者失败")
+		fail(w, 500, "重置主管失败")
 		return
 	}
 	defer tx.Rollback(r.Context()) //nolint:errcheck
@@ -597,27 +596,19 @@ func (a *API) platformResetOwner(w http.ResponseWriter, r *http.Request, _ auth.
 			return
 		}
 		a.logger.Error("reset owner lookup failed", "error", err, "tenant", id)
-		fail(w, 500, "重置所有者失败")
-		return
-	}
-	// The previous owner is demoted rather than deleted, so transcripts keep their
-	// author and the person keeps working as an admin.
-	if _, err := tx.Exec(r.Context(), `update agent set role='ADMIN', updated_at=now()
-		where tenant_id=$1 and role='OWNER' and id <> $2`, id, ownerID); err != nil {
-		a.logger.Error("demote owner failed", "error", err, "tenant", id)
-		fail(w, 500, "重置所有者失败")
+		fail(w, 500, "重置主管失败")
 		return
 	}
 	if _, err := tx.Exec(r.Context(), `update agent
-		set password_hash=$3, role='OWNER', status='ACTIVE', updated_at=now()
+		set password_hash=$3, role='SUPERVISOR', status='ACTIVE', updated_at=now()
 		where tenant_id=$1 and id=$2`, id, ownerID, hash); err != nil {
 		a.logger.Error("reset owner failed", "error", err, "tenant", id, "agent", ownerID)
-		fail(w, 500, "重置所有者失败")
+		fail(w, 500, "重置主管失败")
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
 		a.logger.Error("reset owner commit failed", "error", err, "tenant", id)
-		fail(w, 500, "重置所有者失败")
+		fail(w, 500, "重置主管失败")
 		return
 	}
 	_ = a.authn.RevokeAllSessions(r.Context(), ownerID)
@@ -680,7 +671,7 @@ func (a *API) platformMeta(w http.ResponseWriter, r *http.Request, _ auth.Princi
 		model = "未配置"
 	}
 	respond(w, 200, map[string]any{
-		"product": "通语客服", "version": version,
+		"product": "语聊客服", "version": version,
 		"model":            model,
 		"aiProvider":       a.ai.ProviderName(),
 		"aiAvailable":      a.ai.Available(),

@@ -11,6 +11,34 @@ import 'package:relaydesk_agent_console/src/state/credential_store.dart';
 /// the login form, the validation messages, the remembered appearance — rather
 /// than about the widget tree's shape, so they survive UI rearrangements.
 void main() {
+  for (final size in const [Size(390, 844), Size(800, 600), Size(1440, 900)]) {
+    testWidgets('切换登录入口保持位置 ${size.width}', (tester) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+      final store = MemoryCredentialStore();
+      await store.saveServer('http://localhost');
+      await tester.pumpWidget(RelayDeskConsoleApp(credentials: store));
+      await tester.pumpAndSettle();
+      final anchor = tester.getTopLeft(find.text('客服工作台登录'));
+      final title = tester.getTopLeft(find.text('登录工作台'));
+      for (var i = 0; i < 3; i++) {
+        await tester.tap(find.text('平台管理员登录'));
+        await tester.pumpAndSettle();
+        expect(tester.getTopLeft(find.text('客服工作台登录')), anchor);
+        expect(tester.getTopLeft(find.text('登录运营后台')), title);
+        await tester.tap(find.text('客服工作台登录'));
+        await tester.pumpAndSettle();
+        expect(tester.getTopLeft(find.text('客服工作台登录')), anchor);
+        expect(tester.getTopLeft(find.text('登录工作台')), title);
+      }
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   Future<void> boot(WidgetTester tester, CredentialStore store) async {
     await tester.pumpWidget(RelayDeskConsoleApp(credentials: store));
     await tester.pumpAndSettle();
@@ -19,9 +47,9 @@ void main() {
   testWidgets('an empty store lands on the login form', (tester) async {
     await boot(tester, MemoryCredentialStore());
 
-    expect(find.text('通语'), findsWidgets);
-    expect(find.text('登录工作台'), findsOneWidget);
-    expect(find.text('进入工作台'), findsOneWidget);
+    expect(find.text('语聊'), findsWidgets);
+    expect(find.text('客服工作台登录'), findsOneWidget);
+    expect(find.text('登录'), findsOneWidget);
     expect(find.text('高级设置'), findsOneWidget);
     expect(find.widgetWithText(TextFormField, '企业标识'), findsOneWidget);
   });
@@ -29,13 +57,41 @@ void main() {
   testWidgets('submitting an empty form reports every field', (tester) async {
     await boot(tester, MemoryCredentialStore());
 
-    await tester.tap(find.text('进入工作台'));
+    await tester.ensureVisible(find.text('登录'));
+    await tester.tap(find.text('登录'));
     await tester.pumpAndSettle();
 
     expect(find.text('请填写服务器地址'), findsOneWidget);
     expect(find.text('请填写企业标识'), findsOneWidget);
     expect(find.text('请填写用户名'), findsOneWidget);
     expect(find.text('请填写密码'), findsOneWidget);
+  });
+
+  testWidgets('手机登录帮助可返回，密码显隐保留输入', (tester) async {
+    tester.view.physicalSize = const Size(390, 600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    await boot(tester, MemoryCredentialStore());
+    final password = find.widgetWithText(TextFormField, '密码');
+    await tester.ensureVisible(password);
+    await tester.enterText(password, 'test-password');
+    await tester.tap(find.byTooltip('显示密码'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextFormField>(password).controller!.text,
+        'test-password');
+    expect(find.byTooltip('隐藏密码'), findsOneWidget);
+    await tester.ensureVisible(find.text('需要登录帮助？'));
+    await tester.tap(find.text('需要登录帮助？'));
+    await tester.pumpAndSettle();
+    expect(find.text('登录帮助'), findsOneWidget);
+    await tester.tap(find.text('知道了'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextFormField>(password).controller!.text,
+        'test-password');
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('the remembered appearance is applied before signing in',
@@ -59,15 +115,15 @@ void main() {
     await tester.pumpAndSettle();
 
     // 运营登录：账号密码为主，服务器地址收在高级设置里。
-    expect(find.text('登录运营后台'), findsOneWidget);
-    expect(find.text('进入运营后台'), findsOneWidget);
+    expect(find.text('平台管理员登录'), findsOneWidget);
+    expect(find.text('登录'), findsOneWidget);
     expect(find.widgetWithText(TextFormField, '密码'), findsWidgets);
 
-    await tester.ensureVisible(find.text('切换到客服登录'));
-    await tester.tap(find.text('切换到客服登录'));
+    await tester.ensureVisible(find.text('客服工作台登录'));
+    await tester.tap(find.text('客服工作台登录'));
     await tester.pumpAndSettle();
 
-    expect(find.text('登录工作台'), findsOneWidget);
+    expect(find.text('客服工作台登录'), findsOneWidget);
     expect(find.widgetWithText(TextFormField, '企业标识'), findsOneWidget);
   });
 
@@ -77,8 +133,8 @@ void main() {
     await tester.tap(find.text('平台管理员登录'));
     await tester.pumpAndSettle();
 
-    await tester.ensureVisible(find.text('进入运营后台'));
-    await tester.tap(find.text('进入运营后台'));
+    await tester.ensureVisible(find.text('登录'));
+    await tester.tap(find.text('登录'));
     await tester.pumpAndSettle();
 
     expect(find.text('请填写服务器地址'), findsOneWidget);
@@ -98,7 +154,7 @@ void main() {
     await tester.ensureVisible(find.text('平台管理员登录'));
     await tester.tap(find.text('平台管理员登录'));
     await tester.pumpAndSettle();
-    expect(find.text('登录运营后台'), findsOneWidget);
+    expect(find.text('平台管理员登录'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -108,24 +164,27 @@ void main() {
     await boot(tester, store);
 
     // 未登录：必须是登录表单，不能进运营内页。
-    expect(find.text('进入运营后台'), findsOneWidget);
-    expect(find.text('登录运营后台'), findsOneWidget);
-    expect(find.text('运营概览'), findsNothing);
+    expect(find.text('登录'), findsOneWidget);
+    expect(find.text('平台管理员登录'), findsOneWidget);
+    expect(find.text('平台概览'), findsNothing);
   });
   testWidgets('有效平台登录恢复后不被客服入口偏好困在登录页', (tester) async {
     tester.view.physicalSize = const Size(1440, 1000);
     tester.view.devicePixelRatio = 1;
-    addTearDown(() { tester.view.resetPhysicalSize(); tester.view.resetDevicePixelRatio(); });
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
     final store = MemoryCredentialStore();
     await store.saveServer('http://localhost');
     await store.savePlatformToken('test-token');
     await store.saveConsoleSurface('agent');
     final fake = FakePlatformApi();
-    await tester.pumpWidget(RelayDeskConsoleApp(credentials: store, platformApiFactory: (_) => fake.buildClient()));
+    await tester.pumpWidget(RelayDeskConsoleApp(
+        credentials: store, platformApiFactory: (_) => fake.buildClient()));
     await tester.pumpAndSettle();
-    expect(find.text('进入运营后台'), findsNothing);
-    expect(find.text('运营概览'), findsWidgets);
+    expect(find.text('登录'), findsNothing);
+    expect(find.text('平台概览'), findsWidgets);
     await tester.pumpWidget(const SizedBox.shrink());
   });
-
 }

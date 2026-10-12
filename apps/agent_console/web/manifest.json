@@ -1,11 +1,11 @@
 {
-  "name": "通语工作台",
-  "short_name": "通语",
+  "name": "语聊工作台",
+  "short_name": "语聊",
   "start_url": ".",
   "display": "standalone",
-  "background_color": "#F5F6F8",
+  "background_color": "#F5F7FA",
   "theme_color": "#2F6BFF",
-  "description": "通语客户沟通与团队协作平台",
+  "description": "语聊客户沟通与团队协作平台",
   "prefer_related_applications": false,
   "icons": [
     {

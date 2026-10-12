@@ -62,9 +62,13 @@ class _PlatformLoginPageState extends State<PlatformLoginPage> {
   }
 
   Future<void> _submit() async {
+    if (widget.controller.busy) return;
     if (!(_formKey.currentState?.validate() ?? false)) {
       if (_server.text.trim().isEmpty && !_advancedOpen) {
         setState(() => _advancedOpen = true);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _formKey.currentState?.validate();
+        });
       }
       return;
     }
@@ -81,9 +85,10 @@ class _PlatformLoginPageState extends State<PlatformLoginPage> {
     return LoginShell(
       icon: Icons.admin_panel_settings_outlined,
       title: '登录运营后台',
-      subtitle: '管理企业、套餐与平台状态',
+      subtitle: '使用平台管理员账号，管理企业与服务。',
       badgeLabel: '平台运营',
       heroKind: LoginHeroKind.platform,
+      onSurfaceSwitch: widget.controller.busy ? null : widget.onAgentLogin,
       child: ListenableBuilder(
         listenable: widget.controller,
         builder: (context, _) {
@@ -100,21 +105,26 @@ class _PlatformLoginPageState extends State<PlatformLoginPage> {
                     children: [
                       TextFormField(
                         controller: _email,
+                        autofillHints: const [AutofillHints.username],
                         enabled: !busy && _emailLoaded,
                         keyboardType: TextInputType.text,
+                        autocorrect: false,
+                        textInputAction: TextInputAction.next,
                         decoration: const InputDecoration(
                           labelText: '账号',
+                          hintText: '请输入管理员用户名',
+                          floatingLabelBehavior: FloatingLabelBehavior.always,
                           prefixIcon: Icon(Icons.person_outline),
                         ),
-                        validator: (value) => (value ?? '').trim().isEmpty
-                            ? '请填写管理员用户名'
-                            : null,
+                        validator: (value) =>
+                            (value ?? '').trim().isEmpty ? '请填写管理员用户名' : null,
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 18),
                       TextFormField(
                         controller: _token,
                         enabled: !busy,
                         obscureText: _obscure,
+                        autofillHints: const [AutofillHints.password],
                         autocorrect: false,
                         enableSuggestions: false,
                         textInputAction: TextInputAction.done,
@@ -122,6 +132,7 @@ class _PlatformLoginPageState extends State<PlatformLoginPage> {
                         decoration: InputDecoration(
                           labelText: '密码',
                           hintText: '请输入管理员密码',
+                          floatingLabelBehavior: FloatingLabelBehavior.always,
                           prefixIcon: const Icon(Icons.lock_outline),
                           suffixIcon: IconButton(
                             tooltip: _obscure ? '显示密码' : '隐藏密码',
@@ -130,13 +141,13 @@ class _PlatformLoginPageState extends State<PlatformLoginPage> {
                                   ? Icons.visibility_outlined
                                   : Icons.visibility_off_outlined,
                             ),
-                            onPressed: () =>
-                                setState(() => _obscure = !_obscure),
+                            onPressed: busy
+                                ? null
+                                : () => setState(() => _obscure = !_obscure),
                           ),
                         ),
-                        validator: (value) => (value ?? '').trim().isEmpty
-                            ? '请填写登录密码'
-                            : null,
+                        validator: (value) =>
+                            (value ?? '').trim().isEmpty ? '请填写登录密码' : null,
                       ),
                     ],
                   ),
@@ -158,14 +169,9 @@ class _PlatformLoginPageState extends State<PlatformLoginPage> {
                 ],
                 const SizedBox(height: 18),
                 LoginSubmitButton(
-                  label: '进入运营后台',
+                  label: '登录',
                   busy: busy,
                   onPressed: _submit,
-                ),
-                const SizedBox(height: 4),
-                TextButton(
-                  onPressed: busy ? null : widget.onAgentLogin,
-                  child: const Text('切换到客服登录'),
                 ),
               ],
             ),

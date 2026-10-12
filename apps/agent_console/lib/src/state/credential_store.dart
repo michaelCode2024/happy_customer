@@ -41,6 +41,16 @@ abstract class CredentialStore {
 
   Future<void> clearPlatformToken();
 
+  /// 上次打开的控制台：`agent` 或 `platform`。用于冷启动直接回到对应门面。
+  Future<String?> loadConsoleSurface();
+
+  Future<void> saveConsoleSurface(String surface);
+
+  /// 平台管理员用户名，退出后仍预填，密码从不落盘。
+  Future<String?> loadPlatformEmail();
+
+  Future<void> savePlatformEmail(String email);
+
   Future<void> clear();
 }
 
@@ -56,6 +66,8 @@ class PreferencesCredentialStore implements CredentialStore {
   static const _expiresKey = 'relaydesk.expiresAt';
   static const _themeKey = 'relaydesk.themeMode';
   static const _platformKey = 'relaydesk.platformToken';
+  static const _surfaceKey = 'relaydesk.consoleSurface';
+  static const _platformEmailKey = 'relaydesk.platformEmail';
 
   @override
   Future<StoredSession?> load() async {
@@ -95,7 +107,8 @@ class PreferencesCredentialStore implements CredentialStore {
     await preferences.setString(_serverKey, session.server);
     await preferences.setString(_tokenKey, session.token);
     await preferences.setString(_agentKey, jsonEncode(session.agent.toJson()));
-    await preferences.setString(_tenantKey, jsonEncode(session.tenant.toJson()));
+    await preferences.setString(
+        _tenantKey, jsonEncode(session.tenant.toJson()));
     await preferences.setString(
       _inboxesKey,
       jsonEncode(session.inboxes.map((inbox) => inbox.toJson()).toList()),
@@ -151,6 +164,30 @@ class PreferencesCredentialStore implements CredentialStore {
   }
 
   @override
+  Future<String?> loadConsoleSurface() async {
+    final preferences = await SharedPreferences.getInstance();
+    return preferences.getString(_surfaceKey);
+  }
+
+  @override
+  Future<void> saveConsoleSurface(String surface) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(_surfaceKey, surface);
+  }
+
+  @override
+  Future<String?> loadPlatformEmail() async {
+    final preferences = await SharedPreferences.getInstance();
+    return preferences.getString(_platformEmailKey);
+  }
+
+  @override
+  Future<void> savePlatformEmail(String email) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(_platformEmailKey, email);
+  }
+
+  @override
   Future<void> clear() async {
     final preferences = await SharedPreferences.getInstance();
     await preferences.remove(_tokenKey);
@@ -158,9 +195,7 @@ class PreferencesCredentialStore implements CredentialStore {
     await preferences.remove(_tenantKey);
     await preferences.remove(_inboxesKey);
     await preferences.remove(_expiresKey);
-    // The theme choice, the server address and the platform token deliberately
-    // survive a sign-out: an operator fixes a customer's account and then signs
-    // back in as themselves.
+    // 主题、服务器、平台令牌与上次门面故意在退出后保留，方便回访。
   }
 }
 
@@ -172,6 +207,8 @@ class MemoryCredentialStore implements CredentialStore {
   String _server = '';
   String _theme = '';
   String _platformToken = '';
+  String _surface = '';
+  String _platformEmail = '';
 
   @override
   Future<StoredSession?> load() async {
@@ -214,6 +251,20 @@ class MemoryCredentialStore implements CredentialStore {
 
   @override
   Future<void> clearPlatformToken() async => _platformToken = '';
+
+  @override
+  Future<String?> loadConsoleSurface() async =>
+      _surface.isEmpty ? null : _surface;
+
+  @override
+  Future<void> saveConsoleSurface(String surface) async => _surface = surface;
+
+  @override
+  Future<String?> loadPlatformEmail() async =>
+      _platformEmail.isEmpty ? null : _platformEmail;
+
+  @override
+  Future<void> savePlatformEmail(String email) async => _platformEmail = email;
 
   @override
   Future<void> clear() async {

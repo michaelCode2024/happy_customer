@@ -25,6 +25,16 @@ export interface RelayDeskWidgetOptions {
   offlineMessage?: string;
   placeholder?: string;
   primaryColor?: string;
+  /** Brand image shown in the launcher and panel header (overrides the icon). */
+  logoUrl?: string;
+  /** Brand image used as the agent avatar in the thread and welcome screen. */
+  avatarUrl?: string;
+  /** Raw CSS injected into the widget's shadow root; scoped to the widget only. */
+  customCss?: string;
+  /** Font family for the panel; falls back to the system stack when empty. */
+  fontFamily?: string;
+  /** Bubble corner radius in pixels (default 12). */
+  bubbleRadius?: number;
   /** 'right' | 'left' pins the launcher and the panel. */
   position?: 'right' | 'left';
   theme?: 'light' | 'dark';
@@ -76,13 +86,18 @@ export interface WidgetBridge {
 }
 
 export const DEFAULTS = {
-  title: '在线客服',
-  subtitle: '在线咨询',
+  title: '语聊客服',
+  subtitle: '语聊为您服务',
   welcomeMessage: '',
   offlineMessage: '',
-  placeholder: '发送消息…',
-  // 默认使用聊桥品牌蓝；接入企业可覆盖，不改已有自定义主题。
-  primaryColor: '#3370FF',
+  placeholder: '请输入消息…',
+  // 默认使用语聊品牌蓝；接入企业可覆盖，不改已有自定义主题。
+  primaryColor: '#4263EB',
+  logoUrl: '',
+  avatarUrl: '',
+  customCss: '',
+  fontFamily: '',
+  bubbleRadius: 12,
   position: 'right' as const,
   theme: 'light' as const,
   launcher: 'bubble' as const,

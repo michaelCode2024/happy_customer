@@ -355,7 +355,8 @@ class AiProviderUsage {
     required this.deflectionRate,
   });
 
-  factory AiProviderUsage.fromJson(Map<String, dynamic> json) => AiProviderUsage(
+  factory AiProviderUsage.fromJson(Map<String, dynamic> json) =>
+      AiProviderUsage(
         provider: asString(json['provider']),
         interactions: asInt(json['interactions']),
         answered: asInt(json['answered']),
@@ -382,11 +383,11 @@ class PlatformAiUsage {
     required this.available,
   });
 
-  factory PlatformAiUsage.fromJson(Map<String, dynamic> json) => PlatformAiUsage(
+  factory PlatformAiUsage.fromJson(Map<String, dynamic> json) =>
+      PlatformAiUsage(
         days: asInt(json['days']),
-        providers: asMapList(json['providers'])
-            .map(AiProviderUsage.fromJson)
-            .toList(),
+        providers:
+            asMapList(json['providers']).map(AiProviderUsage.fromJson).toList(),
         reasons: <String, int>{
           for (final entry in asMap(json['reasons']).entries)
             entry.key: asInt(entry.value),
@@ -410,8 +411,7 @@ class PlatformAiUsage {
   int get answered =>
       providers.fold(0, (sum, provider) => sum + provider.answered);
 
-  double get deflectionRate =>
-      interactions == 0 ? 0 : answered / interactions;
+  double get deflectionRate => interactions == 0 ? 0 : answered / interactions;
 }
 
 /// What the instance reports about itself, shown in the console's about panel.

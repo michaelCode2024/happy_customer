@@ -27,7 +27,8 @@ services:
       WIDGET_TOKEN_TTL: 12h
       ALLOWED_ORIGIN: "*"
       DEMO_ENABLED: "true"
-      PLATFORM_ADMIN_TOKEN: local-platform-admin-token
+      PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-admin@relaydesk.local}
+      PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:-RelayDesk@2026}
       STORAGE_DRIVER: local
       STORAGE_LOCAL_DIR: /data/uploads
     volumes:

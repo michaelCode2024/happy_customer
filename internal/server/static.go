@@ -15,7 +15,7 @@ var h5Page = template.Must(template.New("h5").Parse(`<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>通语客服</title>
+  <title>语聊客服</title>
   <style>html,body{margin:0;height:100%;background:#f5f6f8}</style>
 </head>
 <body>
@@ -32,6 +32,7 @@ func (a *API) registerStatic(mux *http.ServeMux) {
 		return
 	}
 	mux.HandleFunc("GET /groups.html", func(w http.ResponseWriter, r *http.Request) {
+		a.setFrameAncestors(w)
 		w.Header().Set("Cache-Control", "no-store")
 		http.ServeFile(w, r, filepath.Join(a.cfg.StaticDir, "groups.html"))
 	})
@@ -123,6 +124,22 @@ func (a *API) registerStatic(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("GET /console", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/console/", http.StatusPermanentRedirect)
+	})
+	// 本机联调：模拟第三方业务 H5 嵌入客服，不进入 /console 体系。
+	mux.HandleFunc("GET /demo/{name}", func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		if name == "" || strings.ContainsAny(name, `/\:`) || !strings.HasSuffix(name, ".html") {
+			http.NotFound(w, r)
+			return
+		}
+		file := filepath.Join(a.cfg.StaticDir, name)
+		if info, err := os.Stat(file); err != nil || info.IsDir() {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		http.ServeFile(w, r, file)
 	})
 }
 

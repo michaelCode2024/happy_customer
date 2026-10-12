@@ -5,7 +5,5 @@ String initialServerHint(String saved, {bool? web, Uri? location}) {
     return saved;
   }
   final page = location ?? Uri.base;
-  return page.scheme == 'http' || page.scheme == 'https'
-      ? page.origin
-      : '';
+  return page.scheme == 'http' || page.scheme == 'https' ? page.origin : '';
 }

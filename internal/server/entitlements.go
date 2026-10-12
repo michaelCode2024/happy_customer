@@ -17,7 +17,7 @@ func planFeatures(plan string) map[string]bool {
 
 func (a *API) entitlementFeatures(r *http.Request, p auth.Principal) (string, map[string]bool, error) {
 	var plan string
-	err := a.db.QueryRow(r.Context(), "select coalesce((select case when status='ACTIVE' and (plan<>'TRIAL' or trial_ends_at is null or trial_ends_at>now()) then plan else 'INACTIVE' end from tenant_subscription where tenant_id=$1),'TRIAL')", p.TenantID).Scan(&plan)
+	err := a.db.QueryRow(r.Context(), "select coalesce((select case when status='ACTIVE' and (plan<>'TRIAL' or trial_ends_at is null or trial_ends_at>now()) and (service_starts_at is null or service_starts_at<=now()) and (service_ends_at is null or service_ends_at>now()) then plan else 'INACTIVE' end from tenant_subscription where tenant_id=$1),'TRIAL')", p.TenantID).Scan(&plan)
 	return plan, planFeatures(plan), err
 }
 
@@ -78,7 +78,7 @@ func (a *API) allowPlanRoute(w http.ResponseWriter, r *http.Request, p auth.Prin
 
 func (a *API) tenantHasFeature(ctx context.Context, tenantID uuid.UUID, feature string) bool {
 	var plan string
-	if err := a.db.QueryRow(ctx, "select coalesce((select case when status='ACTIVE' and (plan<>'TRIAL' or trial_ends_at is null or trial_ends_at>now()) then plan else 'INACTIVE' end from tenant_subscription where tenant_id=$1),'TRIAL')", tenantID).Scan(&plan); err != nil {
+	if err := a.db.QueryRow(ctx, "select coalesce((select case when status='ACTIVE' and (plan<>'TRIAL' or trial_ends_at is null or trial_ends_at>now()) and (service_starts_at is null or service_starts_at<=now()) and (service_ends_at is null or service_ends_at>now()) then plan else 'INACTIVE' end from tenant_subscription where tenant_id=$1),'TRIAL')", tenantID).Scan(&plan); err != nil {
 		return false
 	}
 	return planFeatures(plan)[feature]

@@ -7,6 +7,7 @@ import 'package:relaydesk_agent_console/src/state/session_controller.dart';
 import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
 import 'package:relaydesk_agent_console/src/theme.dart';
 import 'package:relaydesk_agent_console/src/util/format.dart';
+import 'package:relaydesk_agent_console/src/util/labels.dart';
 
 /// The left pane of the workbench: which conversations to work on.
 ///
@@ -73,11 +74,11 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
           children: <Widget>[
             // 对齐腾讯 IM：顶栏「会话」+ 筛选 Tab + 搜索，列表信息密度更高。
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 8, 0),
+              padding: const EdgeInsets.fromLTRB(20, 20, 12, 6),
               child: Row(
                 children: [
                   Text(
-                    '会话',
+                    '客户消息',
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
@@ -85,14 +86,23 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
                   const Spacer(),
                   if (workbench.queued > 0)
                     Padding(
-                      padding: const EdgeInsets.only(right: 2),
+                      padding: const EdgeInsets.only(right: 4),
                       child: Tooltip(
-                        message: '待接待 ${workbench.queued} 个会话',
+                        message: '未分配、需点击「开始接待」领取的会话',
                         child: InkWell(
                           onTap: () =>
                               workbench.setFilter(QueueFilter.unassigned),
-                          child: _CountPill(count: workbench.queued),
+                          borderRadius: BorderRadius.circular(8),
+                          child: _QueueChip(count: workbench.queued),
                         ),
+                      ),
+                    ),
+                  if (workbench.unread > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 2),
+                      child: Tooltip(
+                        message: '未读消息 ${workbench.unread} 条',
+                        child: _CountPill(count: workbench.unread),
                       ),
                     ),
                   IconButton(
@@ -121,9 +131,7 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
                     ),
                   const Spacer(),
                   Tooltip(
-                    message: workbench.includeResolved
-                        ? '隐藏已解决'
-                        : '显示已解决',
+                    message: workbench.includeResolved ? '隐藏已解决' : '显示已解决',
                     child: IconButton(
                       iconSize: 18,
                       visualDensity: VisualDensity.compact,
@@ -143,13 +151,13 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 18),
               child: TextField(
                 controller: _search,
                 textInputAction: TextInputAction.search,
                 decoration: InputDecoration(
                   contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                  hintText: '搜索',
+                  hintText: '搜索客户、内容',
                   prefixIcon: const Icon(Icons.search, size: 18),
                   filled: true,
                   fillColor: theme.colorScheme.surfaceContainerHighest,
@@ -271,15 +279,18 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
       child: ListView.builder(
         controller: _scroll,
         physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 18),
         itemCount: workbench.conversations.length,
         itemBuilder: (context, index) {
           final conversation = workbench.conversations[index];
-          return _ConversationRow(
-            conversation: conversation,
-            selected: conversation.id == workbench.selectedId,
-            agentId: widget.session.agent?.id ?? '',
-            onTap: () => workbench.select(conversation.id),
-          );
+          return Padding(
+              padding: const EdgeInsets.only(bottom: 5),
+              child: _ConversationRow(
+                conversation: conversation,
+                selected: conversation.id == workbench.selectedId,
+                agentId: widget.session.agent?.id ?? '',
+                onTap: () => workbench.select(conversation.id),
+              ));
         },
       ),
     );
@@ -319,15 +330,18 @@ class _ConversationRow extends StatelessWidget {
     ].join(' · ');
 
     return Material(
-      color: selected ? RelayTheme.listSelected(scheme) : scheme.surface,
+      color: selected ? RelayTheme.listSelected(scheme) : Colors.transparent,
+      borderRadius: BorderRadius.circular(10),
       child: InkWell(
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          padding: const EdgeInsets.fromLTRB(12, 15, 12, 15),
           decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(color: scheme.outlineVariant.withOpacity(0.85)),
-            ),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+                color: selected
+                    ? scheme.primary.withOpacity(0.12)
+                    : Colors.transparent),
           ),
           child: Row(
             children: <Widget>[
@@ -360,7 +374,7 @@ class _ConversationRow extends StatelessWidget {
                             style: theme.textTheme.bodyMedium?.copyWith(
                               fontWeight:
                                   unread ? FontWeight.w700 : FontWeight.w500,
-                              fontSize: 15,
+                              fontSize: 13,
                               color: scheme.onSurface,
                             ),
                           ),
@@ -377,25 +391,39 @@ class _ConversationRow extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 4),
-                    Row(
-                      children: <Widget>[
-                        Expanded(
-                          child: Text(
-                            sub,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                              fontSize: 12.5,
-                            ),
-                          ),
-                        ),
-                        if (unread) ...<Widget>[
-                          const SizedBox(width: 8),
-                          _CountPill(count: conversation.agentUnread),
-                        ],
-                      ],
-                    ),
+                    Text(sub,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant, fontSize: 11)),
+                    const SizedBox(height: 9),
+                    Row(children: [
+                      Flexible(
+                          child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 7, vertical: 3),
+                              decoration: BoxDecoration(
+                                  color: conversation.isUnassigned
+                                      ? scheme.tertiaryContainer
+                                          .withOpacity(.35)
+                                      : scheme.surfaceContainerHighest,
+                                  borderRadius: BorderRadius.circular(5)),
+                              child: Text(
+                                  conversation.isUnassigned
+                                      ? '待接待'
+                                      : conversation.isResolved
+                                          ? '已解决'
+                                          : conversation.tags.isNotEmpty
+                                              ? conversation.tags.first
+                                              : conversationSourceLabel(
+                                                  conversation.source),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.labelSmall
+                                      ?.copyWith(fontSize: 10)))),
+                      const Spacer(),
+                      if (unread) _CountPill(count: conversation.agentUnread),
+                    ]),
                   ],
                 ),
               ),
@@ -414,27 +442,27 @@ class _Avatar extends StatelessWidget {
   final String name;
   final String seed;
 
-  static const double size = 42;
+  static const double size = 38;
 
   @override
   Widget build(BuildContext context) {
     final hue = avatarHue(seed);
     final background =
-        HSLColor.fromAHSL(1, hue.toDouble(), 0.48, 0.58).toColor();
+        HSLColor.fromAHSL(1, hue.toDouble(), 0.30, 0.92).toColor();
     return Container(
       width: size,
       height: size,
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: background,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
         initials(name),
-        style: const TextStyle(
-          fontSize: 15,
+        style: TextStyle(
+          fontSize: 13,
           fontWeight: FontWeight.w600,
-          color: Colors.white,
+          color: HSLColor.fromAHSL(1, hue.toDouble(), .24, .48).toColor(),
         ),
       ),
     );
@@ -454,7 +482,7 @@ class _CountPill extends StatelessWidget {
       alignment: Alignment.center,
       padding: const EdgeInsets.symmetric(horizontal: 5),
       decoration: BoxDecoration(
-        color: theme.colorScheme.error,
+        color: theme.colorScheme.primary,
         borderRadius: BorderRadius.circular(9),
       ),
       child: Text(
@@ -462,6 +490,33 @@ class _CountPill extends StatelessWidget {
         textAlign: TextAlign.center,
         style: theme.textTheme.labelSmall?.copyWith(
           color: theme.colorScheme.onError,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
+/// 待接待入口：带文案，避免被误认成未读红点。
+class _QueueChip extends StatelessWidget {
+  const _QueueChip({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: scheme.tertiaryContainer,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        '待接待 $count',
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: scheme.onTertiaryContainer,
           fontWeight: FontWeight.w600,
         ),
       ),

@@ -50,7 +50,8 @@ func (a *API) registerGroups(m *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/groups", a.groupAuth(a.groupList))
 	m.HandleFunc("POST /api/v1/groups", a.requireAgent(a.groupCreate))
 	m.HandleFunc("GET /api/v1/groups/{id}", a.groupAuth(a.groupDetail))
-	m.HandleFunc("PATCH /api/v1/groups/{id}", a.requireAgent(a.groupUpdate))
+	m.HandleFunc("PATCH /api/v1/groups/{id}", a.groupAuth(a.groupUpdate))
+	m.HandleFunc("PUT /api/v1/groups/{id}/owner", a.groupAuth(a.groupTransfer))
 	m.HandleFunc("GET /api/v1/groups/{id}/messages", a.groupAuth(a.groupMessages))
 	m.HandleFunc("POST /api/v1/groups/{id}/messages", a.groupAuth(a.groupSend))
 	m.HandleFunc("POST /api/v1/groups/{id}/read", a.groupAuth(a.groupRead))
@@ -62,7 +63,7 @@ func (a *API) registerGroups(m *http.ServeMux) {
 	m.HandleFunc("POST /api/v1/groups/session", a.limit(a.widgetRate, a.groupSession))
 	m.HandleFunc("PATCH /api/v1/groups/{id}/me", a.groupAuth(a.groupNickname))
 	m.HandleFunc("POST /api/v1/groups/{id}/messages/{message}/recall", a.groupAuth(a.groupRecall))
-	m.HandleFunc("POST /api/v1/groups/{id}/dissolve", a.requireAgent(a.groupDissolve))
+	m.HandleFunc("POST /api/v1/groups/{id}/dissolve", a.groupAuth(a.groupDissolve))
 	m.HandleFunc("GET /api/v1/groups/{id}/calls", a.groupAuth(a.groupCalls))
 	m.HandleFunc("POST /api/v1/groups/{id}/calls", a.groupAuth(a.groupCallStart))
 	m.HandleFunc("POST /api/v1/groups/{id}/calls/{call}", a.groupAuth(a.groupCallAction))
@@ -76,11 +77,11 @@ func (a *API) groupAllowed(r *http.Request, p auth.Principal, owner bool) (uuid.
 		return id, false
 	}
 	var ok bool
-	e = a.db.QueryRow(r.Context(), `select exists(select 1 from chat_group g join chat_group_member m on m.group_id=g.id where g.id=$1 and g.tenant_id=$2 and m.actor_kind=$3 and m.actor_id=$4 and (not $5 or g.owner_id=$4 and $3='agent'))`, id, p.TenantID, p.Kind, groupActor(p), owner).Scan(&ok)
+	e = a.db.QueryRow(r.Context(), `select exists(select 1 from chat_group g join chat_group_member m on m.group_id=g.id where g.id=$1 and g.tenant_id=$2 and (g.inbox_id is null or exists(select 1 from inbox i where i.id=g.inbox_id and i.status='ACTIVE')) and m.actor_kind=$3 and m.actor_id=$4 and (not $5 or g.owner_id=$4 and g.owner_kind=$3))`, id, p.TenantID, p.Kind, groupActor(p), owner).Scan(&ok)
 	return id, e == nil && ok
 }
 func (a *API) groupList(w http.ResponseWriter, r *http.Request, p auth.Principal) {
-	rows, e := a.db.Query(r.Context(), `select g.id,g.name,g.kind,g.archived,g.dissolved_at is not null,g.announcement,g.sequence,(select count(*) from chat_group_message gm where gm.group_id=g.id and gm.sequence>m.last_read and (gm.actor_kind<>m.actor_kind or gm.actor_id<>m.actor_id)),g.owner_id,(select count(*) from chat_group_member mm where mm.group_id=g.id) from chat_group g join chat_group_member m on m.group_id=g.id where g.tenant_id=$1 and m.actor_kind=$2 and m.actor_id=$3 order by g.updated_at desc limit 100`, p.TenantID, p.Kind, groupActor(p))
+	rows, e := a.db.Query(r.Context(), `select g.id,g.name,g.kind,g.archived,g.dissolved_at is not null,g.announcement,g.sequence,(select count(*) from chat_group_message gm where gm.group_id=g.id and gm.sequence>m.last_read and (gm.actor_kind<>m.actor_kind or gm.actor_id<>m.actor_id)),g.owner_id,g.owner_kind,(select count(*) from chat_group_member mm where mm.group_id=g.id) from chat_group g join chat_group_member m on m.group_id=g.id where g.tenant_id=$1 and m.actor_kind=$2 and m.actor_id=$3 order by g.updated_at desc limit 100`, p.TenantID, p.Kind, groupActor(p))
 	if e != nil {
 		fail(w, 500, "读取群列表失败")
 		return
@@ -89,13 +90,13 @@ func (a *API) groupList(w http.ResponseWriter, r *http.Request, p auth.Principal
 	items := []map[string]any{}
 	for rows.Next() {
 		var id, owner uuid.UUID
-		var name, kind, announcement string
+		var name, kind, announcement, ownerKind string
 		var archived, dissolved bool
 		var seq, read, count int64
-		if rows.Scan(&id, &name, &kind, &archived, &dissolved, &announcement, &seq, &read, &owner, &count) != nil {
+		if rows.Scan(&id, &name, &kind, &archived, &dissolved, &announcement, &seq, &read, &owner, &ownerKind, &count) != nil {
 			continue
 		}
-		items = append(items, map[string]any{"id": id, "name": name, "kind": kind, "archived": archived, "dissolved": dissolved, "announcement": announcement, "sequence": seq, "unread": read, "ownerId": owner, "memberCount": count})
+		items = append(items, map[string]any{"id": id, "name": name, "kind": kind, "archived": archived, "dissolved": dissolved, "announcement": announcement, "sequence": seq, "unread": read, "ownerId": owner, "ownerKind": ownerKind, "memberCount": count})
 	}
 	respond(w, 200, map[string]any{"items": items})
 }
@@ -179,7 +180,14 @@ func (a *API) groupDetail(w http.ResponseWriter, r *http.Request, p auth.Princip
 			items = append(items, map[string]any{"kind": kind, "id": actor, "name": name, "lastRead": read})
 		}
 	}
-	respond(w, 200, map[string]any{"members": items})
+	var name, announcement, ownerKind string
+	var owner uuid.UUID
+	var archived, dissolved bool
+	if a.db.QueryRow(r.Context(), `select name,announcement,owner_id,owner_kind,archived,dissolved_at is not null from chat_group where id=$1`, id).Scan(&name, &announcement, &owner, &ownerKind, &archived, &dissolved) != nil {
+		fail(w, 500, "读取群资料失败")
+		return
+	}
+	respond(w, 200, map[string]any{"members": items, "actorId": groupActor(p), "actorKind": p.Kind, "group": map[string]any{"id": id, "name": name, "announcement": announcement, "ownerId": owner, "ownerKind": ownerKind, "archived": archived, "dissolved": dissolved}})
 }
 func (a *API) groupUpdate(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 	id, ok := a.groupAllowed(r, p, true)
@@ -205,6 +213,10 @@ func (a *API) groupUpdate(w http.ResponseWriter, r *http.Request, p auth.Princip
 		return
 	}
 	defer tx.Rollback(r.Context())
+	if !groupOwnerLocked(r, tx, id, p) {
+		fail(w, 403, "仅当前群主可管理群")
+		return
+	}
 	result, e := tx.Exec(r.Context(), `update chat_group set name=$2,announcement=$3,archived=$4,updated_at=now() where id=$1 and dissolved_at is null`, id, in.Name, in.Announcement, in.Archived)
 	if e != nil {
 		fail(w, 500, "保存失败")
@@ -388,15 +400,16 @@ func (a *API) groupRemove(w http.ResponseWriter, r *http.Request, p auth.Princip
 	}
 	defer tx.Rollback(r.Context())
 	var owner uuid.UUID
-	if tx.QueryRow(r.Context(), `select owner_id from chat_group where id=$1 for update`, id).Scan(&owner) != nil {
+	var ownerKind string
+	if tx.QueryRow(r.Context(), `select owner_id,owner_kind from chat_group where id=$1 for update`, id).Scan(&owner, &ownerKind) != nil {
 		fail(w, 404, "群不存在")
 		return
 	}
-	if kind == "agent" && target == owner {
+	if kind == ownerKind && target == owner {
 		fail(w, 409, "群主请先归档群，不能直接退出")
 		return
 	}
-	if !(p.Kind == auth.KindAgent && p.AgentID == owner) && !(kind == p.Kind && target == groupActor(p)) {
+	if !(p.Kind == ownerKind && groupActor(p) == owner) && !(kind == p.Kind && target == groupActor(p)) {
 		fail(w, 403, "仅群主可移除他人")
 		return
 	}

@@ -231,7 +231,7 @@ func (a *API) openListConversations(w http.ResponseWriter, r *http.Request, p ap
 		select c.id, c.inbox_id, c.visitor_id, coalesce(c.subject,''), c.status, c.priority, c.source,
 		       c.assignee_id, coalesce(ag.display_name,''), c.last_sequence,
 		       coalesce(c.last_message_preview,''), c.last_message_at, c.agent_unread, c.visitor_unread,
-		       coalesce(v.display_name,''), c.created_at, c.updated_at,
+		       coalesce(v.display_name,''), c.created_at, c.updated_at, c.accepted_at, c.assignment_expires_at,
 		       coalesce((select array_agg(t.name order by t.name) from conversation_tag ct
 		                  join tag t on t.id = ct.tag_id where ct.conversation_id = c.id), '{}')
 		  from conversation c
@@ -260,7 +260,7 @@ func (a *API) openListConversations(w http.ResponseWriter, r *http.Request, p ap
 		if err := rows.Scan(&view.ID, &view.InboxID, &view.VisitorID, &view.Subject, &view.Status,
 			&view.Priority, &view.Source, &view.AssigneeID, &view.AssigneeName, &view.LastSequence,
 			&view.LastMessagePreview, &view.LastMessageAt, &view.AgentUnread, &view.VisitorUnread,
-			&view.VisitorName, &view.CreatedAt, &view.UpdatedAt, &tags); err != nil {
+			&view.VisitorName, &view.CreatedAt, &view.UpdatedAt, &view.AcceptedAt, &view.AssignmentExpiresAt, &tags); err != nil {
 			fail(w, 500, "查询会话失败")
 			return
 		}
@@ -362,6 +362,7 @@ func (a *API) openPostMessage(w http.ResponseWriter, r *http.Request, p apiKeyPr
 	}
 	metadata["source"] = "open_api"
 	view, err := a.appendMessage(r.Context(), p.TenantID, id, messageInput{
+		ReceptionExempt: true,
 		SenderType:      "AGENT",
 		SenderID:        a.integrationAgentID(r.Context(), p.TenantID),
 		ClientMessageID: in.ClientMessageID,
@@ -632,7 +633,8 @@ func (a *API) openCreateConversation(w http.ResponseWriter, r *http.Request, p a
 		metadata := orEmpty(in.Metadata)
 		metadata["source"] = "open_api"
 		message, err := a.appendMessage(r.Context(), p.TenantID, conversationID, messageInput{
-			SenderType: "AGENT", SenderID: a.integrationAgentID(r.Context(), p.TenantID),
+			ReceptionExempt: true,
+			SenderType:      "AGENT", SenderID: a.integrationAgentID(r.Context(), p.TenantID),
 			MessageType: "TEXT", Content: in.Content, Metadata: metadata,
 		})
 		if err != nil {
@@ -796,7 +798,7 @@ func (a *API) loadConversation(ctx handlerContext, tenantID, conversationID uuid
 		select c.id, c.inbox_id, c.visitor_id, coalesce(c.subject,''), c.status, c.priority, c.source,
 		       c.assignee_id, coalesce(ag.display_name,''), c.last_sequence,
 		       coalesce(c.last_message_preview,''), c.last_message_at, c.agent_unread, c.visitor_unread,
-		       coalesce(v.display_name,''), c.created_at, c.updated_at,
+		       coalesce(v.display_name,''), c.created_at, c.updated_at, c.accepted_at, c.assignment_expires_at,
 		       coalesce((select array_agg(t.name order by t.name) from conversation_tag ct
 		                  join tag t on t.id = ct.tag_id where ct.conversation_id = c.id), '{}')
 		  from conversation c
@@ -806,7 +808,7 @@ func (a *API) loadConversation(ctx handlerContext, tenantID, conversationID uuid
 		Scan(&view.ID, &view.InboxID, &view.VisitorID, &view.Subject, &view.Status, &view.Priority,
 			&view.Source, &view.AssigneeID, &view.AssigneeName, &view.LastSequence,
 			&view.LastMessagePreview, &view.LastMessageAt, &view.AgentUnread, &view.VisitorUnread,
-			&view.VisitorName, &view.CreatedAt, &view.UpdatedAt, &tags)
+			&view.VisitorName, &view.CreatedAt, &view.UpdatedAt, &view.AcceptedAt, &view.AssignmentExpiresAt, &tags)
 	if err != nil {
 		return conversationView{}, err
 	}

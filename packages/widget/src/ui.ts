@@ -134,6 +134,8 @@ export interface UiHandlers {
   onTyping: () => void;
   /** Quotes a message, so the next send is a reply to it. */
   onQuote: (messageId: string) => void;
+  /** Asks a human agent to take over an AI-generated reply. */
+  onHandoff: (messageId: string) => void;
   onClearQuote: () => void;
   onSearch: (query: string) => void;
   onClearSearch: () => void;
@@ -189,12 +191,31 @@ export class WidgetView {
     const first = !this.#lastSnapshot;
     this.#lastSnapshot = snapshot;
     if (first) {
-      this.#root.innerHTML = `<style>${this.#styles()}</style><div class="rd-launcher-slot"></div><div class="rd-panel-slot"></div>`;
+      const customCss = this.#options.customCss
+        ? `<style>${this.#sanitizeCss(this.#options.customCss)}</style>`
+        : '';
+      this.#root.innerHTML = `<style>${this.#styles()}</style>${customCss}<div class="rd-launcher-slot"></div><div class="rd-panel-slot"></div>`;
       this.#buildLauncher();
       this.#buildPanel();
     }
     this.#syncLauncher(snapshot);
     this.#syncPanel(snapshot);
+    if (first) this.#autoGrow();
+  }
+
+  /** Re-brands the widget from server-side white-label config delivered on bootstrap. */
+  applyWhiteLabel(config: Partial<ResolvedOptions>): void {
+    Object.assign(this.#options, config);
+    const customCss = this.#options.customCss
+      ? `<style class="rd-extra-style">${this.#sanitizeCss(this.#options.customCss)}</style>`
+      : '';
+    this.#root.innerHTML = `<style class="rd-main-style">${this.#styles()}</style>${customCss}<div class="rd-launcher-slot"></div><div class="rd-panel-slot"></div>`;
+    this.#buildLauncher();
+    this.#buildPanel();
+    if (this.#lastSnapshot) {
+      this.#syncLauncher(this.#lastSnapshot);
+      this.#syncPanel(this.#lastSnapshot);
+    }
   }
 
   /** Scrolls the thread to the newest message after a render. */
@@ -231,7 +252,7 @@ export class WidgetView {
     button.type = 'button';
     button.className = 'rd-launcher';
     button.setAttribute('aria-label', this.#options.title);
-    button.innerHTML = `<span class="rd-launcher-icon">${ICONS.chat}</span><span class="rd-launcher-label">${escapeHtml(this.#options.title)}</span><span class="rd-launcher-badge" hidden>0</span>`;
+    button.innerHTML = `<span class="rd-launcher-icon">${this.#options.logoUrl ? `<img class="rd-launcher-logo" src="${escapeAttr(this.#options.logoUrl)}" alt="">` : ICONS.chat}</span><span class="rd-launcher-label">${escapeHtml(this.#options.title)}</span><span class="rd-launcher-badge" hidden>0</span>`;
     button.addEventListener('click', () => this.#handlers.onToggle());
     slot.appendChild(button);
     this.#launcher = button;
@@ -250,7 +271,7 @@ export class WidgetView {
     panel.innerHTML = `
       <header class="rd-header">
         <div class="rd-header-main">
-          <span class="rd-avatar">${ICONS.chat}</span>
+          <span class="rd-avatar">${this.#brandImg(ICONS.chat, true)}</span>
           <div class="rd-heading">
             <strong>${escapeHtml(this.#options.embedded && this.#options.title === '语聊客服' ? '在线客服' : this.#options.title)}</strong>
             <span class="rd-service-subtitle">${escapeHtml(this.#options.subtitle)}</span>
@@ -289,11 +310,13 @@ export class WidgetView {
           <span class="rd-reply-body"><strong></strong><small></small></span>
           <button type="button" class="rd-icon rd-reply-close" title="取消引用">${ICONS.close}</button>
         </div>
-        <div class="rd-composer-row">
-          <button type="button" class="rd-icon rd-mic" title="录制语音" aria-label="录制语音" hidden>${ICONS.mic}</button>
-          <textarea class="rd-input" rows="1" placeholder="${escapeAttr(this.#options.placeholder)}" maxlength="4000"></textarea>
+        <div class="rd-composer-toolbar" aria-label="消息工具">
           <button type="button" class="rd-icon rd-emoji-toggle" title="表情" aria-label="表情" aria-expanded="false">${ICONS.smile}</button>
-          <button type="button" class="rd-icon rd-more-toggle" title="更多功能" aria-label="更多功能" aria-expanded="false">${ICONS.plus}</button>
+          <button type="button" class="rd-icon rd-more-toggle" title="图片和文件" aria-label="图片和文件" aria-expanded="false">${ICONS.plus}</button>
+          <button type="button" class="rd-icon rd-mic" title="录制语音" aria-label="录制语音" hidden>${ICONS.mic}</button>
+        </div>
+        <div class="rd-composer-row">
+          <textarea class="rd-input" rows="1" placeholder="${escapeAttr(this.#options.placeholder)}" maxlength="4000"></textarea>
           <button type="submit" class="rd-send" title="发送" aria-label="发送消息" ${this.#options.theme === 'dark' ? 'hidden' : ''} disabled>发送</button>
         </div>
         <div class="rd-tools" hidden>
@@ -505,10 +528,14 @@ export class WidgetView {
     // record, because a microphone control that always fails is worse than no
     // control at all.
     const mic = panel.querySelector('.rd-mic') as HTMLButtonElement;
-    if (typeof MediaRecorder !== 'undefined' && typeof navigator.mediaDevices?.getUserMedia === 'function') {
-      mic.hidden = false;
-      mic.addEventListener('click', () => void this.#startRecording());
-    }
+    mic.hidden = false;
+    mic.addEventListener('click', () => {
+      if (typeof MediaRecorder === 'undefined' || typeof navigator.mediaDevices?.getUserMedia !== 'function') {
+        this.#flashRecordingError('此浏览器不支持录音，请使用Chrome或Edge，并通过HTTPS或localhost访问');
+        return;
+      }
+      void this.#startRecording();
+    });
     (panel.querySelector('.rd-rec-cancel') as HTMLButtonElement).addEventListener('click', () => this.#stopRecording(true));
     (panel.querySelector('.rd-rec-send') as HTMLButtonElement).addEventListener('click', () => this.#stopRecording(false));
 
@@ -724,7 +751,7 @@ export class WidgetView {
       snapshot.automation?.channelTitle ||
       (this.#options.embedded && this.#options.title === '语聊客服' ? '在线客服' : this.#options.title);
     return `<div class="rd-empty">
-      <span class="rd-avatar lg">${ICONS.headset}</span>
+      <span class="rd-avatar lg">${this.#brandImg(ICONS.headset, false)}</span>
       <div class="rd-welcome-body"><strong>您好，欢迎来到${escapeHtml(brand)}！</strong><p>${escapeHtml(snapshot.automation?.openReply || snapshot.welcomeMessage || '我们很高兴为您服务，请问有什么可以帮您？')}</p>${this.#welcomeSuggestions(snapshot)}</div>
     </div>`;
   }
@@ -823,6 +850,14 @@ export class WidgetView {
           }
         });
       });
+      node.querySelectorAll<HTMLElement>('[data-handoff]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const id = button.dataset.handoff;
+          if (id) {
+            this.#handlers.onHandoff(id);
+          }
+        });
+      });
       node.querySelectorAll<HTMLElement>('[data-more]').forEach((button) => {
         button.addEventListener('click', () => this.#handlers.onLoadOlder());
       });
@@ -850,7 +885,7 @@ export class WidgetView {
       message.delivery === 'SENDING'
         ? '<span class="rd-state">发送中…</span>'
         : message.delivery === 'FAILED'
-          ? `<button type="button" class="rd-state is-failed" data-retry="${escapeAttr(message.localId)}">${ICONS.retry}发送失败，重试</button>`
+          ? `<button type="button" class="rd-state is-failed" data-retry="${escapeAttr(message.localId)}" title="${escapeAttr(message.error || '发送失败')}">${ICONS.retry}${escapeHtml(message.error || '发送失败')}，重试</button>`
           : mine
             ? this.#receiptHtml(snapshot, message)
             : '';
@@ -859,6 +894,12 @@ export class WidgetView {
     const forward = message.forwardedFromId ? '<span class="rd-forwarded">转发的消息</span>' : '';
     const quote = message.replyTo ? this.#quoteHtml(message.replyTo) : '';
     const reactions = this.#reactionsHtml(message);
+    // AI 自动回复对访客透明化：明确身份 + 免责声明 + 一键转人工，避免「在跟机器人聊」的迷惑感。
+    const isAI = !mine && message.metadata?.ai === true && message.metadata?.handoff !== true;
+    const aiBadge = isAI ? `<span class="rd-ai-badge" title="由 AI 自动生成的内容">AI</span>` : '';
+    const aiFooter = isAI
+      ? `<span class="rd-ai-note">由 AI 生成，仅供参考<button type="button" class="rd-handoff-btn" data-handoff="${escapeAttr(message.id)}">转人工</button></span>`
+      : '';
     // data-copy 供长按菜单复制；无正文时用类型占位，避免剪贴板空串。
     const copyText =
       message.content?.trim() ||
@@ -869,16 +910,17 @@ export class WidgetView {
           : message.attachments?.length
             ? '[文件]'
             : '');
-    return `<div class="rd-row rd-msg ${mine ? 'is-mine' : 'is-theirs'}" data-message="${escapeAttr(message.id)}" data-copy="${escapeAttr(copyText)}">
-      ${mine ? '' : `<span class="rd-avatar sm">${ICONS.chat}</span>`}
+    return `<div class="rd-row rd-msg ${mine ? 'is-mine' : 'is-theirs'}${isAI ? ' is-ai' : ''}" data-message="${escapeAttr(message.id)}" data-copy="${escapeAttr(copyText)}">
+      ${mine ? '' : `<span class="rd-avatar sm">${this.#brandImg(ICONS.chat, false)}</span>`}
       <div class="rd-bubble-group">
-        ${mine || !message.senderName ? '' : `<span class="rd-sender">${escapeHtml(message.senderName)}</span>`}
+        ${mine || !message.senderName ? '' : `<span class="rd-sender">${escapeHtml(message.senderName)}${aiBadge}</span>`}
         <div class="rd-bubble-wrap">
           <div class="rd-bubble">${quote}${forward}${this.#bodyHtml(message)}</div>
           <button type="button" class="rd-quote-btn" data-quote="${escapeAttr(message.id)}" title="引用回复">${ICONS.quote}</button>
         </div>
         ${reactions}
         <span class="rd-time">${escapeHtml(timeLabel(message.createdAt))}${edited}${pinned}${state}</span>
+        ${aiFooter}
       </div>
     </div>`;
   }
@@ -1430,15 +1472,43 @@ export class WidgetView {
       return;
     }
     input.style.height = 'auto';
-    input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+    input.style.overflowY = 'hidden';
+    // border-box 的 scrollHeight 不包含边框，少算边框会让单行内容也溢出。
+    const style = getComputedStyle(input);
+    const border = (parseFloat(style.borderTopWidth) || 0)
+      + (parseFloat(style.borderBottomWidth) || 0);
+    const height = input.scrollHeight + border;
+    input.style.height = Math.min(height, 120) + 'px';
+    input.style.overflowY = height > 120 ? 'auto' : 'hidden';
+  }
+
+  #sanitizeCss(css: string): string {
+    // The widget lives in its own shadow root, so host CSS cannot leak out. We
+    // still strip tags that could prematurely close the <style> element.
+    return css.replace(/<\/(style|script)/gi, '').replace(/<script/gi, '');
+  }
+
+  /** Returns a brand image when one is configured, otherwise the fallback icon. */
+  #brandImg(fallback: string, preferLogo = false): string {
+    const src = preferLogo
+      ? this.#options.logoUrl || this.#options.avatarUrl
+      : this.#options.avatarUrl || this.#options.logoUrl;
+    if (!src) {
+      return fallback;
+    }
+    return `<img class="rd-brand-img" src="${escapeAttr(src)}" alt="">`;
   }
 
   #styles(): string {
     const light = this.#options.theme !== 'dark';
     const accent = this.#options.primaryColor;
+    const radius = this.#options.bubbleRadius ?? 12;
+    const fontStack = this.#options.fontFamily ||
+      'system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif';
     const side = this.#options.position === 'left' ? 'left' : 'right';
     return `
 :host { all: initial; }
+:host { --rd-accent: ${accent}; --rd-radius: ${radius}px; --rd-radius-sm: ${Math.max(0, radius - 8)}px; --rd-font: ${fontStack}; }
 * { box-sizing: border-box; }
 /* 隐藏属性必须压过组件布局，避免文件输入框或导航按钮泄漏到界面。 */
 [hidden] { display: none !important; }
@@ -1447,7 +1517,7 @@ export class WidgetView {
 .rd-panel-slot { bottom: 20px; }
 .rd-launcher {
   display: inline-flex; align-items: center; gap: 8px; border: 1px solid ${accent}; cursor: pointer;
-  border-radius: 8px; padding: 10px 14px; font: 600 14px/1.2 system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  border-radius: var(--rd-radius, 12px); padding: 10px 14px; font: 600 14px/1.2 var(--rd-font);
   color: #fff; background: ${accent};
 }
 .rd-launcher:hover { filter: brightness(1.05); }
@@ -1464,7 +1534,7 @@ export class WidgetView {
   height: min(640px, calc(100vh - 40px)); display: flex; flex-direction: column; overflow: hidden;
   border-radius: 12px; background: ${light ? '#ffffff' : '#171b24'}; color: ${light ? '#1f2329' : '#eef2f1'};
   border: 1px solid ${light ? '#e5e6eb' : '#2a3431'}; box-shadow: 0 8px 40px rgba(31,35,41,.12);
-  font: 14px/1.55 system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font: 14px/1.55 var(--rd-font);
 }
 .rd-panel[hidden] { display: none; }
 ${this.#options.embedded ? `
@@ -1492,6 +1562,8 @@ ${this.#options.embedded ? `
 .rd-avatar.lg svg { width: 26px; height: 26px; }
 .rd-avatar.sm { width: 28px; height: 28px; background: ${accent}1a; color: ${accent}; align-self: flex-end; }
 .rd-avatar.sm svg { width: 15px; height: 15px; }
+.rd-brand-img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
+.rd-launcher-logo { width: 24px; height: 24px; border-radius: 6px; object-fit: cover; display: block; }
 .rd-icon {
   display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0;
   border: 0; border-radius: 10px; background: transparent; color: inherit; cursor: pointer; transition: background-color 0.12s, color 0.12s, border-color 0.12s;
@@ -1526,10 +1598,14 @@ ${this.#options.embedded ? `
 .rd-bubble-group { display: flex; flex-direction: column; gap: 6px; max-width: 80%; }
 .rd-row.is-mine .rd-bubble-group { align-items: flex-end; }
 .rd-sender { font-size: 13px; font-weight: 500; color: ${light ? '#6b7280' : '#9ca3af'}; margin-bottom: 2px; }
+  .rd-ai-badge { display: inline-flex; align-items: center; justify-content: center; margin-left: 6px; padding: 0 6px; height: 16px; font-size: 10px; font-weight: 700; line-height: 1; color: #fff; background: ${accent}; border-radius: 4px; vertical-align: middle; letter-spacing: .5px; }
+  .rd-ai-note { font-size: 11px; color: ${light ? '#9ca3af' : '#8b91a0'}; display: inline-flex; align-items: center; gap: 6px; margin-top: 2px; }
+  .rd-handoff-btn { border: 1px solid ${accent}; color: ${accent}; background: transparent; border-radius: 999px; padding: 1px 10px; font-size: 11px; line-height: 1.6; cursor: pointer; transition: background .15s, color .15s; }
+  .rd-handoff-btn:hover { background: ${accent}; color: #fff; }
 .rd-bubble-wrap { position: relative; display: flex; align-items: center; gap: 6px; max-width: 100%; }
 .rd-row.is-mine .rd-bubble-wrap { flex-direction: row-reverse; }
-.rd-bubble {
-  padding: 8px 12px; border-radius: 8px; background: ${light ? '#ffffff' : '#1f2937'};
+  .rd-bubble {
+  padding: 8px 12px; border-radius: var(--rd-radius, 12px); background: ${light ? '#ffffff' : '#1f2937'};
   color: ${light ? '#111827' : '#f9fafb'}; word-break: break-word; white-space: normal;
   min-width: 0; border: 1px solid ${light ? '#e5e6eb' : '#374151'};
   user-select: text; -webkit-user-select: text;
@@ -1704,9 +1780,14 @@ ${this.#options.embedded ? `
 .rd-reply .rd-icon { width: 24px; height: 24px; color: inherit; }
 .rd-reply .rd-icon svg { width: 14px; height: 14px; }
 .rd-input {
+  overflow-x: hidden; overflow-y: hidden;
+  /* 保留长草稿滚动，隐藏右侧滚动条，避免被误认为第二个输入光标。 */
+  scrollbar-width: none;
   flex: 1; resize: none; border: 1px solid ${light ? '#e5e7eb' : '#374151'}; border-radius: 14px; padding: 10px 14px;
   font: inherit; line-height: 1.5; max-height: 120px; background: ${light ? '#f9fafb' : '#111827'}; color: inherit; outline: none; transition: background-color 0.12s, color 0.12s, border-color 0.12s;
 }
+.rd-input::-webkit-scrollbar { width: 0; height: 0; display: none; }
+.rd-input::-webkit-scrollbar-button { width: 0; height: 0; display: none; }
 .rd-input:focus { border-color: ${accent}; background: ${light ? '#ffffff' : '#111827'}; }
 .rd-send {
   display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex: none;
@@ -1769,8 +1850,12 @@ ${this.#options.launcher === 'bubble' ? '.rd-launcher-label { display: none; }' 
 .rd-bubble-group { max-width: calc(100% - 44px); gap: 4px; }
 .rd-row.is-mine .rd-bubble-group { max-width: 85%; }
 .rd-sender { font-size: 12px; color: #646A73; }
+  .rd-ai-badge { display: inline-flex; align-items: center; justify-content: center; margin-left: 6px; padding: 0 6px; height: 15px; font-size: 10px; font-weight: 700; line-height: 1; color: #fff; background: ${accent}; border-radius: 4px; vertical-align: middle; letter-spacing: .5px; }
+  .rd-ai-note { font-size: 11px; color: #8F959E; display: inline-flex; align-items: center; gap: 6px; margin-top: 2px; }
+  .rd-handoff-btn { border: 1px solid ${accent}; color: ${accent}; background: transparent; border-radius: 999px; padding: 1px 10px; font-size: 11px; line-height: 1.6; cursor: pointer; }
+  .rd-handoff-btn:hover { background: ${accent}; color: #fff; }
 .rd-bubble { padding: 9px 12px; border-color: #E5E8EF; border-radius: 4px 12px 12px; color: #1F2329; box-shadow: 0 1px 3px rgba(31,35,41,.02); }
-.rd-row.is-mine .rd-bubble { background: ${accent}; color: #fff; border-color: ${accent}; border-radius: 12px 4px 12px 12px; }
+.rd-row.is-mine .rd-bubble { background: ${accent}; color: #fff; border-color: ${accent}; border-radius: var(--rd-radius, 12px) var(--rd-radius-sm, 4px) var(--rd-radius, 12px) var(--rd-radius, 12px); }
 .rd-bubble:has(.rd-image) { padding: 6px; border-radius: 12px; }
 .rd-image { margin: 0; }
 .rd-image img { border-radius: 8px; min-width: 120px; min-height: 90px; }
@@ -1778,8 +1863,6 @@ ${this.#options.launcher === 'bubble' ? '.rd-launcher-label { display: none; }' 
 .rd-day, .rd-time-separator { align-self: center; color: #8F959E; font-size: 12px; margin: 2px 0; }
 .rd-composer { border-color: #E5E8EF; }
 .rd-composer-row { padding: 10px 12px; gap: 6px; background: #fff; }
-.rd-composer-row .rd-more-toggle { order: -2; }
-.rd-composer-row .rd-emoji-toggle { order: -1; }
 .rd-composer-row .rd-icon { width: 30px; height: 36px; color: #646A73; }
 .rd-composer-row .rd-icon svg { width: 24px; height: 24px; }
 .rd-composer-row .rd-input { border: 1px solid #E5E8EF; border-radius: 20px; padding: 8px 12px; font-size: 14px; line-height: 20px; background: #fff; }
@@ -1801,8 +1884,34 @@ ${this.#options.launcher === 'bubble' ? '.rd-launcher-label { display: none; }' 
   .rd-panel:not(.is-embedded) .rd-header { min-height: 56px; }
   .rd-messages { padding: 12px; gap: 14px; }
   .rd-composer-row { padding: 8px 10px; }
-  .is-embedded .rd-composer-row .rd-emoji-toggle { order: 0; }
 }
-` : ''}`;
+` : ''}
+/* 与坐席工作台统一的外观；企业主色、嵌入模式和全部功能继续由配置驱动。 */
+.rd-panel { border-radius: 17px; border-color: ${light ? '#e9edf3' : '#303848'}; }
+.rd-panel:not(.is-embedded) { width: 360px; }
+.rd-header { background: ${accent}; color: #fff; padding: 22px 20px; border-bottom: 0; }
+.rd-heading strong { color: #fff; font-size: 18px; }
+.rd-subtitle, .rd-service-subtitle { color: #ffffffcc; font-size: 11px; }
+.rd-header-actions .rd-icon { color: #fff; background: transparent; }
+.rd-header .rd-page-back { color: #fff; }
+.rd-body, .rd-messages { background: ${light ? '#fafbfd' : '#171b24'}; }
+.rd-messages { padding: 20px 16px; gap: 20px; }
+.rd-empty { border-color: ${light ? '#e9edf3' : '#303848'}; box-shadow: none; padding: 16px; }
+.rd-bubble { background: ${light ? '#ffffff' : '#2a2f38'}; padding: 12px 15px; border-color: ${light ? '#e9edf3' : '#303848'}; box-shadow: none; border-radius: 2px 10px 10px 10px; }
+.rd-row.is-mine .rd-bubble { background: ${light ? accent + '12' : accent}; color: ${light ? '#202b3d' : '#fff'}; border-color: ${light ? accent + '20' : accent}; border-radius: 10px 2px 10px 10px; }
+.rd-avatar.sm { border-radius: 10px; }
+.rd-composer { border-color: ${light ? '#e9edf3' : '#303848'}; }
+.rd-composer-row .rd-input { border-radius: 8px; border-color: ${light ? '#e9edf3' : '#303848'}; background: ${light ? '#fff' : '#222733'}; }
+.rd-composer-row .rd-send { border-radius: 7px; font-size: 12px; }
+.is-embedded.rd-panel { border-radius: 0; }
+.rd-composer-toolbar { display:flex; align-items:center; gap:8px; padding:6px 12px 0; }
+.rd-composer-toolbar .rd-icon { width:32px; height:32px; padding:6px; color:${light ? '#646A73' : '#d1d5db'}; background:transparent; border-radius:6px; }
+.rd-composer-toolbar .rd-icon svg { width:20px; height:20px; }
+.rd-composer-toolbar .rd-icon:hover { background:${light ? '#f0f3f8' : '#303848'}; }
+.rd-composer-row { align-items:flex-end; gap:10px; padding:6px 12px 12px; min-width:0; }
+.rd-composer-row .rd-input { flex:1 1 0%; width:0; min-width:0; min-height:42px; padding:10px 12px; line-height:20px; border-radius:8px; }
+.rd-composer-row .rd-send { flex:0 0 60px; width:60px; height:42px; border-radius:8px; font-size:14px; }
+@media (max-width: 480px) { .rd-panel:not(.is-embedded) { width: 100vw; border-radius: 0; } .rd-header { padding: 14px 16px; } }
+`;
   }
 }

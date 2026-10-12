@@ -1,5 +1,7 @@
 # 群聊 API
 
+第三方在自己的网站或 App 建群、指定群主、管理成员及解散群，请看 [第三方群聊接入](第三方群聊接入.md)。全程使用第三方用户 ID，无需为用户创建客服账号。
+
 后台和客户统一使用 `/api/v1/groups`，请求头为各自的 Bearer 登录/访客 token。服务端校验企业状态和群成员身份；内部群只能由同企业账号组成。客户只能通过客户服务群邀请加入。
 
 | 方法 | 路径 | 用途 |
@@ -11,6 +13,7 @@
 | GET | /api/v1/groups/{id}/messages | after/before 序号翻页、q 搜索，最多100条，按序号倒序 |
 | POST | /api/v1/groups/{id}/messages | content、clientId(UUID)，同成员重复 clientId 幂等 |
 | POST | /api/v1/groups/{id}/read | 提交实际展示的 sequence（正整数），返回 readSequence 和 unread；不默认读取最新消息 |
+| PUT | /api/v1/groups/{id}/owner | 当前群主转让给现有同身份类型成员，kind、id |
 | POST | /api/v1/groups/{id}/members | 群主添加同企业账号，agentId |
 | DELETE | /api/v1/groups/{id}/members/{kind}/{actor} | 群主移除成员或成员退出，群主不能直接退出 |
 | POST | /api/v1/groups/{id}/invite | 群主生成服务群邀请，24小时有效，撤销旧邀请 |

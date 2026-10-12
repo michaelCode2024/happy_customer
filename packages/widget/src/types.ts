@@ -79,6 +79,8 @@ export interface Conversation {
   subject?: string;
   status: ConversationStatus;
   assigneeId?: string;
+  acceptedAt?: string;
+  assignmentExpiresAt?: string;
   assigneeName?: string;
   priority: number;
   source: ConversationSource;
@@ -102,6 +104,12 @@ export interface InboxInfo {
   name: string;
   welcomeMessage?: string;
   offlineMessage?: string;
+  // Server-side white-label branding delivered on bootstrap.
+  logoUrl?: string;
+  avatarUrl?: string;
+  fontFamily?: string;
+  bubbleRadius?: number;
+  customCss?: string;
 }
 
 export interface BootstrapResult {
@@ -130,6 +138,10 @@ export interface MessagePage {
   // Only the widget's page carries these: a visitor sees one thread, so its
   // unread count is a property of the page rather than of a conversation list.
   visitorUnread?: number;
+  /** 坐席已读水位：访客气泡「已读」依赖它。 */
+  agentLastReadSequence?: number;
+  /** 坐席已送达水位：访客气泡「已送达」依赖它。 */
+  agentLastDeliveredSequence?: number;
 }
 
 // A search hit. The excerpt carries << >> around the matched terms, which the

@@ -15,9 +15,9 @@ import (
 )
 
 // registerAdmin is the tenant administration API. Everything here is reachable
-// by OWNER and ADMIN only: inboxes, agents, tags, webhooks and API keys.
+// by SUPERVISOR only: inboxes, agents, tags, webhooks and API keys.
 func (a *API) registerAdmin(mux *http.ServeMux) {
-	manage := []string{auth.RoleOwner, auth.RoleAdmin}
+	manage := []string{auth.RoleSupervisor}
 
 	// Tenant
 	mux.HandleFunc("GET /api/v1/admin/tenant", a.requireRole(manage, a.adminTenant))
@@ -34,6 +34,11 @@ func (a *API) registerAdmin(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/v1/admin/inboxes/{id}/ai", a.requireRole(manage, a.adminInboxAI))
 	mux.HandleFunc("PUT /api/v1/admin/inboxes/{id}/routing", a.requireRole(manage, a.adminInboxRouting))
 	mux.HandleFunc("GET /api/v1/admin/inboxes/{id}/snippet", a.requireRole(manage, a.adminSnippet))
+
+	mux.HandleFunc("GET /api/v1/admin/inboxes/{id}/conversations/{conversationId}/messages", a.requireRole(manage, a.adminChannelMessages))
+	mux.HandleFunc("GET /api/v1/admin/inboxes/{id}/conversations", a.requireRole(manage, a.adminChannelConversations))
+	mux.HandleFunc("GET /api/v1/admin/inboxes/{id}/automation", a.requireRole(manage, a.adminAutomation))
+	mux.HandleFunc("PUT /api/v1/admin/inboxes/{id}/automation", a.requireRole(manage, a.adminAutomation))
 
 	// Agents
 	mux.HandleFunc("GET /api/v1/admin/agents", a.requireRole(manage, a.adminAgents))
@@ -126,27 +131,12 @@ func (a *API) adminUpdateTenant(w http.ResponseWriter, r *http.Request, p auth.P
 }
 
 func (a *API) adminSubscription(w http.ResponseWriter, r *http.Request, p auth.Principal) {
-	var plan, status string
-	var seatLimit, messageLimit int
-	var trialEnds *time.Time
-	var updatedAt time.Time
-	err := a.db.QueryRow(r.Context(), `select plan, status, seat_limit, monthly_message_limit, trial_ends_at, updated_at
-		from tenant_subscription where tenant_id = $1`, p.TenantID).
-		Scan(&plan, &status, &seatLimit, &messageLimit, &trialEnds, &updatedAt)
+	q, err := readQuota(r.Context(), a.db, p.TenantID)
 	if err != nil {
-		respond(w, 200, map[string]any{"plan": "TRIAL", "status": "ACTIVE", "seatLimit": 3, "monthlyMessageLimit": 5000})
+		fail(w, 503, "暂时无法读取套餐额度")
 		return
 	}
-	var usedMessages, usedSeats int
-	_ = a.db.QueryRow(r.Context(), `select coalesce(sum(messages_in + messages_out),0)::int from tenant_daily_stat
-		where tenant_id = $1 and stat_date >= date_trunc('month', current_date)`, p.TenantID).Scan(&usedMessages)
-	_ = a.db.QueryRow(r.Context(), `select count(*)::int from agent where tenant_id=$1 and status='ACTIVE' and email <> 'bot@relaydesk.local'`, p.TenantID).Scan(&usedSeats)
-	respond(w, 200, map[string]any{
-		"plan": plan, "status": status, "seatLimit": seatLimit, "monthlyMessageLimit": messageLimit,
-		"trialEndsAt": trialEnds, "updatedAt": updatedAt,
-		"usedSeats": usedSeats, "usedMessages": usedMessages,
-		"monthStart": time.Now().UTC().Format("2006-01"),
-	})
+	respond(w, 200, map[string]any{"plan": q.Plan, "status": q.Status, "seatLimit": q.SeatLimit, "monthlyMessageLimit": int64(q.MessageLimit) + q.MessageBonus, "monthlyAiLimit": int64(q.AILimit) + q.AIBonus, "usedMessages": q.UsedMessages, "usedAi": q.UsedAI, "usedSeats": q.UsedSeats, "monthStart": q.Month, "trialEndsAt": q.TrialEnds, "serviceStartsAt": q.Starts, "serviceEndsAt": q.Ends, "updatedAt": q.Version})
 }
 
 func (a *API) adminAudit(w http.ResponseWriter, r *http.Request, p auth.Principal) {
@@ -155,7 +145,7 @@ func (a *API) adminAudit(w http.ResponseWriter, r *http.Request, p auth.Principa
 		limit = 500
 	}
 	rows, err := a.db.Query(r.Context(), `select id, actor_type, coalesce(actor_id, '00000000-0000-0000-0000-000000000000'::uuid),
-			action, coalesce(target_type,''), coalesce(target_id, '00000000-0000-0000-0000-000000000000'::uuid), detail, created_at
+			action, coalesce(target_type,''), coalesce(target_id, '00000000-0000-0000-0000-000000000000'::uuid), detail, created_at, coalesce((select display_name from agent where id=audit_log.actor_id and tenant_id=$1),(select display_name from platform_admin where id=audit_log.actor_id),'')
 		from audit_log where tenant_id = $1 order by created_at desc limit $2`, p.TenantID, limit)
 	if err != nil {
 		fail(w, 500, "查询审计日志失败")
@@ -165,14 +155,14 @@ func (a *API) adminAudit(w http.ResponseWriter, r *http.Request, p auth.Principa
 	items := make([]map[string]any, 0, limit)
 	for rows.Next() {
 		var id, actorID, targetID uuid.UUID
-		var actorType, action, targetType string
+		var actorType, action, targetType, actorName string
 		var detail []byte
 		var createdAt time.Time
-		if err := rows.Scan(&id, &actorType, &actorID, &action, &targetType, &targetID, &detail, &createdAt); err != nil {
+		if err := rows.Scan(&id, &actorType, &actorID, &action, &targetType, &targetID, &detail, &createdAt, &actorName); err != nil {
 			fail(w, 500, "查询审计日志失败")
 			return
 		}
-		item := map[string]any{"id": id, "actorType": actorType, "action": action,
+		item := map[string]any{"id": id, "actorType": actorType, "actorName": actorName, "action": action,
 			"targetType": targetType, "detail": rawJSON(detail), "createdAt": createdAt}
 		if actorID != uuid.Nil {
 			item["actorId"] = actorID
@@ -241,29 +231,34 @@ func (a *API) adminInbox(w http.ResponseWriter, r *http.Request, p auth.Principa
 	var aiEnabled bool
 	var handoff string
 	var threshold float64
+	var logoUrl, avatarUrl, fontFamily, customCss *string
+	var bubbleRadius *int
 	err := a.db.QueryRow(r.Context(), `
 		select i.name, i.public_key, i.status, i.auto_assign, i.allowed_domains, i.welcome_message,
 		       i.offline_message, i.created_at, i.updated_at,
 		       coalesce(s.enabled,false), coalesce(s.handoff_message,'正在为你转接人工客服，请稍候。'),
-		       coalesce(s.confidence_threshold, 0.35)
+		       coalesce(s.confidence_threshold, 0.35),
+		       i.logo_url, i.avatar_url, i.font_family, i.bubble_radius, i.custom_css
 		  from inbox i left join ai_setting s on s.inbox_id = i.id
 		 where i.id = $1 and i.tenant_id = $2`, id, p.TenantID).
 		Scan(&name, &publicKey, &status, &autoAssign, &domains, &welcome, &offline, &createdAt, &updatedAt,
-			&aiEnabled, &handoff, &threshold)
+			&aiEnabled, &handoff, &threshold, &logoUrl, &avatarUrl, &fontFamily, &bubbleRadius, &customCss)
 	if err != nil {
 		fail(w, 404, "客服入口不存在")
 		return
 	}
 	var strategy, fixedAgent string
 	var maxConcurrent int
-	_ = a.db.QueryRow(r.Context(), `select strategy, coalesce(fixed_agent_id::text,''), max_concurrent
+	acceptanceTimeout := 60
+	_ = a.db.QueryRow(r.Context(), `select strategy, coalesce(fixed_agent_id::text,''), max_concurrent, acceptance_timeout_seconds
 		from routing_rule where inbox_id = $1 and tenant_id = $2`, id, p.TenantID).
-		Scan(&strategy, &fixedAgent, &maxConcurrent)
+		Scan(&strategy, &fixedAgent, &maxConcurrent, &acceptanceTimeout)
 	respond(w, 200, map[string]any{
 		"id": id, "name": name, "publicKey": publicKey, "status": status, "autoAssign": autoAssign,
 		"allowedDomains": domains, "welcomeMessage": welcome, "offlineMessage": offline,
 		"aiEnabled": aiEnabled, "handoffMessage": handoff, "confidenceThreshold": threshold,
-		"routing":     map[string]any{"strategy": strategy, "fixedAgentId": fixedAgent, "maxConcurrent": maxConcurrent},
+		"logoUrl": logoUrl, "avatarUrl": avatarUrl, "fontFamily": fontFamily, "bubbleRadius": bubbleRadius, "customCss": customCss,
+		"routing":     map[string]any{"strategy": strategy, "fixedAgentId": fixedAgent, "maxConcurrent": maxConcurrent, "acceptanceTimeoutSeconds": acceptanceTimeout},
 		"createdAt":   createdAt,
 		"updatedAt":   updatedAt,
 		"publicUrl":   a.cfg.PublicBaseURL,
@@ -280,6 +275,11 @@ func (a *API) adminCreateInbox(w http.ResponseWriter, r *http.Request, p auth.Pr
 		WelcomeMessage string   `json:"welcomeMessage"`
 		OfflineMessage string   `json:"offlineMessage"`
 		AutoAssign     *bool    `json:"autoAssign"`
+		LogoURL        string   `json:"logoUrl"`
+		AvatarURL      string   `json:"avatarUrl"`
+		FontFamily     string   `json:"fontFamily"`
+		BubbleRadius   *int     `json:"bubbleRadius"`
+		CustomCSS      string   `json:"customCss"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -300,12 +300,20 @@ func (a *API) adminCreateInbox(w http.ResponseWriter, r *http.Request, p auth.Pr
 	if in.AutoAssign != nil {
 		autoAssign = *in.AutoAssign
 	}
+	if in.AllowedDomains == nil {
+		in.AllowedDomains = []string{}
+	}
+	if in.BubbleRadius != nil && (*in.BubbleRadius < 0 || *in.BubbleRadius > 40) {
+		fail(w, 400, "bubbleRadius 需在 0 到 40 之间")
+		return
+	}
 	id := uuid.New()
 	if _, err := a.db.Exec(r.Context(), `insert into inbox(id, tenant_id, name, public_key, status, auto_assign,
-			allowed_domains, welcome_message, offline_message)
-		values($1,$2,$3,$4,'ACTIVE',$5,$6,$7,$8)`,
+			allowed_domains, welcome_message, offline_message, logo_url, avatar_url, font_family, bubble_radius, custom_css)
+		values($1,$2,$3,$4,'ACTIVE',$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
 		id, p.TenantID, in.Name, publicKey, autoAssign, in.AllowedDomains,
-		nullable(in.WelcomeMessage), nullable(in.OfflineMessage)); err != nil {
+		nullable(in.WelcomeMessage), nullable(in.OfflineMessage),
+		nullable(in.LogoURL), nullable(in.AvatarURL), nullable(in.FontFamily), in.BubbleRadius, nullable(in.CustomCSS)); err != nil {
 		if isUniqueViolation(err) {
 			failCode(w, 409, "PUBLIC_KEY_TAKEN", "该 publicKey 已被占用")
 			return
@@ -323,12 +331,25 @@ func (a *API) adminUpdateInbox(w http.ResponseWriter, r *http.Request, p auth.Pr
 		return
 	}
 	var in struct {
+		AIEnabled           *bool    `json:"aiEnabled"`
+		ConfidenceThreshold *float64 `json:"confidenceThreshold"`
+		Routing             *struct {
+			Strategy                 string `json:"strategy"`
+			FixedAgentID             string `json:"fixedAgentId"`
+			MaxConcurrent            int    `json:"maxConcurrent"`
+			AcceptanceTimeoutSeconds int    `json:"acceptanceTimeoutSeconds"`
+		} `json:"routing"`
 		Name           string   `json:"name"`
 		Status         string   `json:"status"`
 		AllowedDomains []string `json:"allowedDomains"`
 		WelcomeMessage *string  `json:"welcomeMessage"`
 		OfflineMessage *string  `json:"offlineMessage"`
 		AutoAssign     *bool    `json:"autoAssign"`
+		LogoURL        *string  `json:"logoUrl"`
+		AvatarURL      *string  `json:"avatarUrl"`
+		FontFamily     *string  `json:"fontFamily"`
+		BubbleRadius   *int     `json:"bubbleRadius"`
+		CustomCSS      *string  `json:"customCss"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -338,18 +359,109 @@ func (a *API) adminUpdateInbox(w http.ResponseWriter, r *http.Request, p auth.Pr
 		fail(w, 400, "status 只能是 ACTIVE 或 DISABLED")
 		return
 	}
-	if _, err := a.db.Exec(r.Context(), `update inbox
+	if in.AIEnabled != nil && !a.tenantHasFeature(r.Context(), p.TenantID, "ai") {
+		failCode(w, 403, "PLAN_FEATURE_REQUIRED", "当前套餐不包含 AI 配置")
+		return
+	}
+	if in.BubbleRadius != nil && (*in.BubbleRadius < 0 || *in.BubbleRadius > 40) {
+		fail(w, 400, "bubbleRadius 需在 0 到 40 之间")
+		return
+	}
+	tx, err := a.db.Begin(r.Context())
+	if err != nil {
+		fail(w, 500, "保存入口失败")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	var locked uuid.UUID
+	if err = tx.QueryRow(r.Context(), `select id from inbox where id=$1 and tenant_id=$2 for update`, id, p.TenantID).Scan(&locked); err != nil {
+		fail(w, 404, "入口不存在")
+		return
+	}
+	if _, err := tx.Exec(r.Context(), `update inbox
 		set name = coalesce(nullif($3,''), name),
 		    status = coalesce(nullif($4,''), status),
 		    allowed_domains = coalesce($5, allowed_domains),
 		    welcome_message = coalesce($6, welcome_message),
 		    offline_message = coalesce($7, offline_message),
 		    auto_assign = coalesce($8, auto_assign),
+		    logo_url = coalesce($9, logo_url),
+		    avatar_url = coalesce($10, avatar_url),
+		    font_family = coalesce($11, font_family),
+		    bubble_radius = coalesce($12, bubble_radius),
+		    custom_css = coalesce($13, custom_css),
 		    updated_at = now()
 		where id = $1 and tenant_id = $2`,
 		id, p.TenantID, in.Name, status, in.AllowedDomains,
-		nullableIfSet(in.WelcomeMessage), nullableIfSet(in.OfflineMessage), in.AutoAssign); err != nil {
+		nullableIfSet(in.WelcomeMessage), nullableIfSet(in.OfflineMessage), in.AutoAssign,
+		nullableIfSet(in.LogoURL), nullableIfSet(in.AvatarURL), nullableIfSet(in.FontFamily),
+		in.BubbleRadius, nullableIfSet(in.CustomCSS)); err != nil {
 		fail(w, 500, "更新客服入口失败")
+		return
+	}
+	if in.AIEnabled != nil {
+		threshold := 0.35
+		if in.ConfidenceThreshold != nil {
+			threshold = *in.ConfidenceThreshold
+		}
+		if threshold <= 0 || threshold > 1 {
+			fail(w, 400, "置信度必须在0到1之间")
+			return
+		}
+		if _, err = tx.Exec(r.Context(), `insert into ai_setting(inbox_id,tenant_id,enabled,confidence_threshold) values($1,$2,$3,$4) on conflict(inbox_id) do update set enabled=$3,confidence_threshold=$4,updated_at=now()`, id, p.TenantID, *in.AIEnabled, threshold); err != nil {
+			fail(w, 500, "保存AI设置失败")
+			return
+		}
+	}
+	if in.Routing != nil {
+		strategy := strings.ToUpper(in.Routing.Strategy)
+		if strategy != "LOAD_BALANCED" && strategy != "ROUND_ROBIN" && strategy != "FIXED" {
+			fail(w, 400, "分配策略无效")
+			return
+		}
+		var fixed any
+		if strategy == "FIXED" {
+			agent, e := uuid.Parse(in.Routing.FixedAgentID)
+			var ok bool
+			if e == nil {
+				_ = tx.QueryRow(r.Context(), `select exists(select 1 from agent_inbox ai join agent a on a.id=ai.agent_id where ai.inbox_id=$1 and a.id=$2 and a.tenant_id=$3 and a.status='ACTIVE')`, id, agent, p.TenantID).Scan(&ok)
+			}
+			if !ok {
+				fail(w, 400, "指定成员须已分配到本入口且账号启用")
+				return
+			}
+			fixed = agent
+		}
+		max := in.Routing.MaxConcurrent
+		if max < 1 || max > 100 {
+			max = 5
+		}
+		timeout := in.Routing.AcceptanceTimeoutSeconds
+		if timeout != 0 && (timeout < 10 || timeout > 600) {
+			fail(w, 400, "接单超时必须在10到600秒之间")
+			return
+		}
+		if timeout == 0 {
+			timeout = 60
+			_ = tx.QueryRow(r.Context(), `select acceptance_timeout_seconds from routing_rule where inbox_id=$1 and tenant_id=$2`, id, p.TenantID).Scan(&timeout)
+		}
+		var oldHours []byte
+		enabled := true
+		_ = tx.QueryRow(r.Context(), `select working_hours,enabled from routing_rule where inbox_id=$1`, id).Scan(&oldHours, &enabled)
+		if len(oldHours) == 0 {
+			oldHours = []byte(`{}`)
+		}
+		if _, err = tx.Exec(r.Context(), `delete from routing_rule where inbox_id=$1 and tenant_id=$2`, id, p.TenantID); err != nil {
+			fail(w, 500, "保存分配规则失败")
+			return
+		}
+		if _, err = tx.Exec(r.Context(), `insert into routing_rule(id,tenant_id,inbox_id,strategy,fixed_agent_id,working_hours,max_concurrent,enabled,acceptance_timeout_seconds) values($1,$2,$3,$4,$5,$6,$7,$8,$9)`, uuid.New(), p.TenantID, id, strategy, fixed, oldHours, max, enabled, timeout); err != nil {
+			fail(w, 500, "保存分配规则失败")
+			return
+		}
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		fail(w, 500, "保存入口失败")
 		return
 	}
 	a.recordAudit(r.Context(), p.TenantID, "AGENT", p.AgentID, "inbox.update", "inbox", id, map[string]any{"status": status})
@@ -415,11 +527,12 @@ func (a *API) adminInboxRouting(w http.ResponseWriter, r *http.Request, p auth.P
 		return
 	}
 	var in struct {
-		Strategy      string         `json:"strategy"`
-		FixedAgentID  string         `json:"fixedAgentId"`
-		MaxConcurrent int            `json:"maxConcurrent"`
-		WorkingHours  map[string]any `json:"workingHours"`
-		Enabled       *bool          `json:"enabled"`
+		Strategy                 string         `json:"strategy"`
+		FixedAgentID             string         `json:"fixedAgentId"`
+		MaxConcurrent            int            `json:"maxConcurrent"`
+		AcceptanceTimeoutSeconds int            `json:"acceptanceTimeoutSeconds"`
+		WorkingHours             map[string]any `json:"workingHours"`
+		Enabled                  *bool          `json:"enabled"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -452,19 +565,50 @@ func (a *API) adminInboxRouting(w http.ResponseWriter, r *http.Request, p auth.P
 	if in.MaxConcurrent < 1 || in.MaxConcurrent > 100 {
 		in.MaxConcurrent = 5
 	}
+	tx, err := a.db.Begin(r.Context())
+	if err != nil {
+		fail(w, 500, "保存分配规则失败")
+		return
+	}
+	defer tx.Rollback(r.Context()) //nolint:errcheck
+	// 锁定入口并在同一事务中替换规则，失败不会留下无分配规则的入口。
+	var locked uuid.UUID
+	if err := tx.QueryRow(r.Context(), `select id from inbox where id=$1 and tenant_id=$2 for update`, id, p.TenantID).Scan(&locked); err != nil {
+		fail(w, 404, "客服入口不存在")
+		return
+	}
+	timeout := in.AcceptanceTimeoutSeconds
+	if timeout != 0 && (timeout < 10 || timeout > 600) {
+		fail(w, 400, "接单超时必须在10到600秒之间")
+		return
+	}
+	if timeout == 0 {
+		timeout = 60
+		_ = tx.QueryRow(r.Context(), `select acceptance_timeout_seconds from routing_rule where inbox_id=$1 and tenant_id=$2`, id, p.TenantID).Scan(&timeout)
+	}
 	enabled := true
+	var existingHours []byte
+	// 更换分配方式时保留已有工作时间和启用状态，界面未提交这些设置不等于清空。
+	_ = tx.QueryRow(r.Context(), `select working_hours, enabled from routing_rule where inbox_id=$1 and tenant_id=$2`, id, p.TenantID).Scan(&existingHours, &enabled)
 	if in.Enabled != nil {
 		enabled = *in.Enabled
 	}
 	hours, _ := jsonBytes(orEmpty(in.WorkingHours))
+	if in.WorkingHours == nil && len(existingHours) > 0 {
+		hours = existingHours
+	}
 	// One rule per inbox: replace instead of accumulating duplicates.
-	if _, err := a.db.Exec(r.Context(), `delete from routing_rule where inbox_id = $1 and tenant_id = $2`, id, p.TenantID); err != nil {
+	if _, err := tx.Exec(r.Context(), `delete from routing_rule where inbox_id = $1 and tenant_id = $2`, id, p.TenantID); err != nil {
 		fail(w, 500, "保存分配规则失败")
 		return
 	}
-	if _, err := a.db.Exec(r.Context(), `insert into routing_rule(id, tenant_id, inbox_id, strategy, fixed_agent_id, working_hours, max_concurrent, enabled)
-		values($1,$2,$3,$4,$5,$6,$7,$8)`,
-		uuid.New(), p.TenantID, id, strategy, fixed, hours, in.MaxConcurrent, enabled); err != nil {
+	if _, err := tx.Exec(r.Context(), `insert into routing_rule(id, tenant_id, inbox_id, strategy, fixed_agent_id, working_hours, max_concurrent, enabled, acceptance_timeout_seconds)
+		values($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		uuid.New(), p.TenantID, id, strategy, fixed, hours, in.MaxConcurrent, enabled, timeout); err != nil {
+		fail(w, 500, "保存分配规则失败")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		fail(w, 500, "保存分配规则失败")
 		return
 	}
@@ -489,13 +633,14 @@ func (a *API) adminSnippet(w http.ResponseWriter, r *http.Request, p auth.Princi
 		html.EscapeString(base) + "\" data-inbox-key=\"" + html.EscapeString(publicKey) + "\"></script>"
 	// 宿主项目用 iframe 嵌 H5：宽高由父页控制；parentOrigin 限制 postMessage 目标。
 	iframeTag := `<iframe src="` + html.EscapeString(h5URL) + `?parentOrigin=*"` +
-		` title="连语客服" style="border:0;width:100%;height:100%;min-height:520px" allow="microphone;clipboard-write"></iframe>`
+		` title="语聊客服" style="border:0;width:100%;height:100%;min-height:520px" allow="microphone;clipboard-write"></iframe>`
 	respond(w, 200, map[string]any{
-		"inboxKey":   publicKey,
-		"script":     snippet,
-		"scriptUrl":  base + "/widget.js",
-		"iframe":     h5URL,
-		"iframeHtml": iframeTag,
+		"inboxKey":    publicKey,
+		"script":      snippet,
+		"scriptUrl":   base + "/widget.js",
+		"iframe":      h5URL,
+		"appUrl":      h5URL + "?source=APP",
+		"iframeHtml":  iframeTag,
 		"openApiBase": base + "/api/v1/open",
 		"hostNotes": []string{
 			"网站脚本：把 script 贴进页面即可",
@@ -543,7 +688,17 @@ func (a *API) adminAgents(w http.ResponseWriter, r *http.Request, p auth.Princip
 	respond(w, 200, map[string]any{"items": items})
 }
 
+// 企业后台不可建号；服务端拒绝直调，避免只隐藏按钮留下绕过入口。
 func (a *API) adminCreateAgent(w http.ResponseWriter, r *http.Request, p auth.Principal) {
+	failCode(w, 403, "PLATFORM_REQUIRED", "账户只能由超级管理员建立")
+}
+
+func (a *API) createPlatformAgent(w http.ResponseWriter, r *http.Request, p auth.Principal) {
+	// 建号逻辑只接收已通过平台会话鉴权的身份。
+	if p.Kind != auth.KindPlatform {
+		failCode(w, 403, "PLATFORM_REQUIRED", "账户只能由超级管理员建立")
+		return
+	}
 	var in struct {
 		Email         string   `json:"email"`
 		DisplayName   string   `json:"displayName"`
@@ -556,24 +711,28 @@ func (a *API) adminCreateAgent(w http.ResponseWriter, r *http.Request, p auth.Pr
 		return
 	}
 	email := strings.ToLower(strings.TrimSpace(in.Email))
-	if !strings.Contains(email, "@") || len(email) > 200 {
-		fail(w, 400, "邮箱格式不正确")
+	if email == "" || len(email) > 200 {
+		fail(w, 400, "用户名格式不正确")
 		return
 	}
 	if strings.TrimSpace(in.DisplayName) == "" {
 		fail(w, 400, "坐席名称不能为空")
 		return
 	}
-	role := strings.ToUpper(strings.TrimSpace(in.Role))
+	role := auth.NormalizeRole(strings.ToUpper(strings.TrimSpace(in.Role)))
 	if role == "" {
 		role = auth.RoleAgent
 	}
 	if !auth.ValidRole(role) {
-		fail(w, 400, "role 只能是 OWNER、ADMIN、SUPERVISOR 或 AGENT")
+		fail(w, 400, "role 只能是 SUPERVISOR 或 AGENT")
 		return
 	}
-	if role == auth.RoleOwner && p.Role != auth.RoleOwner {
-		failCode(w, 403, "OWNER_REQUIRED", "只有企业所有者可以创建所有者账号")
+
+	if in.MaxConcurrent <= 0 {
+		in.MaxConcurrent = 5
+	}
+	if in.MaxConcurrent > 100 {
+		fail(w, 400, "同时接待数最多100")
 		return
 	}
 	password := in.Password
@@ -603,10 +762,20 @@ func (a *API) adminCreateAgent(w http.ResponseWriter, r *http.Request, p auth.Pr
 		return
 	}
 	defer tx.Rollback(r.Context()) //nolint:errcheck
+	var seatLimit, usedSeats int
+	if err = tx.QueryRow(r.Context(), `select seat_limit from tenant_subscription where tenant_id=$1 for update`, p.TenantID).Scan(&seatLimit); err != nil {
+		fail(w, 500, "读取席位失败")
+		return
+	}
+	_ = tx.QueryRow(r.Context(), `select count(*) from agent where tenant_id=$1 and status='ACTIVE' and email<>'bot@relaydesk.local'`, p.TenantID).Scan(&usedSeats)
+	if usedSeats >= seatLimit {
+		failCode(w, 409, "SEAT_LIMIT_REACHED", errSeatLimit(seatLimit).Error())
+		return
+	}
 	if _, err := tx.Exec(r.Context(), `insert into agent(id, tenant_id, email, display_name, password_hash, role, status, max_concurrent)
 		values($1,$2,$3,$4,$5,$6,'ACTIVE',$7)`, id, p.TenantID, email, in.DisplayName, hash, role, in.MaxConcurrent); err != nil {
 		if isUniqueViolation(err) {
-			failCode(w, 409, "EMAIL_TAKEN", "该邮箱已被使用")
+			failCode(w, 409, "EMAIL_TAKEN", "该用户名已被使用")
 			return
 		}
 		fail(w, 500, "创建坐席失败")
@@ -628,7 +797,7 @@ func (a *API) adminCreateAgent(w http.ResponseWriter, r *http.Request, p auth.Pr
 		fail(w, 500, "创建坐席失败")
 		return
 	}
-	a.recordAudit(r.Context(), p.TenantID, "AGENT", p.AgentID, "agent.create", "agent", id, map[string]any{"email": email, "role": role})
+	a.recordAudit(r.Context(), p.TenantID, "PLATFORM", p.PlatformAdminID, "agent.create", "agent", id, map[string]any{"email": email, "role": role})
 	respond(w, 201, map[string]any{"id": id, "email": email, "role": role, "initialPassword": password})
 }
 
@@ -639,10 +808,11 @@ func (a *API) adminUpdateAgent(w http.ResponseWriter, r *http.Request, p auth.Pr
 		return
 	}
 	var in struct {
-		DisplayName   string `json:"displayName"`
-		Status        string `json:"status"`
-		Role          string `json:"role"`
-		MaxConcurrent *int   `json:"maxConcurrent"`
+		DisplayName   string    `json:"displayName"`
+		Status        string    `json:"status"`
+		Role          string    `json:"role"`
+		MaxConcurrent *int      `json:"maxConcurrent"`
+		InboxIDs      *[]string `json:"inboxIds"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -652,7 +822,7 @@ func (a *API) adminUpdateAgent(w http.ResponseWriter, r *http.Request, p auth.Pr
 		fail(w, 400, "status 只能是 ACTIVE 或 DISABLED")
 		return
 	}
-	role := strings.ToUpper(strings.TrimSpace(in.Role))
+	role := auth.NormalizeRole(strings.ToUpper(strings.TrimSpace(in.Role)))
 	if role != "" && !auth.ValidRole(role) {
 		fail(w, 400, "role 不合法")
 		return
@@ -661,11 +831,88 @@ func (a *API) adminUpdateAgent(w http.ResponseWriter, r *http.Request, p auth.Pr
 		fail(w, 400, "不能停用当前登录的账号")
 		return
 	}
-	if role == auth.RoleOwner && p.Role != auth.RoleOwner {
-		failCode(w, 403, "OWNER_REQUIRED", "只有企业所有者可以转移所有权")
+	if in.MaxConcurrent != nil && (*in.MaxConcurrent < 1 || *in.MaxConcurrent > 100) {
+		fail(w, 400, "同时接待数必须在1到100之间")
 		return
 	}
-	tag, err := a.db.Exec(r.Context(), `update agent
+	tx, err := a.db.Begin(r.Context())
+	if err != nil {
+		fail(w, 500, "更新成员失败")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	var limit int
+	if err = tx.QueryRow(r.Context(), `select seat_limit from tenant_subscription where tenant_id=$1 for update`, p.TenantID).Scan(&limit); err != nil {
+		fail(w, 500, "读取席位失败")
+		return
+	}
+	var previousRole, previousStatus string
+	if tx.QueryRow(r.Context(), `select role,status from agent where id=$1 and tenant_id=$2`, id, p.TenantID).Scan(&previousRole, &previousStatus) != nil {
+		fail(w, 404, "坐席不存在")
+		return
+	}
+	if auth.NormalizeRole(previousRole) == auth.RoleSupervisor && previousStatus == "ACTIVE" && (status == "DISABLED" || role != "" && role != auth.RoleSupervisor) {
+		var supervisors int
+		if err := tx.QueryRow(r.Context(), `select count(*) from agent where tenant_id=$1 and role='SUPERVISOR' and status='ACTIVE'`, p.TenantID).Scan(&supervisors); err != nil {
+			fail(w, 500, "读取主管人数失败")
+			return
+		}
+		if supervisors <= 1 {
+			fail(w, 409, "不能停用或降级最后一名客服主管")
+			return
+		}
+	}
+	if status == "ACTIVE" && previousStatus != "ACTIVE" {
+		var used int
+		_ = tx.QueryRow(r.Context(), `select count(*) from agent where tenant_id=$1 and status='ACTIVE' and email<>'bot@relaydesk.local'`, p.TenantID).Scan(&used)
+		if used >= limit {
+			failCode(w, 409, "SEAT_LIMIT_REACHED", errSeatLimit(limit).Error())
+			return
+		}
+	}
+	permissionsChanged := false
+	if in.InboxIDs != nil {
+		var old []string
+		_ = tx.QueryRow(r.Context(), `select coalesce(array_agg(inbox_id::text),array[]::text[]) from agent_inbox where agent_id=$1`, id).Scan(&old)
+		previous := map[string]bool{}
+		for _, value := range old {
+			previous[value] = true
+		}
+		requested := map[string]bool{}
+		for _, raw := range *in.InboxIDs {
+			inbox, e := uuid.Parse(raw)
+			if e != nil {
+				fail(w, 400, "入口标识无效")
+				return
+			}
+			var ok bool
+			_ = tx.QueryRow(r.Context(), `select exists(select 1 from inbox where id=$1 and tenant_id=$2)`, inbox, p.TenantID).Scan(&ok)
+			if !ok {
+				fail(w, 400, "入口不属于本企业")
+				return
+			}
+			requested[inbox.String()] = true
+		}
+		permissionsChanged = len(previous) != len(requested)
+		for value := range requested {
+			if !previous[value] {
+				permissionsChanged = true
+			}
+		}
+		if permissionsChanged {
+			if _, err = tx.Exec(r.Context(), `delete from agent_inbox where agent_id=$1`, id); err != nil {
+				fail(w, 500, "保存权限失败")
+				return
+			}
+			for value := range requested {
+				if _, err = tx.Exec(r.Context(), `insert into agent_inbox(agent_id,inbox_id) values($1,$2)`, id, value); err != nil {
+					fail(w, 500, "保存权限失败")
+					return
+				}
+			}
+		}
+	}
+	tag, err := tx.Exec(r.Context(), `update agent
 		set display_name = coalesce(nullif($3,''), display_name),
 		    status = coalesce(nullif($4,''), status),
 		    role = coalesce(nullif($5,''), role),
@@ -677,8 +924,15 @@ func (a *API) adminUpdateAgent(w http.ResponseWriter, r *http.Request, p auth.Pr
 		fail(w, 404, "坐席不存在")
 		return
 	}
-	if status == "DISABLED" {
-		_ = a.authn.RevokeAllSessions(r.Context(), id)
+	if status == "DISABLED" || role != "" && role != previousRole || permissionsChanged {
+		if _, err = tx.Exec(r.Context(), `delete from agent_session where agent_id=$1`, id); err != nil {
+			fail(w, 500, "更新登录权限失败")
+			return
+		}
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		fail(w, 500, "保存成员失败")
+		return
 	}
 	a.recordAudit(r.Context(), p.TenantID, "AGENT", p.AgentID, "agent.update", "agent", id, map[string]any{"status": status, "role": role})
 	respond(w, 200, map[string]any{"status": "OK"})
@@ -699,8 +953,8 @@ func (a *API) adminDeleteAgent(w http.ResponseWriter, r *http.Request, p auth.Pr
 		fail(w, 404, "坐席不存在")
 		return
 	}
-	if role == auth.RoleOwner {
-		fail(w, 400, "企业所有者账号不可删除")
+	if auth.NormalizeRole(role) == auth.RoleSupervisor {
+		fail(w, 400, "客服主管请通过成员编辑停用，至少保留一名启用的主管")
 		return
 	}
 	var open int
@@ -799,6 +1053,7 @@ func (a *API) adminAgentInboxes(w http.ResponseWriter, r *http.Request, p auth.P
 		fail(w, 500, "更新权限失败")
 		return
 	}
+	_ = a.authn.RevokeAllSessions(r.Context(), id)
 	respond(w, 200, map[string]any{"status": "OK"})
 }
 
@@ -850,6 +1105,7 @@ func (a *API) adminCreateTag(w http.ResponseWriter, r *http.Request, p auth.Prin
 		return
 	}
 	_ = a.db.QueryRow(r.Context(), `select id from tag where tenant_id=$1 and lower(name)=lower($2)`, p.TenantID, name).Scan(&id)
+	a.assetsChanged(r, p)
 	respond(w, 201, map[string]any{"id": id, "name": name, "color": color})
 }
 
@@ -872,6 +1128,7 @@ func (a *API) adminUpdateTag(w http.ResponseWriter, r *http.Request, p auth.Prin
 		fail(w, 404, "标签不存在")
 		return
 	}
+	a.assetsChanged(r, p)
 	respond(w, 200, map[string]any{"status": "OK"})
 }
 
@@ -886,6 +1143,7 @@ func (a *API) adminDeleteTag(w http.ResponseWriter, r *http.Request, p auth.Prin
 		fail(w, 404, "标签不存在")
 		return
 	}
+	a.assetsChanged(r, p)
 	respond(w, 200, map[string]any{"status": "OK"})
 }
 
@@ -916,7 +1174,7 @@ func (a *API) adminWebhooks(w http.ResponseWriter, r *http.Request, p auth.Princ
 	}
 	respond(w, 200, map[string]any{"items": items, "availableEvents": []string{
 		"conversation.created", "conversation.updated", "conversation.closed",
-		"message.created", "message.agent", "visitor.created",
+		"message.created", "message.agent", "visitor.created", "conversation.read", "conversation.delivered",
 	}, "signatureAlgorithm": "HMAC-SHA256 over \"<timestamp>.<raw body>\""})
 }
 
@@ -1648,7 +1906,7 @@ func (a *API) tenantInbox(w http.ResponseWriter, r *http.Request, p auth.Princip
 func validWebhookEvents(events []string) []string {
 	allowed := map[string]struct{}{
 		"conversation.created": {}, "conversation.updated": {}, "conversation.closed": {},
-		"message.created": {}, "message.agent": {}, "visitor.created": {},
+		"message.created": {}, "message.agent": {}, "visitor.created": {}, "conversation.read": {}, "conversation.delivered": {},
 	}
 	result := make([]string, 0, len(events))
 	seen := make(map[string]struct{})

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:relaydesk_agent_console/src/ui/workspace_layout.dart';
 
 import 'package:relaydesk_agent_console/src/api/models.dart';
 import 'package:relaydesk_agent_console/src/state/session_controller.dart';
@@ -66,7 +67,15 @@ class _StatsPageState extends State<StatsPage> {
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        title: const Text('运营统计'),
+        title: const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('每一份服务，都值得被看见。'),
+              SizedBox(height: 3),
+              Text('了解会话趋势、响应效率和团队工作量',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF8992A3)))
+            ]),
+        toolbarHeight: 76,
         backgroundColor: Colors.transparent,
         actions: <Widget>[
           if (overview?.isTenantWide ?? false)
@@ -108,7 +117,8 @@ class _StatsPageState extends State<StatsPage> {
                       children: <Widget>[
                         Text('无法加载统计：$_error', textAlign: TextAlign.center),
                         const SizedBox(height: 12),
-                        OutlinedButton(onPressed: _load, child: const Text('重试')),
+                        OutlinedButton(
+                            onPressed: _load, child: const Text('重试')),
                       ],
                     ),
                   ),
@@ -133,7 +143,7 @@ class _StatsPageState extends State<StatsPage> {
                         ],
                         const SizedBox(height: 16),
                         Text(
-                          '数据来源：租户每日统计表，实时汇总',
+                          '会话趋势按天汇总，队列与在线状态显示当前数据。',
                           style: theme.textTheme.labelSmall?.copyWith(
                             color: theme.colorScheme.outline,
                           ),
@@ -159,17 +169,18 @@ class _StatsPageState extends State<StatsPage> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = constraints.maxWidth > 900
-            ? 6
+            ? 3
             : constraints.maxWidth > 600
                 ? 3
                 : 2;
-        return GridView.count(
-          crossAxisCount: columns,
+        return GridView(
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: columns,
+              mainAxisExtent: 120,
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12),
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 8,
-          crossAxisSpacing: 8,
-          childAspectRatio: 2.2,
           children: <Widget>[
             for (final metric in cards) _MetricCard(metric: metric),
           ],
@@ -193,37 +204,16 @@ class _MetricCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: theme.colorScheme.outlineVariant.withAlpha(120)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: <Widget>[
-          Text(
-            metric.label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            metric.value,
-            style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w600,
-              fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
-            ),
-          ),
-        ],
-      ),
-    );
+    final icon = switch (metric.label) {
+      '进行中' => Icons.chat_bubble_outline,
+      '待分配' => Icons.inbox_outlined,
+      '在线坐席' => Icons.people_outline,
+      '首响' => Icons.schedule,
+      '评分' => Icons.sentiment_satisfied_alt,
+      _ => Icons.auto_awesome_outlined,
+    };
+    return WorkspaceKpiCard(
+        label: metric.label, value: metric.value, icon: icon);
   }
 }
 
@@ -246,7 +236,8 @@ class _SingleCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: theme.colorScheme.outlineVariant.withAlpha(120)),
+        border:
+            Border.all(color: theme.colorScheme.outlineVariant.withAlpha(120)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -292,7 +283,8 @@ class _TrendCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: theme.colorScheme.outlineVariant.withAlpha(120)),
+        border:
+            Border.all(color: theme.colorScheme.outlineVariant.withAlpha(120)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -337,8 +329,9 @@ class _TrendCard extends StatelessWidget {
                         Expanded(
                           child: _TrendColumn(
                             point: point,
-                            maxStarted: started,
-                            maxMessages: messages,
+                            maxStarted: started > messages ? started : messages,
+                            maxMessages:
+                                started > messages ? started : messages,
                             showLabel: _shouldLabel(series, point),
                           ),
                         ),
@@ -426,14 +419,18 @@ class _Bar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ratio = max <= 0 ? 0.0 : value / max;
-    return Expanded(
-      child: FractionallySizedBox(
-        alignment: Alignment.bottomCenter,
-        heightFactor: ratio.clamp(0.02, 1.0),
-        child: Container(
-          decoration: BoxDecoration(
-            color: color.withAlpha(190),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(3)),
+    return Flexible(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 18),
+        child: FractionallySizedBox(
+          alignment: Alignment.bottomCenter,
+          heightFactor: value == 0 ? 0.0 : ratio.clamp(0.02, 1.0),
+          child: Container(
+            decoration: BoxDecoration(
+              color: color.withAlpha(190),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(3)),
+            ),
           ),
         ),
       ),
@@ -486,7 +483,8 @@ class _LeaderboardCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: theme.colorScheme.outlineVariant.withAlpha(120)),
+        border:
+            Border.all(color: theme.colorScheme.outlineVariant.withAlpha(120)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -525,7 +523,8 @@ class _LeaderboardCard extends StatelessWidget {
                         DataCell(Text(row.displayName)),
                         DataCell(Text('${row.resolved}')),
                         DataCell(Text('${row.open}')),
-                        DataCell(Text(durationText(row.avgFirstResponseSeconds))),
+                        DataCell(
+                            Text(durationText(row.avgFirstResponseSeconds))),
                         DataCell(
                           Text(
                             row.avgRating <= 0

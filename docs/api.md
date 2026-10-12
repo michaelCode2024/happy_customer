@@ -9,12 +9,14 @@
 ```json
 {
   "inboxKey": "网站公开入口 Key",
-  "externalId": "业务系统用户 ID（可选）",
+  "identityToken": "业务后端签发的身份票据（关联账号时提供）",
   "displayName": "访客昵称（可选）"
 }
 ```
 
 响应中的 `token` 用于后续请求：`Authorization: Bearer <token>`。
+
+匿名咨询仅需 inboxKey。关联已登录账号，由客户业务后端使用 write 权限的 APIKey 调用 `POST /api/v1/open/visitor-identity`，提交 inboxKey、externalId、displayName，取得 5 分钟有效的 identityToken。前端不能再单独提交裸 externalId；详见 [接入指南](integrations.md)。
 
 ## 会话
 

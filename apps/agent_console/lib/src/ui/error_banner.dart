@@ -62,7 +62,34 @@ Future<void> copyToClipboard(
   String value,
   String label,
 ) async {
-  await Clipboard.setData(ClipboardData(text: value));
+  try {
+    await Clipboard.setData(ClipboardData(text: value));
+  } catch (_) {
+    if (!context.mounted) return;
+    // 嵌入浏览器可能限制剪贴板；仍提供可选中的完整内容，不让复制操作无响应。
+    await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+              title: Text('手动复制$label'),
+              content: SizedBox(
+                  width: 560,
+                  child: SingleChildScrollView(
+                      child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                        const Text('当前浏览器限制了剪贴板访问，请选中下面的内容复制。'),
+                        const SizedBox(height: 16),
+                        SelectableText(value),
+                      ]))),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('关闭'))
+              ],
+            ));
+    return;
+  }
   if (!context.mounted) {
     return;
   }

@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'package:relaydesk_agent_console/src/util/console_surface.dart';
 
 import 'package:flutter/material.dart';
+import 'package:relaydesk_agent_console/src/platform/platform_api.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'package:relaydesk_agent_console/src/platform/platform_controller.dart';
@@ -10,33 +12,22 @@ import 'package:relaydesk_agent_console/src/theme.dart';
 import 'package:relaydesk_agent_console/src/ui/login_page.dart';
 import 'package:relaydesk_agent_console/src/ui/platform_login_page.dart';
 import 'package:relaydesk_agent_console/src/ui/platform_page.dart';
+import 'package:relaydesk_agent_console/src/ui/product_brand.dart';
 import 'package:relaydesk_agent_console/src/ui/workbench_page.dart';
 
 void main() {
   runApp(const RelayDeskConsoleApp());
 }
 
-/// Which of the two consoles the window is showing.
-///
-/// The agent workbench and the operations backend are different principals with
-/// different credentials, but they ship as one binary: the person running a
-/// self-hosted RelayDesk is usually both the first agent and the operator, and a
-/// second download for four screens would be a worse answer than a switch.
+/// 同一安装包里的两套门面：客服工作台与平台运营后台。
 enum ConsoleSurface { agent, platform }
 
-/// The console's root.
-///
-/// It owns the things that outlive a sign-in: the stored agent session, the
-/// stored operator token and the brightness choice. The session and the surface
-/// are read before the first frame so a returning user never sees the wrong
-/// screen flash, which is why the root is stateful rather than a plain
-/// [MaterialApp].
+/// 应用根：按「已登录 → 主页 / 未登录 → 登录页」路由，并记住上次门面。
 class RelayDeskConsoleApp extends StatefulWidget {
-  const RelayDeskConsoleApp({super.key, this.credentials});
+  const RelayDeskConsoleApp({super.key, this.credentials, this.platformApiFactory});
 
-  /// Injectable so tests avoid the platform preferences channel. The store is
-  /// shared with [SessionController], so both read the same "remember me" data.
   final CredentialStore? credentials;
+  final PlatformApi Function(String server)? platformApiFactory;
 
   @override
   State<RelayDeskConsoleApp> createState() => _RelayDeskConsoleAppState();
@@ -48,24 +39,24 @@ class _RelayDeskConsoleAppState extends State<RelayDeskConsoleApp> {
   late final PlatformController _platform;
 
   ThemeMode _themeMode = ThemeMode.system;
-
-  /// Agent by default, because a shared machine is far more likely to be an
-  /// agent's desk than the operator's.
   ConsoleSurface _surface = ConsoleSurface.agent;
 
-  /// True once the platform controller has decided whether it holds a usable
-  /// token. Until then the surface must not be switchable, or a cold start could
-  /// flash the operator's login form at an agent.
+  /// 平台 bootstrap 完成前不暴露「平台管理员登录」，避免点进去还在闪 splash。
   bool _platformResolved = false;
+
+  /// 门面偏好读完前先挡一层，避免先闪客服登录再跳运营台。
+  bool _surfaceRestored = false;
+  bool _manualSurface = false;
 
   @override
   void initState() {
     super.initState();
     _store = widget.credentials ?? const PreferencesCredentialStore();
+    _manualSurface = loadTabConsoleSurface() != null;
     _session = SessionController(store: _store)..addListener(_onSessionChanged);
-    _platform = PlatformController(store: _store)
+    _platform = PlatformController(store: _store, apiFactory: widget.platformApiFactory)
       ..addListener(_onPlatformChanged);
-    unawaited(_restoreTheme());
+    unawaited(_restorePrefs());
     unawaited(_session.bootstrap());
     unawaited(_platform.bootstrap());
   }
@@ -79,18 +70,16 @@ class _RelayDeskConsoleAppState extends State<RelayDeskConsoleApp> {
     super.dispose();
   }
 
-  /// Keeps the presence heartbeat in step with the session: it should run only
-  /// while an agent is actually signed in.
   void _onSessionChanged() {
     if (_session.phase == SessionPhase.loggedIn) {
       _session.startPresenceHeartbeat();
     } else {
       _session.stopPresenceHeartbeat();
     }
+    // 客服会话变化时也要刷新根路由（例如退出后回登录页）。
+    setState(() {});
   }
 
-  /// Follows the operator's own state instead of tracking it separately: if they
-  /// sign out from inside the console, the surface has to come back with them.
   void _onPlatformChanged() {
     if (!_platformResolved && _platform.phase != PlatformPhase.booting) {
       _platformResolved = true;
@@ -98,40 +87,52 @@ class _RelayDeskConsoleAppState extends State<RelayDeskConsoleApp> {
     setState(() {});
   }
 
-  Future<void> _restoreTheme() async {
-    final stored = await _store.loadThemeMode();
-    final mode = switch (stored) {
+  Future<void> _restorePrefs() async {
+    final storedTheme = await _store.loadThemeMode();
+    final mode = switch (storedTheme) {
       'light' => ThemeMode.light,
       'dark' => ThemeMode.dark,
       'system' => ThemeMode.system,
       _ => null,
     };
-    if (mode == null || !mounted) {
-      return;
-    }
-    setState(() => _themeMode = mode);
+    final storedSurface = loadTabConsoleSurface() ?? await _store.loadConsoleSurface();
+    final surface = switch (storedSurface) {
+      'platform' => ConsoleSurface.platform,
+      'agent' => ConsoleSurface.agent,
+      _ => ConsoleSurface.agent,
+    };
+    if (!mounted) return;
+    setState(() {
+      if (mode != null) _themeMode = mode;
+      _surface = surface;
+      _surfaceRestored = true;
+    });
   }
 
   void _setThemeMode(ThemeMode mode) {
     setState(() => _themeMode = mode);
-    // Saved outside the session so it applies to the login screen too, and so it
-    // survives signing out.
     unawaited(_store.saveThemeMode(mode.name));
   }
 
   void _openPlatformConsole() {
+    _manualSurface = true;
+    saveTabConsoleSurface('platform');
     setState(() => _surface = ConsoleSurface.platform);
+    unawaited(_store.saveConsoleSurface('platform'));
   }
 
   void _openAgentConsole() {
+    _manualSurface = true;
+    saveTabConsoleSurface('agent');
     setState(() => _surface = ConsoleSurface.agent);
+    unawaited(_store.saveConsoleSurface('agent'));
   }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: '连语客服工作台',
+      title: ProductBrand.consoleTitle,
       locale: const Locale('zh', 'CN'),
       supportedLocales: const <Locale>[Locale('zh', 'CN')],
       localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
@@ -142,70 +143,107 @@ class _RelayDeskConsoleAppState extends State<RelayDeskConsoleApp> {
       theme: RelayTheme.light(),
       darkTheme: RelayTheme.dark(),
       themeMode: _themeMode,
-      home: ListenableBuilder(
-        listenable: _session,
-        builder: (context, _) => _home(),
-      ),
+      home: _home(),
     );
   }
 
   Widget _home() {
+    // 偏好未恢复完时先 splash，避免门面闪烁。
+    if (!_surfaceRestored || _session.phase == SessionPhase.booting || _platform.phase == PlatformPhase.booting) {
+      return const _Splash();
+    }
+
+    if (!_manualSurface) {
+      if (_surface == ConsoleSurface.agent && _session.phase == SessionPhase.loggedOut && _platform.phase == PlatformPhase.ready) {
+        _surface = ConsoleSurface.platform;
+        saveTabConsoleSurface('platform');
+      } else if (_surface == ConsoleSurface.platform && _platform.phase == PlatformPhase.locked && _session.phase == SessionPhase.loggedIn) {
+        _surface = ConsoleSurface.agent;
+        saveTabConsoleSurface('agent');
+      }
+    }
     if (_surface == ConsoleSurface.platform) {
       return ListenableBuilder(
         listenable: _platform,
         builder: (context, _) {
-          if (_platform.phase == PlatformPhase.booting) {
-            return const _Splash();
+          // 已登录 → 运营主页；未登录 / 登录中 → 登录页；启动校验中 → splash。
+          switch (_platform.phase) {
+            case PlatformPhase.booting:
+              return const _Splash();
+            case PlatformPhase.ready:
+              return PlatformPage(
+                controller: _platform,
+                onAgentLogin: _openAgentConsole,
+              );
+            case PlatformPhase.locked:
+            case PlatformPhase.signingIn:
+              return PlatformLoginPage(
+                controller: _platform,
+                onAgentLogin: _openAgentConsole,
+              );
           }
-          if (_platform.phase != PlatformPhase.ready) {
-            return PlatformLoginPage(
-              controller: _platform,
-              onAgentLogin: _openAgentConsole,
-            );
-          }
-          return PlatformPage(
-            controller: _platform,
-            onAgentLogin: _openAgentConsole,
-          );
         },
       );
     }
-    switch (_session.phase) {
-      case SessionPhase.booting:
-        return const _Splash();
-      case SessionPhase.loggedOut:
-      case SessionPhase.authenticating:
-        return LoginPage(
-          session: _session,
-          onPlatformLogin:
-              _platformResolved ? _openPlatformConsole : null,
-        );
-      case SessionPhase.loggedIn:
-        // Keyed by agent so switching accounts rebuilds the workbench instead of
-        // reusing a controller bound to the previous session's API client.
-        final agentId = _session.agent?.id ?? '';
-        return WorkbenchPage(
-          key: ValueKey<String>('workbench-$agentId'),
-          session: _session,
-          themeMode: _themeMode,
-          onThemeModeChanged: _setThemeMode,
-        );
-    }
+
+    return ListenableBuilder(
+      listenable: _session,
+      builder: (context, _) {
+        switch (_session.phase) {
+          case SessionPhase.booting:
+            return const _Splash();
+          case SessionPhase.loggedOut:
+          case SessionPhase.authenticating:
+            return LoginPage(
+              session: _session,
+              onPlatformLogin:
+                  _platformResolved ? _openPlatformConsole : null,
+            );
+          case SessionPhase.loggedIn:
+            final agentId = _session.agent?.id ?? '';
+            return WorkbenchPage(
+              key: ValueKey<String>('workbench-$agentId'),
+              session: _session,
+              themeMode: _themeMode,
+              onThemeModeChanged: _setThemeMode,
+            );
+        }
+      },
+    );
   }
 }
 
-/// Shown for the moment it takes to read the stored session.
 class _Splash extends StatelessWidget {
   const _Splash();
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
+    final scheme = Theme.of(context).colorScheme;
+    return Scaffold(
       body: Center(
-        child: SizedBox(
-          width: 28,
-          height: 28,
-          child: CircularProgressIndicator(strokeWidth: 2.5),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: scheme.primary,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: const Icon(Icons.forum_rounded,
+                  color: Colors.white, size: 26),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.4,
+                color: scheme.primary,
+              ),
+            ),
+          ],
         ),
       ),
     );

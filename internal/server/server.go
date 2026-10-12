@@ -64,7 +64,25 @@ func New(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) (*API, error)
 			Temperature: cfg.AI.Temperature,
 			MaxTokens:   cfg.AI.MaxTokens,
 			Timeout:     cfg.AI.TimeoutSeconds,
-		}), cfg.AI.ConfidenceThreshold),
+		}), cfg.AI.ConfidenceThreshold).WithEmbeddings(
+			func() *ai.EmbeddingProvider {
+				if cfg.AI.EmbeddingProvider == "" || cfg.AI.APIKey == "" {
+					return nil
+				}
+				ep := ai.NewEmbeddingProvider(
+					cfg.AI.BaseURL,
+					cfg.AI.APIKey,
+					cfg.AI.EmbeddingModel,
+				)
+				if !ep.Available() {
+					return nil
+				}
+				return ep
+			}(),
+		).WithTools((func() []ai.Tool {
+			tmp := &API{cfg: cfg, db: db}
+			return tmp.initTools()
+		})()...),
 		store:        store,
 		webhooks:     webhook.NewDispatcher(db, cfg.Webhook.MaxAttempts, logger),
 		widgetRate:   ratelimit.New(cfg.RateLimit.WidgetPerMinute, cfg.RateLimit.WidgetBurst),
@@ -84,6 +102,7 @@ func (a *API) Run(ctx context.Context) {
 	go a.bus.Start(ctx)
 	go a.webhooks.Run(ctx)
 	go a.retentionLoop(ctx)
+	go a.receptionLoop(ctx)
 }
 
 func (a *API) Handler() http.Handler {

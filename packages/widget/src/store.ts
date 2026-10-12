@@ -1,4 +1,4 @@
-import type { ChannelPresentation, ChannelItem } from "./types.js";
+import type { ChannelPresentation, ChannelItem, InboxInfo } from "./types.js";
 // The store owns all visitor-side state and is the only place that talks to the
 // API and the socket. The UI is a pure function of the snapshot it reads, which
 // keeps re-renders cheap and makes the send path (optimistic message, then
@@ -44,6 +44,11 @@ export interface Snapshot {
   replyTo?: QuotedMessage;
   /** Highest sequence in the open thread at the moment it was last read. */
   readBoundary: number;
+  /** 当前会话里坐席已读 / 已送达的最大序号，驱动访客气泡回执。 */
+  agentLastReadSequence: number;
+  agentLastDeliveredSequence: number;
+  /** 正在拉取当前会话历史；为 true 时 UI 不展示欢迎语，避免刷新闪一下。 */
+  loadingThread: boolean;
   loadingOlder: boolean;
   search: {
     query: string;
@@ -119,6 +124,8 @@ export class ChatStore {
   #state: Snapshot;
   // 原始文件仅保留在当前页面内，用于上传失败重试，不写入本地持久化存储。
   readonly #pendingFiles = new Map<string, File>();
+  /** Called once when server-side white-label branding arrives from bootstrap. */
+  onWhiteLabel?: (config: Partial<ResolvedOptions>) => void;
   #attachmentConversation?: Promise<void>;
   #typingTimer?: ReturnType<typeof setTimeout>;
   #typingSentAt = 0;
@@ -147,6 +154,9 @@ export class ChatStore {
       welcomeMessage: options.welcomeMessage,
       offlineMessage: options.offlineMessage,
       readBoundary: 0,
+      agentLastReadSequence: 0,
+      agentLastDeliveredSequence: 0,
+      loadingThread: false,
       loadingOlder: false,
       search: { query: '', running: false, hits: [] },
     };
@@ -197,6 +207,7 @@ export class ChatStore {
         // falls through to a fresh bootstrap.
         try {
           const live = await this.#api.listConversations();
+          const activeId = this.#pickActive(live.items ?? []);
           this.#patch({
             status: 'READY',
             agentsOnline: live.agentsOnline ?? 0,
@@ -205,7 +216,9 @@ export class ChatStore {
             welcomeMessage: live.welcomeMessage || this.#options.welcomeMessage,
             offlineMessage: live.offlineMessage || this.#options.offlineMessage,
             conversations: live.items ?? [],
-            activeId: this.#pickActive(live.items ?? []),
+            activeId,
+            // 刷新恢复会话时立刻进入加载态，首帧就不画欢迎语。
+            loadingThread: Boolean(activeId),
           });
           this.#afterReady();
           return;
@@ -243,6 +256,7 @@ export class ChatStore {
       conversations: this.#state.conversations,
     });
     const conversations = await this.#api.listConversations().then((page) => page.items ?? []).catch(() => []);
+    const activeId = this.#pickActive(conversations);
     this.#patch({
       status: 'READY',
       agentsOnline: result.agentsOnline,
@@ -251,8 +265,10 @@ export class ChatStore {
       welcomeMessage: result.inbox.welcomeMessage || this.#options.welcomeMessage,
       offlineMessage: result.inbox.offlineMessage || this.#options.offlineMessage,
       conversations,
-      activeId: this.#pickActive(conversations),
+      activeId,
+      loadingThread: Boolean(activeId),
     });
+    this.#applyServerWhiteLabel(result.inbox);
     this.#afterReady();
   }
 
@@ -274,6 +290,21 @@ export class ChatStore {
         void this.#resync();
       }
     }, 20_000);
+  }
+
+  /** Overlays server-provided white-label branding onto the options and notifies the view. */
+  #applyServerWhiteLabel(inbox: InboxInfo): void {
+    const wl: Partial<ResolvedOptions> = {};
+    if (inbox.logoUrl) wl.logoUrl = inbox.logoUrl;
+    if (inbox.avatarUrl) wl.avatarUrl = inbox.avatarUrl;
+    if (inbox.fontFamily) wl.fontFamily = inbox.fontFamily;
+    if (typeof inbox.bubbleRadius === 'number') wl.bubbleRadius = inbox.bubbleRadius;
+    if (inbox.customCss) wl.customCss = inbox.customCss;
+    if (Object.keys(wl).length === 0) {
+      return;
+    }
+    Object.assign(this.#options, wl);
+    this.onWhiteLabel?.(wl);
   }
 
   destroy(): void {
@@ -336,6 +367,9 @@ export class ChatStore {
       rated: undefined,
       replyTo: undefined,
       readBoundary: 0,
+      agentLastReadSequence: 0,
+      agentLastDeliveredSequence: 0,
+      loadingThread: true,
       search: { query: '', running: false, hits: [] },
     });
     this.#socket.subscribe(id);
@@ -357,6 +391,9 @@ export class ChatStore {
       agentTyping: false,
       replyTo: undefined,
       readBoundary: 0,
+      agentLastReadSequence: 0,
+      agentLastDeliveredSequence: 0,
+      loadingThread: false,
       search: { query: '', running: false, hits: [] },
     });
   }
@@ -758,6 +795,21 @@ export class ChatStore {
     }
   }
 
+  /** Asks a human agent to take over from the AI on the active conversation. */
+  async requestHandoff(_messageId?: string): Promise<void> {
+    const id = this.#state.activeId;
+    if (!id) {
+      this.#emit({ type: 'error', data: '当前没有可转接的会话' });
+      return;
+    }
+    try {
+      await this.#api.requestHandoff(id);
+      this.#emit({ type: 'handoff', data: { conversationId: id } });
+    } catch (error) {
+      this.#emit({ type: 'error', data: error instanceof Error ? error.message : '转接人工失败' });
+    }
+  }
+
   /** Mentions that the visitor is composing, throttled to one frame per 3s. */
   notifyTyping(): void {
     const id = this.#state.activeId;
@@ -773,6 +825,33 @@ export class ChatStore {
       this.#socket.sendTyping(id);
     } else {
       void this.#api.typing(id).catch(() => undefined);
+    }
+  }
+
+  /**
+   * 坐席上报送达 / 已读后，推进访客气泡回执；只处理当前打开的会话。
+   */
+  #applyAgentReceipt(event: RealtimeEvent, read: boolean): void {
+    if (event.conversationId !== this.#state.activeId) {
+      return;
+    }
+    const data = event.data as { readerType?: string; sequence?: number } | undefined;
+    if (data?.readerType !== 'AGENT') {
+      return;
+    }
+    const sequence = Number(data.sequence) || 0;
+    if (sequence <= 0) {
+      return;
+    }
+    const patch: Partial<Snapshot> = {};
+    if (sequence > this.#state.agentLastDeliveredSequence) {
+      patch.agentLastDeliveredSequence = sequence;
+    }
+    if (read && sequence > this.#state.agentLastReadSequence) {
+      patch.agentLastReadSequence = sequence;
+    }
+    if (Object.keys(patch).length) {
+      this.#patch(patch);
     }
   }
 
@@ -832,8 +911,15 @@ export class ChatStore {
   }
 
   async #loadMessages(id: string): Promise<void> {
+    // 拉历史期间先占住 loading，避免空列表误画欢迎语。
+    if (this.#state.activeId === id) {
+      this.#patch({ loadingThread: true });
+    }
     try {
       const page = await this.#api.pageMessages(id, { limit: PAGE_SIZE });
+      if (this.#state.activeId !== id) {
+        return;
+      }
       const messages = (page.items ?? []).map(toChatMessage);
       // The server's unread count is what the visitor has not seen, so the
       // boundary sits that many sequences below the tail.
@@ -843,12 +929,22 @@ export class ChatStore {
         messages: mergeMessages(messages, this.#state.messages),
         hasMore: page.hasOlder,
         readBoundary: boundary,
+        loadingThread: false,
+        // 拉历史时同步坐席回执水位，避免只靠推送导致首屏全是「未读」。
+        agentLastReadSequence: Math.max(page.agentLastReadSequence ?? 0, this.#state.agentLastReadSequence),
+        agentLastDeliveredSequence: Math.max(
+          page.agentLastDeliveredSequence ?? 0,
+          this.#state.agentLastDeliveredSequence,
+        ),
       });
       this.#markDelivered();
       if (this.#state.open) {
         void this.#markRead();
       }
     } catch (error) {
+      if (this.#state.activeId === id) {
+        this.#patch({ loadingThread: false });
+      }
       if (error instanceof ApiError && error.isAuthError) {
         await this.#recoverToken();
       }
@@ -879,8 +975,18 @@ export class ChatStore {
       }
       const last = this.#state.messages.filter((message) => message.sequence > 0).at(-1);
       const page = await this.#api.pageMessages(id, { after: last?.sequence ?? 0, limit: PAGE_SIZE });
+      // 即使没有新消息，也要吃到坐席回执水位（坐席刚读完时 items 可能为空）。
+      this.#patch({
+        messages: page.items?.length
+          ? mergeMessages(this.#state.messages, page.items.map(toChatMessage))
+          : this.#state.messages,
+        agentLastReadSequence: Math.max(page.agentLastReadSequence ?? 0, this.#state.agentLastReadSequence),
+        agentLastDeliveredSequence: Math.max(
+          page.agentLastDeliveredSequence ?? 0,
+          this.#state.agentLastDeliveredSequence,
+        ),
+      });
       if (page.items?.length) {
-        this.#patch({ messages: mergeMessages(this.#state.messages, page.items.map(toChatMessage)) });
         this.#markDelivered();
       }
       // 已读仍要求面板打开；送达已在上方独立上报，避免两态粘成一步。
@@ -929,7 +1035,9 @@ export class ChatStore {
           });
         }
         if (message.conversationId === this.#state.activeId) {
-          this.#patch({ messages: mergeMessages(this.#state.messages, [toChatMessage(message)]) });
+          // Drop the transient streaming bubble now that the real AI message has landed.
+          const filtered = this.#state.messages.filter((item) => item.id !== `ai-streaming-${message.conversationId}`);
+          this.#patch({ messages: mergeMessages(filtered, [toChatMessage(message)]) });
           this.#markDelivered();
           if (this.#state.open) {
             void this.#markRead();
@@ -965,6 +1073,38 @@ export class ChatStore {
             ),
           });
         }
+        break;
+      }
+      case 'conversation.aiToken': {
+        // 流式 AI 回复：后端逐字推送 token，前端累加成一个临时气泡，真实消息到达后由 message.created 替换。
+        const token = (event.data as { token?: string } | undefined)?.token;
+        const conversationId = event.conversationId;
+        if (!conversationId || typeof token !== 'string') {
+          break;
+        }
+        if (conversationId !== this.#state.activeId) {
+          break;
+        }
+        const streamId = `ai-streaming-${conversationId}`;
+        const existing = this.#state.messages.find((message) => message.id === streamId);
+        const streamMessage: ChatMessage = existing
+          ? { ...existing, content: existing.content + token }
+          : {
+              id: streamId,
+              localId: streamId,
+              conversationId,
+              senderType: 'AGENT',
+              senderName: 'AI 助手',
+              sequence: 0,
+              messageType: 'TEXT',
+              content: token,
+              attachments: [],
+              createdAt: new Date().toISOString(),
+              delivery: 'SENT',
+              reactions: [],
+              metadata: { ai: true, streaming: true },
+            };
+        this.#patch({ messages: mergeMessages(this.#state.messages, [streamMessage]) });
         break;
       }
       case 'message.updated': {
@@ -1043,7 +1183,8 @@ export class ChatStore {
       }
       case 'conversation.read':
       case 'conversation.delivered': {
-        void this.#resync();
+        // 坐席回执推过来时本地推进水位；访客自己的送达/已读回声不必重拉整页。
+        this.#applyAgentReceipt(event, event.type === 'conversation.read');
         break;
       }
       case 'agent.presence': {

@@ -43,13 +43,15 @@ void main() {
     expect(controller.error, isNull);
   });
 
-  test('signing in exchanges the static token and loads the overview', () async {
+  test('signing in exchanges the static token and loads the overview',
+      () async {
     final controller = build();
     addTearDown(controller.dispose);
 
     final ok = await controller.signIn(
       server: 'relay.example.test',
-      staticToken: 'good-token',
+      email: 'admin@relaydesk.local',
+      password: 'good-token',
     );
 
     expect(ok, isTrue);
@@ -68,12 +70,13 @@ void main() {
 
     final ok = await controller.signIn(
       server: 'relay.example.test',
-      staticToken: 'wrong-token',
+      email: 'admin@relaydesk.local',
+      password: 'wrong-token',
     );
 
     expect(ok, isFalse);
     expect(controller.phase, PlatformPhase.locked);
-    expect(controller.error, '平台管理令牌无效');
+    expect(controller.error, '账号或密码错误');
   });
 
   test('the server address is normalised before it is stored', () async {
@@ -82,7 +85,8 @@ void main() {
 
     await controller.signIn(
       server: '  relay.example.test/  ',
-      staticToken: 'good-token',
+      email: 'admin@relaydesk.local',
+      password: 'good-token',
     );
 
     expect(controller.server, 'https://relay.example.test');
@@ -92,7 +96,8 @@ void main() {
     final controller = build();
     addTearDown(controller.dispose);
 
-    final ok = await controller.signIn(server: '   ', staticToken: 'good-token');
+    final ok = await controller.signIn(
+        server: '   ', email: 'admin@relaydesk.local', password: 'good-token');
 
     expect(ok, isFalse);
     expect(controller.error, '请填写服务器地址');
@@ -152,7 +157,8 @@ void main() {
     addTearDown(controller.dispose);
     await controller.signIn(
       server: 'relay.example.test',
-      staticToken: 'good-token',
+      email: 'admin@relaydesk.local',
+      password: 'good-token',
     );
 
     await controller.signOut();
@@ -168,7 +174,8 @@ void main() {
     addTearDown(controller.dispose);
     await controller.signIn(
       server: 'relay.example.test',
-      staticToken: 'good-token',
+      email: 'admin@relaydesk.local',
+      password: 'good-token',
     );
 
     await controller.refreshTenants();
@@ -206,7 +213,8 @@ void main() {
     addTearDown(controller.dispose);
     await controller.signIn(
       server: 'relay.example.test',
-      staticToken: 'good-token',
+      email: 'admin@relaydesk.local',
+      password: 'good-token',
     );
 
     await controller.openTenant('11111111-1111-1111-1111-111111111111');
@@ -224,7 +232,8 @@ void main() {
     addTearDown(controller.dispose);
     await controller.signIn(
       server: 'relay.example.test',
-      staticToken: 'good-token',
+      email: 'admin@relaydesk.local',
+      password: 'good-token',
     );
     await controller.openTenant(FakePlatformApi.tenantId);
     await settle();
@@ -255,7 +264,8 @@ void main() {
     addTearDown(controller.dispose);
     await controller.signIn(
       server: 'relay.example.test',
-      staticToken: 'good-token',
+      email: 'admin@relaydesk.local',
+      password: 'good-token',
     );
 
     final created = await controller.createTenant(
@@ -280,7 +290,8 @@ void main() {
     addTearDown(controller.dispose);
     await controller.signIn(
       server: 'relay.example.test',
-      staticToken: 'good-token',
+      email: 'admin@relaydesk.local',
+      password: 'good-token',
     );
     await controller.openTenant('11111111-1111-1111-1111-111111111111');
 
@@ -324,7 +335,8 @@ void main() {
     addTearDown(controller.dispose);
     await controller.signIn(
       server: 'relay.example.test',
-      staticToken: 'good-token',
+      email: 'admin@relaydesk.local',
+      password: 'good-token',
     );
     await controller.refreshAiUsage(days: 7);
 
@@ -342,7 +354,8 @@ void main() {
     addTearDown(controller.dispose);
     await controller.signIn(
       server: 'relay.example.test',
-      staticToken: 'good-token',
+      email: 'admin@relaydesk.local',
+      password: 'good-token',
     );
     fake.failWith = jsonResponse(401, <String, dynamic>{
       'code': 'UNAUTHORIZED',
@@ -360,7 +373,8 @@ void main() {
     addTearDown(controller.dispose);
     await controller.signIn(
       server: 'relay.example.test',
-      staticToken: 'good-token',
+      email: 'admin@relaydesk.local',
+      password: 'good-token',
     );
     await settle();
     fake.calls.clear();

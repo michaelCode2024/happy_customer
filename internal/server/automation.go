@@ -260,35 +260,10 @@ func (a *API) maybeAutomationReply(ctx context.Context, tenantID, conversationID
 	}
 	meta := map[string]any{"automation": true, "rule": rule, "handoff": handoff, "senderName": "语聊助手"}
 	if handoff {
-		if paused && assigned {
-			// 旧会话可能只收到「请稍候」；重复点转人工不能静默吞掉，否则访客会以为卡死。
-			name := "人工客服"
-			_ = a.db.QueryRow(ctx, `
-				select coalesce(nullif(ag.display_name,''), '人工客服')
-				  from conversation c
-				  join agent ag on ag.id = c.assignee_id
-				 where c.id = $1`, conversationID).Scan(&name)
-			answer = fmt.Sprintf("客服「%s」已在接待中，请直接描述您的问题。", name)
-			meta["rule"] = "handoff:active"
-			meta["queued"] = false
-		} else {
-			assigneeID, statusLine, handoffErr := a.completeHandoff(ctx, tenantID, conversationID)
-			if handoffErr != nil {
-				_, _ = a.db.Exec(ctx, `delete from automation_delivery where conversation_id=$1 and question_id=$2`, conversationID, q.ID)
-				return true
-			}
-			if answer == "" {
-				answer = "正在为你联系人工客服，请稍候。"
-			}
-			// 把分配结果写进同一条系统消息，避免访客停在「请稍候」看不到下文。
-			if statusLine != "" {
-				answer = strings.TrimSpace(answer) + "\n" + statusLine
-			}
-			meta["queued"] = assigneeID == nil
-			if assigneeID != nil {
-				meta["assigneeId"] = assigneeID.String()
-			}
+		if _, _, err := a.completeHandoff(ctx, tenantID, conversationID); err != nil {
+			_, _ = a.db.Exec(ctx, `delete from automation_delivery where conversation_id=$1 and question_id=$2`, conversationID, q.ID)
 		}
+		return true
 	}
 
 	_, err = a.appendMessage(ctx, tenantID, conversationID, messageInput{AutomationOnly: !handoff && !strings.HasPrefix(rule, "menu:"), AutomationRespectAgent: c.RespectAgent, SenderType: "SYSTEM", MessageType: "TEXT", Content: answer, ClientMessageID: "auto:" + q.ID.String(), Metadata: meta})

@@ -60,7 +60,7 @@ func (d *Dispatcher) Enqueue(ctx context.Context, tenantID uuid.UUID, eventType 
 		insert into webhook_delivery(id, endpoint_id, tenant_id, event_type, payload, status, next_attempt_at)
 		select gen_random_uuid(), e.id, $1, $2::varchar(60), $3, 'PENDING', now()
 		  from webhook_endpoint e
-		 where e.tenant_id = $1 and e.status = 'ACTIVE' and $4::text = any(e.events)`,
+		 where e.tenant_id = $1 and e.status = 'ACTIVE' and $4::text = any(e.events) and exists(select 1 from tenant t join tenant_subscription s on s.tenant_id=t.id where t.id=$1 and t.status='ACTIVE' and s.status='ACTIVE' and (s.service_starts_at is null or s.service_starts_at<=now()) and (s.service_ends_at is null or s.service_ends_at>now()) and s.plan in ('STARTER','GROWTH','ENTERPRISE'))`,
 		tenantID, eventType, body, eventType)
 	return err
 }
@@ -103,7 +103,7 @@ func (d *Dispatcher) drain(ctx context.Context) error {
 		select d.id, d.endpoint_id, d.tenant_id, d.event_type, d.payload, d.attempts, e.url, e.secret
 		  from webhook_delivery d
 		  join webhook_endpoint e on e.id = d.endpoint_id
-		 where d.status = 'PENDING' and d.next_attempt_at <= now()
+		 where d.status = 'PENDING' and d.next_attempt_at <= now() and e.status='ACTIVE' and exists(select 1 from tenant t join tenant_subscription s on s.tenant_id=t.id where t.id=d.tenant_id and t.status='ACTIVE' and s.status='ACTIVE' and (s.service_starts_at is null or s.service_starts_at<=now()) and (s.service_ends_at is null or s.service_ends_at>now()) and s.plan in ('STARTER','GROWTH','ENTERPRISE'))
 		 order by d.next_attempt_at
 		 limit 20
 		   for update of d skip locked`)

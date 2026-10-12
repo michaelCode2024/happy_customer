@@ -1,3 +1,5 @@
+import '../ui/manual_quota_page.dart';
+import 'package:relaydesk_agent_console/src/platform/create_agent_dialog.dart';
 import 'package:flutter/material.dart';
 
 import 'package:relaydesk_agent_console/src/platform/platform_controller.dart';
@@ -74,16 +76,22 @@ class TenantDetailPane extends StatelessWidget {
           trailing: Row(
             children: <Widget>[
               TextButton(
-                onPressed: busy ? null : () => _changePlan(context),
-                child: const Text('调整套餐'),
+                onPressed: busy || !controller.isSuperAdmin
+                    ? null
+                    : () => _changePlan(context),
+                child: const Text('分配套餐'),
               ),
               TextButton(
-                onPressed: busy ? null : () => _extendTrial(context),
+                onPressed: busy ||
+                        !controller.isSuperAdmin ||
+                        tenant.subscription.plan != 'TRIAL'
+                    ? null
+                    : () => _changePlan(context),
                 child: const Text('延长试用'),
               ),
               if (tenant.isSuspended)
                 TextButton(
-                  onPressed: busy
+                  onPressed: busy || !controller.isSuperAdmin
                       ? null
                       : () => _setStatus(context, 'ACTIVE'),
                   child: const Text('恢复使用'),
@@ -93,7 +101,9 @@ class TenantDetailPane extends StatelessWidget {
                   style: TextButton.styleFrom(
                     foregroundColor: theme.colorScheme.error,
                   ),
-                  onPressed: busy ? null : () => _setStatus(context, 'SUSPENDED'),
+                  onPressed: busy || !controller.isSuperAdmin
+                      ? null
+                      : () => _setStatus(context, 'SUSPENDED'),
                   child: const Text('停用'),
                 ),
             ],
@@ -113,7 +123,8 @@ class TenantDetailPane extends StatelessWidget {
               _Metric(label: '状态', value: tenantStatusLabel(tenant.status)),
               _Metric(
                 label: '坐席上限',
-                value: '${tenant.agents.where((a) => !a.isSystemAccount).length}'
+                value:
+                    '${tenant.agents.where((a) => !a.isSystemAccount).length}'
                     ' / ${tenant.subscription.seatLimit}',
               ),
               _Metric(
@@ -144,10 +155,30 @@ class TenantDetailPane extends StatelessWidget {
         const SizedBox(height: 16),
         _Section(
           title: '坐席（${tenant.agents.where((a) => !a.isSystemAccount).length}）',
-          trailing: TextButton(
-            onPressed: busy ? null : () => _resetOwner(context),
-            child: const Text('重置管理员密码'),
-          ),
+          trailing: Wrap(spacing: 8, children: [
+            TextButton(
+                onPressed: busy || !controller.isSuperAdmin
+                    ? null
+                    : () => _resetOwner(context),
+                child: const Text('重置客服主管密码')),
+            FilledButton.icon(
+                onPressed: busy || !controller.isSuperAdmin
+                    ? null
+                    : () async {
+                        final created = await showDialog<bool>(
+                            context: context,
+                            barrierDismissible: false,
+                            builder: (_) => CreateAgentDialog(
+                                controller: controller, tenantId: tenant.id));
+                        if (created == true && context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content: Text('账户已建立，请在企业后台分配客服入口。')));
+                        }
+                      },
+                icon: const Icon(Icons.person_add_alt, size: 18),
+                label: const Text('建立账户')),
+          ]),
           child: Column(
             children: <Widget>[
               for (final agent in tenant.agents)
@@ -176,7 +207,8 @@ class TenantDetailPane extends StatelessWidget {
                   title: Text(
                     agent.displayName.isEmpty ? agent.email : agent.displayName,
                   ),
-                   subtitle: Text('${agent.email} · ${agentRoleLabel(agent.role)}'),
+                  subtitle:
+                      Text('${agent.email} · ${agentRoleLabel(agent.role)}'),
                   trailing: _StatusDot(
                     label: agent.status == 'DISABLED'
                         ? '停用'
@@ -200,10 +232,10 @@ class TenantDetailPane extends StatelessWidget {
                   contentPadding: EdgeInsets.zero,
                   leading: const Icon(Icons.web_asset_outlined, size: 18),
                   title: Text(inbox.name),
-                   subtitle: Text('入口公钥：${inbox.publicKey}'),
+                  subtitle: Text('入口公钥：${inbox.publicKey}'),
                   trailing: TextButton(
                     onPressed: () =>
-                         copyToClipboard(context, inbox.publicKey, '入口公钥'),
+                        copyToClipboard(context, inbox.publicKey, '入口公钥'),
                     child: const Text('复制'),
                   ),
                 ),
@@ -215,22 +247,7 @@ class TenantDetailPane extends StatelessWidget {
   }
 
   Future<void> _changePlan(BuildContext context) async {
-    final selection = await showDialog<_PlanChange>(
-      context: context,
-      builder: (context) => _PlanDialog(tenant: tenant),
-    );
-    if (selection == null || !context.mounted) {
-      return;
-    }
-    final ok = await controller.updateTenant(
-      plan: selection.plan,
-      seatLimit: selection.seatLimit,
-      monthlyMessageLimit: selection.messageLimit,
-    );
-    if (!context.mounted) {
-      return;
-    }
-    _report(context, ok, '套餐已更新', '更新失败');
+    await assignTenantPlan(context, controller, tenant);
   }
 
   Future<void> _extendTrial(BuildContext context) async {
@@ -290,7 +307,7 @@ class TenantDetailPane extends StatelessWidget {
 
   Future<void> _resetOwner(BuildContext context) async {
     final owner = tenant.agents.firstWhere(
-      (agent) => agent.role == 'OWNER',
+      (agent) => agent.role == 'SUPERVISOR',
       orElse: () => tenant.agents.isEmpty
           ? const TenantAgent(
               id: '',
@@ -308,7 +325,7 @@ class TenantDetailPane extends StatelessWidget {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('重置管理员密码'),
+        title: const Text('重置客服主管密码'),
         content: Text(
           '将为 ${owner.email} 生成新密码，并注销该账号的全部登录状态。'
           '旧密码立即失效，新密码只显示一次。',
@@ -381,21 +398,21 @@ class _Section extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withAlpha(80),
-        borderRadius: BorderRadius.circular(12),
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: theme.dividerColor.withAlpha(80)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Row(
+          Wrap(
+            spacing: 12,
+            runSpacing: 4,
             children: <Widget>[
-              Expanded(
-                child: Text(
-                  title,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
+              Text(
+                title,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
                 ),
               ),
               if (trailing != null) trailing!,
@@ -494,7 +511,8 @@ class _UsageChart extends StatelessWidget {
     final totalIn = ordered.fold<int>(0, (sum, day) => sum + day.messagesIn);
     final totalOut = ordered.fold<int>(0, (sum, day) => sum + day.messagesOut);
     final totalAi = ordered.fold<int>(0, (sum, day) => sum + day.aiAnswered);
-    final totalHandoff = ordered.fold<int>(0, (sum, day) => sum + day.aiHandoff);
+    final totalHandoff =
+        ordered.fold<int>(0, (sum, day) => sum + day.aiHandoff);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -517,13 +535,15 @@ class _UsageChart extends StatelessWidget {
                         children: <Widget>[
                           Expanded(
                             child: FractionallySizedBox(
+                              widthFactor: ordered.length < 7 ? 0.08 : 0.7,
                               heightFactor: day.total == 0
                                   ? 0.02
                                   : (day.total / peak).clamp(0.02, 1.0),
                               alignment: Alignment.bottomCenter,
                               child: Container(
                                 decoration: BoxDecoration(
-                                  color: theme.colorScheme.primary.withAlpha(140),
+                                  color:
+                                      theme.colorScheme.primary.withAlpha(140),
                                   borderRadius: const BorderRadius.vertical(
                                     top: Radius.circular(2),
                                   ),
@@ -561,132 +581,18 @@ class _UsageChart extends StatelessWidget {
   }
 }
 
-class _PlanChange {
-  const _PlanChange({
-    required this.plan,
-    required this.seatLimit,
-    required this.messageLimit,
-  });
-
-  final String plan;
-  final int seatLimit;
-  final int messageLimit;
-}
-
-/// The plan editor. Seat and message limits are pre-filled from the chosen
-/// plan's defaults but stay editable, because a sales deal routinely means
-/// "GROWTH, but 25 seats".
-class _PlanDialog extends StatefulWidget {
-  const _PlanDialog({required this.tenant});
-
-  final TenantDetail tenant;
-
-  @override
-  State<_PlanDialog> createState() => _PlanDialogState();
-}
-
-class _PlanDialogState extends State<_PlanDialog> {
-  late String _plan = widget.tenant.subscription.plan.isEmpty
-      ? 'TRIAL'
-      : widget.tenant.subscription.plan;
-  late final TextEditingController _seats = TextEditingController(
-    text: '${widget.tenant.subscription.seatLimit}',
-  );
-  late final TextEditingController _messages = TextEditingController(
-    text: '${widget.tenant.subscription.monthlyMessageLimit}',
-  );
-
-  @override
-  void dispose() {
-    _seats.dispose();
-    _messages.dispose();
-    super.dispose();
+/// 保存成功后关闭；失败保留企业、套餐与自定义额度，允许重试。
+Future<bool> assignTenantPlan(
+    BuildContext context, PlatformController controller, TenantDetail tenant,
+    {String? initialPlan}) async {
+  final ok = await openQuotaEditor(context, controller, tenant.id,
+      initialPlan: initialPlan);
+  if (ok) {
+    await controller.openTenant(tenant.id);
+    await controller.refreshTenants();
+    await controller.refreshOverview();
   }
-
-  void _applyDefaults(String plan) {
-    setState(() {
-      _plan = plan;
-      final limits = switch (plan) {
-        'STARTER' => (3, 5000),
-        'GROWTH' => (10, 50000),
-        'ENTERPRISE' => (100, 1000000),
-        _ => (2, 1000),
-      };
-      _seats.text = '${limits.$1}';
-      _messages.text = '${limits.$2}';
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('调整套餐'),
-      content: SizedBox(
-        width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            DropdownButtonFormField<String>(
-              value: _plan,
-              decoration: const InputDecoration(labelText: '套餐'),
-              items: const <DropdownMenuItem<String>>[
-                 DropdownMenuItem<String>(value: 'TRIAL', child: Text('试用版')),
-                DropdownMenuItem<String>(
-                  value: 'STARTER',
-                   child: Text('入门版'),
-                ),
-                 DropdownMenuItem<String>(value: 'GROWTH', child: Text('成长版')),
-                DropdownMenuItem<String>(
-                  value: 'ENTERPRISE',
-                   child: Text('企业版'),
-                ),
-              ],
-              onChanged: (value) {
-                if (value != null) {
-                  _applyDefaults(value);
-                }
-              },
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _seats,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: '坐席上限',
-                helperText: '留空或 0 表示按套餐默认值',
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _messages,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: '月消息上限',
-                helperText: '留空或 0 表示按套餐默认值',
-              ),
-            ),
-          ],
-        ),
-      ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(
-            _PlanChange(
-              plan: _plan,
-              seatLimit: int.tryParse(_seats.text.trim()) ?? 0,
-              messageLimit: int.tryParse(_messages.text.trim()) ?? 0,
-            ),
-          ),
-          child: const Text('保存'),
-        ),
-      ],
-    );
-  }
+  return ok;
 }
 
 class _DaysDialog extends StatefulWidget {

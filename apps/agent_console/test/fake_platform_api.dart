@@ -88,7 +88,7 @@ class FakePlatformApi {
       'available': false,
     },
     this.metaBody = const <String, dynamic>{
-      'product': 'RelayDesk 连语客服',
+      'product': '语聊客服',
       'version': '0.1.0',
       'model': 'test-model',
       'aiProvider': 'none',
@@ -111,6 +111,7 @@ class FakePlatformApi {
       'initialPassword': 'generated-secret',
     },
     this.staticToken = 'good-token',
+    this.platformRole = 'SUPER_ADMIN',
   });
 
   static const String tenantId = '11111111-1111-1111-1111-111111111111';
@@ -125,6 +126,28 @@ class FakePlatformApi {
   /// The token `/token` accepts. Anything else is rejected the way the server
   /// rejects it.
   String staticToken;
+  final String platformRole;
+  Map<String, dynamic> get quotaBody => {
+        'tenantId': tenantId,
+        'name': '演示科技',
+        'slug': 'demo',
+        'owner': '负责人',
+        'plan': 'GROWTH',
+        'status': 'ACTIVE',
+        'tenantStatus': 'ACTIVE',
+        'seatLimit': 10,
+        'monthlyMessageLimit': 50000,
+        'monthlyAiLimit': 5000,
+        'usedSeats': 3,
+        'usedMessages': 12000,
+        'usedAi': 100,
+        'messageBonus': 0,
+        'aiBonus': 0,
+        'version': '2026-10-12T00:00:00Z',
+        'serviceStartsAt': null,
+        'serviceEndsAt': null,
+        'trialEndsAt': null
+      };
 
   /// When set, every call answers with this instead. Used for the 401 and
   /// unreachable-server paths.
@@ -133,6 +156,7 @@ class FakePlatformApi {
   /// Requests seen, as `METHOD /path`, so a test can assert that a screen pulled
   /// the data it claims to.
   final List<String> calls = <String>[];
+  final List<Map<String, dynamic>> tenantUpdates = [];
 
   /// Builds a real [PlatformApi] whose transport answers from this fake.
   PlatformApi buildClient() => PlatformApi(
@@ -152,12 +176,17 @@ class FakePlatformApi {
     // Routed on method as well as path: `/tenants` is a list on GET and a
     // provisioning call on POST, and answering the wrong one would make a
     // broken create look like a successful list.
-    if (path == '/api/v1/platform/token' && method == 'POST') {
+    if (path == '/api/v1/platform/tenants/$tenantId/quota') {
+      if (method == 'GET') return jsonResponse(200, quotaBody);
+      tenantUpdates.add(jsonDecode(request.body) as Map<String, dynamic>);
+      return jsonResponse(200, {'status': 'OK', 'quota': quotaBody});
+    }
+    if (path == '/api/v1/platform/login' && method == 'POST') {
       final body = jsonDecode(request.body) as Map<String, dynamic>;
-      if (body['token'] != staticToken) {
+      if (body['password'] != staticToken) {
         return jsonResponse(401, <String, dynamic>{
           'code': 'PLATFORM_TOKEN_INVALID',
-          'message': '平台管理令牌无效',
+          'message': '账号或密码错误',
         });
       }
       return jsonResponse(200, <String, dynamic>{
@@ -166,6 +195,16 @@ class FakePlatformApi {
         'label': 'platform-console',
       });
     }
+    if (path == '/api/v1/platform/me')
+      return jsonResponse(
+          200, {'displayName': '测试超级管理员', 'role': platformRole});
+    if (path == '/api/v1/platform/quotas')
+      return jsonResponse(200, {
+        'items': [quotaBody],
+        'hasMore': false
+      });
+    if (path == '/api/v1/platform/quota-adjustments')
+      return jsonResponse(200, {'items': [], 'hasMore': false});
     if (path == '/api/v1/platform/overview') {
       return jsonResponse(200, overviewBody);
     }
@@ -185,6 +224,7 @@ class FakePlatformApi {
       return jsonResponse(200, tenantBody);
     }
     if (path == '/api/v1/platform/tenants/$tenantId' && method == 'PATCH') {
+      tenantUpdates.add(jsonDecode(request.body) as Map<String, dynamic>);
       return jsonResponse(200, <String, dynamic>{'status': 'OK'});
     }
     if (path == '/api/v1/platform/tenants/$tenantId/trial') {

@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/relaydesk/relaydesk/internal/auth"
 	"github.com/relaydesk/relaydesk/internal/realtime"
 )
 
@@ -26,6 +28,12 @@ type inboxContext struct {
 	AIHandoff       string
 	WorkingHours    map[string]any
 	AgentsAvailable int
+	// White-label branding delivered to the visitor widget on bootstrap.
+	LogoURL     *string
+	AvatarURL   *string
+	FontFamily  *string
+	BubbleRadius *int
+	CustomCSS   *string
 }
 
 func (a *API) loadInbox(ctx handlerContext, publicKey string) (inboxContext, error) {
@@ -37,7 +45,8 @@ func (a *API) loadInbox(ctx handlerContext, publicKey string) (inboxContext, err
 		       (select count(*)::int from agent_presence ap
 		          join agent ag on ag.id = ap.agent_id
 		          join agent_inbox ai on ai.agent_id = ag.id
-		         where ai.inbox_id = i.id and ap.status = 'ONLINE' and ag.status = 'ACTIVE')
+		         where ai.inbox_id = i.id and ap.status = 'ONLINE' and ag.status = 'ACTIVE'),
+		       i.logo_url, i.avatar_url, i.font_family, i.bubble_radius, i.custom_css
 		  from inbox i
 		  left join ai_setting s on s.inbox_id = i.id
 		  left join lateral (
@@ -45,7 +54,8 @@ func (a *API) loadInbox(ctx handlerContext, publicKey string) (inboxContext, err
 		  ) r on true
 		 where i.public_key = $1 and i.status = 'ACTIVE'`, publicKey).
 		Scan(&inbox.ID, &inbox.TenantID, &inbox.Name, &inbox.WelcomeMessage, &inbox.OfflineMessage,
-			&inbox.PublicKey, &inbox.AIEnabled, &inbox.AIHandoff, &inbox.WorkingHours, &inbox.AgentsAvailable)
+			&inbox.PublicKey, &inbox.AIEnabled, &inbox.AIHandoff, &inbox.WorkingHours, &inbox.AgentsAvailable,
+			&inbox.LogoURL, &inbox.AvatarURL, &inbox.FontFamily, &inbox.BubbleRadius, &inbox.CustomCSS)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return inbox, errors.New("客服入口不存在或已停用")
 	}
@@ -67,6 +77,9 @@ func (a *API) publish(ctx handlerContext, channels []string, event realtime.Even
 }
 
 func (a *API) notifyWebhook(ctx handlerContext, tenantID uuid.UUID, eventType string, payload any) {
+	if a.webhooks == nil || !a.tenantHasFeature(ctx, tenantID, "integrations") {
+		return
+	}
 	if err := a.webhooks.Enqueue(ctx, tenantID, eventType, payload); err != nil {
 		a.logger.Warn("webhook enqueue failed", "error", err, "event", eventType)
 	}
@@ -104,12 +117,9 @@ func (a *API) conversationChannels(ctx handlerContext, conversationID uuid.UUID)
 	return channels
 }
 
-// agentOnlyChannels is conversationChannels minus the visitor. Internal notes
-// travel down these and nothing else: the visitor channel is precisely the
-// stream a visitor socket subscribes to, so a note published there is a note
-// leaked.
+// agentOnlyChannels 只使用坐席与入口频道。会话频道也被访客订阅，不能承载内部备注。
 func (a *API) agentOnlyChannels(ctx handlerContext, conversationID uuid.UUID) []string {
-	channels := []string{realtime.ConversationChannel(conversationID.String())}
+	channels := []string{}
 	var inboxID uuid.UUID
 	var assignee *uuid.UUID
 	if a.db.QueryRow(ctx, `select inbox_id, assignee_id from conversation where id=$1`, conversationID).
@@ -165,3 +175,9 @@ func nowUTC() time.Time { return time.Now().UTC() }
 func jsonBytes(value any) ([]byte, error) { return json.Marshal(value) }
 
 func decodeJSONBytes(payload []byte, target any) error { return json.Unmarshal(payload, target) }
+
+func (a *API) assetsChanged(r *http.Request, p auth.Principal) {
+	if a.bus != nil {
+		a.publish(r.Context(), []string{realtime.TenantChannel(p.TenantID.String())}, realtime.Event{Type: "support.assets.updated"})
+	}
+}

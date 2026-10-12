@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
+import 'package:relaydesk_agent_console/src/ui/workspace_layout.dart';
 
 /// 傻瓜式首页：先告诉人「现在该做什么」，再给数字和最近会话。
 class OverviewPage extends StatelessWidget {
@@ -30,8 +31,8 @@ class OverviewPage extends StatelessWidget {
         builder: (context, _) {
           final scheme = Theme.of(context).colorScheme;
           final theme = Theme.of(context);
-          final unread = workbench.conversations
-              .fold<int>(0, (n, c) => n + c.agentUnread);
+          final unread =
+              workbench.conversations.fold<int>(0, (n, c) => n + c.agentUnread);
           final greeting = name.trim().isEmpty ? '同事' : name.trim();
 
           return LayoutBuilder(builder: (context, constraints) {
@@ -42,7 +43,7 @@ class OverviewPage extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '$greeting，今天先做这些',
+                    '今天，也让服务更近一步。',
                     style: theme.textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.w700,
                       letterSpacing: -0.2,
@@ -50,7 +51,7 @@ class OverviewPage extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    '按顺序点就行：有客户先接待，网站还没挂上就去接入。',
+                    '$greeting，关注客户体验，也关注团队的每一次回应。',
                     style: TextStyle(
                       color: scheme.onSurfaceVariant,
                       height: 1.45,
@@ -80,7 +81,7 @@ class OverviewPage extends StatelessWidget {
                       children: [
                         if (onIntegrations != null)
                           _SecondaryActionChip(
-                            label: '① 把聊天挂到网站',
+                            label: '渠道接入',
                             hint: '复制一段代码',
                             icon: Icons.code_rounded,
                             onTap: onIntegrations!,
@@ -88,7 +89,7 @@ class OverviewPage extends StatelessWidget {
                           ),
                         if (onAutomation != null)
                           _SecondaryActionChip(
-                            label: '② 设欢迎语 / 自动回复',
+                            label: '自动接待',
                             hint: '没人时也能应答',
                             icon: Icons.auto_awesome_rounded,
                             onTap: onAutomation!,
@@ -96,7 +97,7 @@ class OverviewPage extends StatelessWidget {
                           ),
                         if (onEnterprise != null)
                           _SecondaryActionChip(
-                            label: '③ 加同事账号',
+                            label: '团队成员',
                             hint: '多人一起接待',
                             icon: Icons.person_add_alt_1_rounded,
                             onTap: onEnterprise!,
@@ -106,29 +107,35 @@ class OverviewPage extends StatelessWidget {
                     ),
                   ],
                   const SizedBox(height: 24),
-                  Row(
-                    children: [
-                      _StatPill(
-                        label: '会话',
-                        value: '${workbench.conversations.length}',
-                        scheme: scheme,
-                      ),
-                      const SizedBox(width: 10),
-                      _StatPill(
-                        label: '待领取',
-                        value: '${workbench.queued}',
-                        scheme: scheme,
-                        hot: workbench.queued > 0,
-                      ),
-                      const SizedBox(width: 10),
-                      _StatPill(
-                        label: '未读',
-                        value: '$unread',
-                        scheme: scheme,
-                        hot: unread > 0,
-                      ),
-                    ],
-                  ),
+                  LayoutBuilder(builder: (context, box) {
+                    final columns = box.maxWidth < 640 ? 1 : 3;
+                    final width = (box.maxWidth - (columns - 1) * 16) / columns;
+                    return Wrap(spacing: 16, runSpacing: 16, children: [
+                      for (final metric in [
+                        (
+                          '当前已加载会话',
+                          '${workbench.conversations.length}',
+                          Icons.forum_outlined
+                        ),
+                        (
+                          '待接待客户',
+                          '${workbench.queued}',
+                          Icons.schedule_outlined
+                        ),
+                        (
+                          '已加载会话未读消息',
+                          '$unread',
+                          Icons.mark_chat_unread_outlined
+                        ),
+                      ])
+                        SizedBox(
+                            width: width,
+                            child: WorkspaceKpiCard(
+                                label: metric.$1,
+                                value: metric.$2,
+                                icon: metric.$3)),
+                    ]);
+                  }),
                   const SizedBox(height: 28),
                   Row(
                     children: [
@@ -154,8 +161,7 @@ class OverviewPage extends StatelessWidget {
                         style: TextStyle(color: scheme.error),
                       ),
                     ),
-                  if (!workbench.loadingList &&
-                      workbench.conversations.isEmpty)
+                  if (!workbench.loadingList && workbench.conversations.isEmpty)
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(
@@ -170,8 +176,7 @@ class OverviewPage extends StatelessWidget {
                           Icon(Icons.forum_outlined,
                               size: 32, color: scheme.outline),
                           const SizedBox(height: 12),
-                          Text('还没有客户来过',
-                              style: theme.textTheme.titleSmall),
+                          Text('还没有客户来过', style: theme.textTheme.titleSmall),
                           const SizedBox(height: 6),
                           Text(
                             isAdmin
@@ -242,8 +247,9 @@ class OverviewPage extends StatelessWidget {
                                       padding: const EdgeInsets.symmetric(
                                           horizontal: 8, vertical: 2),
                                       decoration: BoxDecoration(
-                                        color: scheme.error,
-                                        borderRadius: BorderRadius.circular(999),
+                                        color: scheme.primary,
+                                        borderRadius:
+                                            BorderRadius.circular(999),
                                       ),
                                       child: Text(
                                         '${entry.value.agentUnread}',
@@ -298,7 +304,8 @@ class _PrimaryActionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Material(
-      color: primary ? scheme.primary : scheme.surface,
+      color:
+          primary ? scheme.primaryContainer.withOpacity(.45) : scheme.surface,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
@@ -308,9 +315,7 @@ class _PrimaryActionCard extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(20, 20, 18, 20),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
-            border: primary
-                ? null
-                : Border.all(color: scheme.outlineVariant),
+            border: primary ? null : Border.all(color: scheme.outlineVariant),
           ),
           child: Row(
             children: [
@@ -325,7 +330,7 @@ class _PrimaryActionCard extends StatelessWidget {
                 ),
                 child: Icon(
                   icon,
-                  color: primary ? Colors.white : scheme.primary,
+                  color: scheme.primary,
                 ),
               ),
               const SizedBox(width: 16),
@@ -337,7 +342,7 @@ class _PrimaryActionCard extends StatelessWidget {
                       title,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w700,
-                            color: primary ? Colors.white : scheme.onSurface,
+                            color: scheme.onSurface,
                           ),
                     ),
                     const SizedBox(height: 4),
@@ -346,7 +351,7 @@ class _PrimaryActionCard extends StatelessWidget {
                       style: TextStyle(
                         height: 1.4,
                         color: primary
-                            ? Colors.white.withOpacity(0.88)
+                            ? scheme.onSurfaceVariant
                             : scheme.onSurfaceVariant,
                       ),
                     ),
@@ -355,7 +360,7 @@ class _PrimaryActionCard extends StatelessWidget {
               ),
               Icon(
                 Icons.arrow_forward_rounded,
-                color: primary ? Colors.white : scheme.outline,
+                color: scheme.primary,
               ),
             ],
           ),
@@ -426,56 +431,6 @@ class _SecondaryActionChip extends StatelessWidget {
               ],
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _StatPill extends StatelessWidget {
-  const _StatPill({
-    required this.label,
-    required this.value,
-    required this.scheme,
-    this.hot = false,
-  });
-
-  final String label;
-  final String value;
-  final ColorScheme scheme;
-  final bool hot;
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: hot
-              ? scheme.errorContainer.withOpacity(0.55)
-              : scheme.surfaceContainerHighest.withOpacity(0.7),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                color: hot ? scheme.error : scheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w700,
-                color: hot ? scheme.error : scheme.onSurface,
-              ),
-            ),
-          ],
         ),
       ),
     );

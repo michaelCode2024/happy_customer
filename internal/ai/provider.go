@@ -34,6 +34,10 @@ type Provider interface {
 	// Generate is Complete plus token accounting, so per-tenant spend can be
 	// recorded on every ai_interaction row.
 	Generate(ctx context.Context, messages []Message) (string, Usage, error)
+	// GenerateWithTools runs a chat completion that may emit tool calls.
+	// The caller supplies tool definitions; the provider dispatches them and
+	// loops until the model returns plain text or maxToolRounds is reached.
+	GenerateWithTools(ctx context.Context, messages []Message, tools []Tool, maxToolRounds int) (string, Usage, error)
 	// Stream delivers the answer incrementally. A nil channel with a nil error
 	// means the provider cannot stream and the caller should fall back to
 	// Generate.
@@ -79,6 +83,10 @@ func (p *disabledProvider) Complete(context.Context, []Message) (string, error) 
 }
 
 func (p *disabledProvider) Generate(context.Context, []Message) (string, Usage, error) {
+	return "", Usage{}, p.err()
+}
+
+func (p *disabledProvider) GenerateWithTools(context.Context, []Message, []Tool, int) (string, Usage, error) {
 	return "", Usage{}, p.err()
 }
 

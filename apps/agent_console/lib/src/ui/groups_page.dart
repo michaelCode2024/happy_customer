@@ -5,6 +5,7 @@ import '../util/message_alert_stub.dart'
 import 'package:relaydesk_agent_console/src/util/group_window_stub.dart'
     if (dart.library.html) 'package:relaydesk_agent_console/src/util/group_window_web.dart';
 import 'package:flutter/material.dart';
+import 'package:relaydesk_agent_console/src/ui/create_group_dialog.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -179,94 +180,28 @@ class _GroupsPageState extends State<GroupsPage> {
   }
 
   Future<void> create() async {
-    final name = TextEditingController();
-    String kind = 'INTERNAL',
-        inbox = widget.session.inboxes.isEmpty
-            ? ''
-            : widget.session.inboxes.first.id;
-    String? failure;
-    bool busy = false;
-    await showDialog<void>(
+    final id = await showDialog<String>(
         context: context,
         barrierDismissible: false,
-        builder: (ctx) => StatefulBuilder(
-            builder: (ctx, update) => AlertDialog(
-                    title: const Text('创建群聊'),
-                    content: SizedBox(
-                        width: 420,
-                        child:
-                            Column(mainAxisSize: MainAxisSize.min, children: [
-                          if (failure != null)
-                            Text(failure!,
-                                style: const TextStyle(color: Colors.red)),
-                          TextField(
-                              controller: name,
-                              maxLength: 120,
-                              decoration:
-                                  const InputDecoration(labelText: '群名称')),
-                          DropdownButtonFormField<String>(
-                              value: kind,
-                              items: const [
-                                DropdownMenuItem(
-                                    value: 'INTERNAL',
-                                    child: Text('内部协作群 · 企业成员')),
-                                DropdownMenuItem(
-                                    value: 'SERVICE',
-                                    child: Text('客户服务群 · 客户与客服'))
-                              ],
-                              onChanged:
-                                  busy ? null : (v) => update(() => kind = v!),
-                              decoration:
-                                  const InputDecoration(labelText: '群类型')),
-                          if (kind == 'SERVICE')
-                            DropdownButtonFormField<String>(
-                                value: inbox.isEmpty ? null : inbox,
-                                isExpanded: true,
-                                items: widget.session.inboxes
-                                    .map((i) => DropdownMenuItem(
-                                        value: i.id, child: Text(i.name)))
-                                    .toList(),
-                                onChanged: busy
-                                    ? null
-                                    : (v) => update(() => inbox = v!),
-                                decoration:
-                                    const InputDecoration(labelText: '客服入口')),
-                          const SizedBox(height: 12),
-                          const Text('创建后在群成员中添加同事，客户服务群可生成客户邀请链接。')
-                        ])),
-                    actions: [
-                      TextButton(
-                          onPressed: busy ? null : () => Navigator.pop(ctx),
-                          child: const Text('取消')),
-                      FilledButton(
-                          onPressed: busy
-                              ? null
-                              : () async {
-                                  update(() => busy = true);
-                                  try {
-                                    final result = await widget.session.api
-                                        .groupRequest('POST', '', body: {
-                                      'name': name.text.trim(),
-                                      'kind': kind,
-                                      'inboxId': inbox,
-                                      'agentIds': []
-                                    });
-                                    if (ctx.mounted) {
-                                      Navigator.pop(ctx);
-                                    }
-                                    selected = result['id'] as String;
-                                    await refresh();
-                                  } catch (e) {
-                                    if (ctx.mounted) {
-                                      update(() => failure = e.toString());
-                                    }
-                                  } finally {
-                                    if (ctx.mounted) update(() => busy = false);
-                                  }
-                                },
-                          child: Text(busy ? '创建中…' : '创建群聊'))
-                    ])));
-    name.dispose();
+        builder: (_) => CreateGroupDialog(
+            inboxes: widget.session.inboxes,
+            onCreate: (payload) async {
+              final result = await widget.session.api
+                  .groupRequest('POST', '', body: payload);
+              return result['id'] as String;
+            }));
+    if (id != null && mounted) {
+      setState(() {
+        selected = id;
+        messages = [];
+        members = [];
+        draft.clear();
+        search.clear();
+        pendingContent = null;
+        pendingId = null;
+      });
+      await refresh();
+    }
   }
 
   Future<void> invite() async {
@@ -629,12 +564,23 @@ class _GroupsPageState extends State<GroupsPage> {
                     for (final g in groups)
                       ListTile(
                           selected: g['id'] == selected,
-                          leading: const Icon(Icons.groups_outlined),
+                          selectedTileColor:
+                              Theme.of(context).colorScheme.primaryContainer,
+                          leading: CircleAvatar(
+                              backgroundColor: Theme.of(context)
+                                  .colorScheme
+                                  .primaryContainer,
+                              child: Icon(Icons.groups_outlined,
+                                  color:
+                                      Theme.of(context).colorScheme.primary)),
                           title: Text('${g['name']}'),
                           subtitle: Text(
                               '${g['kind'] == 'INTERNAL' ? '内部协作' : '客户服务'} · ${g['memberCount']}人${g['dissolved'] == true ? ' · 已解散' : g['archived'] == true ? ' · 已归档' : ''}'),
                           trailing: (g['unread'] as num) > 0
-                              ? Badge(label: Text('${g['unread']}'))
+                              ? Badge(
+                                  backgroundColor:
+                                      Theme.of(context).colorScheme.primary,
+                                  label: Text('${g['unread']}'))
                               : null,
                           onTap: () {
                             setState(() {
@@ -664,10 +610,6 @@ class _GroupsPageState extends State<GroupsPage> {
                   onPressed:
                       group?['archived'] == true ? null : () => callWindow(),
                   icon: const Icon(Icons.call_outlined)),
-              IconButton(
-                  tooltip: '群成员',
-                  onPressed: manage,
-                  icon: const Icon(Icons.group_outlined)),
               PopupMenuButton<String>(
                   tooltip: '更多群聊操作',
                   onSelected: (action) {
@@ -705,10 +647,38 @@ class _GroupsPageState extends State<GroupsPage> {
                                   style: TextStyle(color: Colors.red))),
                       ])
             ])),
+        Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: Align(
+                alignment: Alignment.centerLeft,
+                child: Wrap(spacing: 8, runSpacing: 8, children: [
+                  OutlinedButton.icon(
+                      onPressed: manage,
+                      icon: const Icon(Icons.group_outlined, size: 18),
+                      label: const Text('群成员')),
+                  if (owner &&
+                      group?['kind'] == 'SERVICE' &&
+                      group?['archived'] != true)
+                    FilledButton.tonalIcon(
+                        onPressed: invite,
+                        icon: const Icon(Icons.link, size: 18),
+                        label: const Text('邀请客户')),
+                ]))),
         if ((group?['announcement'] ?? '') != '')
-          Padding(
+          Container(
+              margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
               padding: const EdgeInsets.all(12),
-              child: Text('群公告：${group?['announcement']}')),
+              decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primaryContainer,
+                  border: Border.all(
+                      color: Theme.of(context).colorScheme.outlineVariant),
+                  borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                Icon(Icons.campaign_outlined,
+                    color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 10),
+                Expanded(child: Text('群公告：${group?['announcement']}')),
+              ])),
         if (error != null)
           Padding(
               padding: const EdgeInsets.all(12),
@@ -753,9 +723,13 @@ class _GroupsPageState extends State<GroupsPage> {
                                   decoration: BoxDecoration(
                                       color: m['actorId'] ==
                                               widget.session.agent?.id
-                                          ? const Color(0xffe5edff)
-                                          : Colors.white,
-                                      borderRadius: BorderRadius.circular(8)),
+                                          ? Theme.of(context)
+                                              .colorScheme
+                                              .primaryContainer
+                                          : Theme.of(context)
+                                              .colorScheme
+                                              .surfaceContainerHighest,
+                                      borderRadius: BorderRadius.circular(12)),
                                   child: SelectableText(m['recalled'] == true
                                       ? '该消息已被撤回'
                                       : '${m['content']}')),
@@ -797,8 +771,71 @@ class _GroupsPageState extends State<GroupsPage> {
         Expanded(
             child: selected == null
                 ? const Center(child: Text('选择群聊，开始协作'))
-                : thread)
+                : thread),
+        if (box.maxWidth >= 1040 && selected != null) ...[
+          const VerticalDivider(width: 1),
+          SizedBox(width: 260, child: _memberSidebar(context)),
+        ],
       ]);
     });
+  }
+
+  Widget _memberSidebar(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+        color: theme.colorScheme.surface,
+        child:
+            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+              child: Row(children: [
+                const Icon(Icons.groups_outlined),
+                const SizedBox(width: 8),
+                Expanded(
+                    child: Text('群成员（${members.length}）',
+                        style: theme.textTheme.titleSmall)),
+                IconButton(
+                    tooltip: '管理群成员',
+                    onPressed: manage,
+                    icon: const Icon(Icons.more_horiz)),
+              ])),
+          const Divider(),
+          Expanded(
+              child: ListView(children: [
+            for (final m in members)
+              ListTile(
+                  leading: CircleAvatar(
+                      radius: 18,
+                      backgroundColor: theme.colorScheme.primaryContainer,
+                      child: Icon(
+                          m['kind'] == 'agent'
+                              ? Icons.person_outline
+                              : Icons.person,
+                          color: theme.colorScheme.primary,
+                          size: 20)),
+                  title: Text('${m['name'] ?? ''}'),
+                  trailing: Text(
+                      m['kind'] == 'agent' && m['id'] == group?['ownerId']
+                          ? '群主'
+                          : m['kind'] == 'agent'
+                              ? '成员'
+                              : '客户',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant))),
+          ])),
+          if ((group?['announcement'] ?? '') != '')
+            Padding(
+                padding: const EdgeInsets.all(16),
+                child: Card(
+                    child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('群公告', style: theme.textTheme.titleSmall),
+                              const SizedBox(height: 8),
+                              Text('${group?['announcement']}'),
+                            ])))),
+        ]));
   }
 }

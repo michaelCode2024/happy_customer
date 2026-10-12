@@ -151,6 +151,11 @@ export class VisitorApi {
     return this.#json('POST', `/api/v1/widget/conversations/${id}/rating`, { score, comment });
   }
 
+  /** Visitor-initiated handoff: asks a human agent to take over an AI reply. */
+  requestHandoff(id: string): Promise<unknown> {
+    return this.#json('POST', `/api/v1/widget/conversations/${id}/handoff`, {});
+  }
+
   /**
    * Uploads one file against a conversation. XMLHttpRequest rather than fetch:
    * upload progress matters for a phone photo on a slow connection, and fetch

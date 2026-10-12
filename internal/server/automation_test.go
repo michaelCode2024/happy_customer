@@ -145,14 +145,14 @@ func TestAutomationDatabaseDelivery(t *testing.T) {
 		t.Fatal("handoff did not pause bot")
 	}
 	pool.QueryRow(ctx, `select count(*) from message where conversation_id=$1`, conversation).Scan(&count)
-	if count != 2 {
+	if count != 3 {
 		t.Fatal("handoff incorrectly blocked by cooldown")
 	}
 	q.ID = uuid.New()
 	q.Content = "问题"
 	a.maybeAutomationReply(ctx, tenant, conversation, q)
 	pool.QueryRow(ctx, `select count(*) from message where conversation_id=$1`, conversation).Scan(&count)
-	if count != 2 {
+	if count != 3 {
 		t.Fatal("bot replied after handoff")
 	}
 	// 已交接后再次点转人工必须有回执，不能静默结束。
@@ -160,7 +160,7 @@ func TestAutomationDatabaseDelivery(t *testing.T) {
 	run(`insert into agent(id,tenant_id,email,display_name,role,status,password_hash) values($1,$2,'handoff@test.local','测试客服','AGENT','ACTIVE','x')`, agentID, tenant)
 	run(`insert into agent_inbox(agent_id,inbox_id) values($1,$2)`, agentID, inbox)
 	run(`insert into agent_presence(agent_id,status,last_seen_at) values($1,'ONLINE',now()) on conflict(agent_id) do update set status='ONLINE', last_seen_at=now()`, agentID)
-	run(`update conversation set assignee_id=$1, assigned_at=now() where id=$2`, agentID, conversation)
+	run(`update conversation set assignee_id=$1, assigned_at=now(),accepted_at=now() where id=$2`, agentID, conversation)
 	q.ID = uuid.New()
 	q.Content = "转人工"
 	a.maybeAutomationReply(ctx, tenant, conversation, q)

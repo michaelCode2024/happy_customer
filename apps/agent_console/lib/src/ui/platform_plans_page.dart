@@ -58,7 +58,7 @@ class PlatformPlansPage extends StatelessWidget {
       price: '¥999',
       period: '/月起',
       seats: '10 坐席',
-      messages: '5 万条/月',
+      messages: '50,000 条/月',
       history: '历史消息持续保留',
       highlight: true,
       features: [
@@ -77,7 +77,7 @@ class PlatformPlansPage extends StatelessWidget {
       price: '¥2,999',
       period: '/月起',
       seats: '100 坐席',
-      messages: '100 万条/月',
+      messages: '1,000,000 条/月',
       history: '历史消息持续保留',
       highlight: false,
       features: [
@@ -123,8 +123,6 @@ class PlatformPlansPage extends StatelessWidget {
         // 宽屏用等高 Row，保证四张卡底边、价格、按钮同一基线；窄屏再换行。
         LayoutBuilder(
           builder: (context, constraints) {
-            final openTenants =
-                () => controller.selectSection(PlatformSection.tenants);
             if (constraints.maxWidth >= 1100) {
               return IntrinsicHeight(
                 child: Row(
@@ -135,7 +133,8 @@ class PlatformPlansPage extends StatelessWidget {
                       Expanded(
                         child: _PlanCard(
                           plan: _plans[i],
-                          onChoose: openTenants,
+                          onChoose: () =>
+                              controller.beginPlanAssignment(_plans[i].code),
                         ),
                       ),
                     ],
@@ -157,7 +156,8 @@ class PlatformPlansPage extends StatelessWidget {
                             Expanded(
                               child: _PlanCard(
                                 plan: _plans[row * 2 + col],
-                                onChoose: openTenants,
+                                onChoose: () => controller.beginPlanAssignment(
+                                    _plans[row * 2 + col].code),
                               ),
                             ),
                           ],
@@ -172,7 +172,10 @@ class PlatformPlansPage extends StatelessWidget {
               children: [
                 for (var i = 0; i < _plans.length; i++) ...[
                   if (i > 0) const SizedBox(height: 16),
-                  _PlanCard(plan: _plans[i], onChoose: openTenants),
+                  _PlanCard(
+                      plan: _plans[i],
+                      onChoose: () =>
+                          controller.beginPlanAssignment(_plans[i].code)),
                 ],
               ],
             );
@@ -447,7 +450,7 @@ class _PlanCard extends StatelessWidget {
               foregroundColor:
                   plan.highlight ? scheme.onPrimary : scheme.onPrimaryContainer,
             ),
-            child: Text(plan.code == 'TRIAL' ? '免费试用' : '开通此方案'),
+            child: const Text('分配给企业'),
           ),
         ],
       ),

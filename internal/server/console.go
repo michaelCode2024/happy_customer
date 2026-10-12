@@ -75,9 +75,9 @@ func (a *API) registerConsole(mux *http.ServeMux) {
 	// Knowledge base (the AI reads from the same tables)
 	mux.HandleFunc("GET /api/v1/console/knowledge-categories", a.requireAgent(a.adminKnowledgeCategories))
 	mux.HandleFunc("GET /api/v1/console/knowledge", a.requireAgent(a.consoleKnowledgeList))
-	mux.HandleFunc("POST /api/v1/console/knowledge", a.requireRole([]string{auth.RoleOwner, auth.RoleAdmin, auth.RoleSupervisor}, a.consoleKnowledgeCreate))
-	mux.HandleFunc("PATCH /api/v1/console/knowledge/{id}", a.requireRole([]string{auth.RoleOwner, auth.RoleAdmin, auth.RoleSupervisor}, a.consoleKnowledgeUpdate))
-	mux.HandleFunc("DELETE /api/v1/console/knowledge/{id}", a.requireRole([]string{auth.RoleOwner, auth.RoleAdmin, auth.RoleSupervisor}, a.consoleKnowledgeDelete))
+	mux.HandleFunc("POST /api/v1/console/knowledge", a.requireRole([]string{auth.RoleSupervisor}, a.consoleKnowledgeCreate))
+	mux.HandleFunc("PATCH /api/v1/console/knowledge/{id}", a.requireRole([]string{auth.RoleSupervisor}, a.consoleKnowledgeUpdate))
+	mux.HandleFunc("DELETE /api/v1/console/knowledge/{id}", a.requireRole([]string{auth.RoleSupervisor}, a.consoleKnowledgeDelete))
 	mux.HandleFunc("POST /api/v1/console/knowledge/search", a.requireAgent(a.consoleKnowledgeSearch))
 	mux.HandleFunc("POST /api/v1/console/knowledge/preview", a.requireAgent(a.consoleKnowledgePreview))
 
@@ -334,7 +334,7 @@ func (a *API) consoleConversations(w http.ResponseWriter, r *http.Request, p aut
 		select c.id, c.tenant_id, c.inbox_id, c.visitor_id, coalesce(c.subject,''), c.status, c.assignee_id,
 		       coalesce(ag.display_name,''), c.priority, c.source, c.last_sequence,
 		       coalesce(c.last_message_preview,''), c.last_message_at, c.agent_unread, c.visitor_unread,
-		       coalesce(v.display_name,''), c.created_at, c.updated_at
+		       coalesce(v.display_name,''), c.created_at, c.updated_at, c.accepted_at, c.assignment_expires_at
 		  from conversation c
 		  join visitor v on v.id = c.visitor_id
 		  left join agent ag on ag.id = c.assignee_id
@@ -358,11 +358,16 @@ func (a *API) consoleConversations(w http.ResponseWriter, r *http.Request, p aut
 		}
 		items = append(items, item)
 	}
+	// queued=待接待（未分配）；unread=坐席未读消息条数。二者语义不同，不能混成一个角标。
 	var queued int
 	_ = a.db.QueryRow(r.Context(), `select count(*)::int from conversation
 		where tenant_id=$1 and assignee_id is null and status <> 'RESOLVED'
 		and exists (select 1 from agent_inbox ai where ai.inbox_id=conversation.inbox_id and ai.agent_id=$2)`, p.TenantID, p.AgentID).Scan(&queued)
-	respond(w, 200, map[string]any{"items": items, "queued": queued})
+	var unread int
+	_ = a.db.QueryRow(r.Context(), `select coalesce(sum(agent_unread),0)::int from conversation
+		where tenant_id=$1 and status <> 'RESOLVED'
+		and exists (select 1 from agent_inbox ai where ai.inbox_id=conversation.inbox_id and ai.agent_id=$2)`, p.TenantID, p.AgentID).Scan(&unread)
+	respond(w, 200, map[string]any{"items": items, "queued": queued, "unread": unread})
 }
 
 func (a *API) consoleConversation(w http.ResponseWriter, r *http.Request, p auth.Principal) {
@@ -547,20 +552,11 @@ func (a *API) consoleClaim(w http.ResponseWriter, r *http.Request, p auth.Princi
 	if !ok {
 		return
 	}
-	tag, err := a.db.Exec(r.Context(), `update conversation
-		set assignee_id = $3, assigned_at = now(), updated_at = now()
-		where id = $1 and tenant_id = $2 and (assignee_id is null or assignee_id = $3)`, id, p.TenantID, p.AgentID)
-	if err != nil {
-		fail(w, 500, "领取会话失败")
+	if err := a.acceptReception(r.Context(), p.TenantID, id, p.AgentID, p.Name); err != nil {
+		failCode(w, 409, "ALREADY_ASSIGNED", err.Error())
 		return
 	}
-	if tag.RowsAffected() == 0 {
-		var owner string
-		_ = a.db.QueryRow(r.Context(), `select coalesce(ag.display_name,'其他坐席') from conversation c
-			left join agent ag on ag.id = c.assignee_id where c.id = $1`, id).Scan(&owner)
-		failCode(w, 409, "ALREADY_ASSIGNED", "该会话已被 "+owner+" 领取")
-		return
-	}
+
 	a.publish(r.Context(), a.conversationChannels(r.Context(), id), realtime.Event{
 		Type: "conversation.assigned", TenantID: p.TenantID.String(), ConversationID: id.String(),
 		Data: map[string]any{"assigneeId": p.AgentID, "assigneeName": p.Name},
@@ -597,11 +593,27 @@ func (a *API) consoleTransfer(w http.ResponseWriter, r *http.Request, p auth.Pri
 		fail(w, 404, "目标坐席不存在")
 		return
 	}
-	if _, err := a.db.Exec(r.Context(), `update conversation set assignee_id=$3, assigned_at=now(), updated_at=now()
+	tx, err := a.db.Begin(r.Context())
+	if err != nil {
+		fail(w, 500, "转接失败")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	if _, err := tx.Exec(r.Context(), `update conversation set assignee_id=$3, assigned_at=now(), accepted_at=null,bot_paused=true,handoff_requested_at=coalesce(handoff_requested_at,now()),assignment_expires_at=now()+make_interval(secs=>coalesce((select acceptance_timeout_seconds from routing_rule rr where rr.tenant_id=$2 and rr.enabled and (rr.inbox_id=conversation.inbox_id or rr.inbox_id is null) order by rr.inbox_id nulls last limit 1),60)), updated_at=now()
 		where id=$1 and tenant_id=$2`, id, p.TenantID, target); err != nil {
 		fail(w, 500, "转接失败")
 		return
 	}
+	if err = receptionNotice(r.Context(), tx, p.TenantID, id, "已分配给客服「"+targetName+"」，等待客服接待。", "ASSIGNED"); err != nil {
+		fail(w, 500, "转接失败")
+		return
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		fail(w, 500, "转接失败")
+		return
+	}
+	a.flushReceptionNotices(r.Context())
+
 	if strings.TrimSpace(in.Note) != "" {
 		_, _ = a.appendMessage(r.Context(), p.TenantID, id, messageInput{
 			SenderType: "AGENT", SenderID: &p.AgentID, MessageType: "EVENT",
@@ -884,7 +896,7 @@ func (a *API) consoleVisitorConversations(w http.ResponseWriter, r *http.Request
 		select c.id, c.tenant_id, c.inbox_id, c.visitor_id, coalesce(c.subject,''), c.status, c.assignee_id,
 		       coalesce(ag.display_name,''), c.priority, c.source, c.last_sequence,
 		       coalesce(c.last_message_preview,''), c.last_message_at, c.agent_unread, c.visitor_unread,
-		       coalesce(v.display_name,''), c.created_at, c.updated_at
+		       coalesce(v.display_name,''), c.created_at, c.updated_at, c.accepted_at, c.assignment_expires_at
 		  from conversation c
 		  join visitor v on v.id = c.visitor_id
 		  left join agent ag on ag.id = c.assignee_id

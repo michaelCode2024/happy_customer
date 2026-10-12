@@ -56,25 +56,27 @@ type attachmentView struct {
 }
 
 type conversationView struct {
-	ID                 uuid.UUID  `json:"id"`
-	TenantID           uuid.UUID  `json:"tenantId"`
-	InboxID            uuid.UUID  `json:"inboxId"`
-	VisitorID          uuid.UUID  `json:"visitorId"`
-	Subject            string     `json:"subject,omitempty"`
-	Status             string     `json:"status"`
-	AssigneeID         *uuid.UUID `json:"assigneeId,omitempty"`
-	AssigneeName       string     `json:"assigneeName,omitempty"`
-	Priority           int16      `json:"priority"`
-	Source             string     `json:"source"`
-	LastSequence       int64      `json:"lastSequence"`
-	LastMessagePreview string     `json:"lastMessagePreview,omitempty"`
-	LastMessageAt      *time.Time `json:"lastMessageAt,omitempty"`
-	AgentUnread        int        `json:"agentUnread"`
-	VisitorUnread      int        `json:"visitorUnread"`
-	VisitorName        string     `json:"visitorName,omitempty"`
-	Tags               []string   `json:"tags,omitempty"`
-	CreatedAt          time.Time  `json:"createdAt"`
-	UpdatedAt          time.Time  `json:"updatedAt"`
+	AcceptedAt          *time.Time `json:"acceptedAt,omitempty"`
+	AssignmentExpiresAt *time.Time `json:"assignmentExpiresAt,omitempty"`
+	ID                  uuid.UUID  `json:"id"`
+	TenantID            uuid.UUID  `json:"tenantId"`
+	InboxID             uuid.UUID  `json:"inboxId"`
+	VisitorID           uuid.UUID  `json:"visitorId"`
+	Subject             string     `json:"subject,omitempty"`
+	Status              string     `json:"status"`
+	AssigneeID          *uuid.UUID `json:"assigneeId,omitempty"`
+	AssigneeName        string     `json:"assigneeName,omitempty"`
+	Priority            int16      `json:"priority"`
+	Source              string     `json:"source"`
+	LastSequence        int64      `json:"lastSequence"`
+	LastMessagePreview  string     `json:"lastMessagePreview,omitempty"`
+	LastMessageAt       *time.Time `json:"lastMessageAt,omitempty"`
+	AgentUnread         int        `json:"agentUnread"`
+	VisitorUnread       int        `json:"visitorUnread"`
+	VisitorName         string     `json:"visitorName,omitempty"`
+	Tags                []string   `json:"tags,omitempty"`
+	CreatedAt           time.Time  `json:"createdAt"`
+	UpdatedAt           time.Time  `json:"updatedAt"`
 }
 
 func (a *API) registerWidget(mux *http.ServeMux) {
@@ -89,6 +91,7 @@ func (a *API) registerWidget(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/widget/conversations/{id}/search", a.requireWidget(a.searchVisitorMessages))
 	mux.HandleFunc("POST /api/v1/widget/conversations/{id}/typing", a.requireWidget(a.visitorTyping))
 	mux.HandleFunc("POST /api/v1/widget/conversations/{id}/rating", a.requireWidget(a.rateConversation))
+	mux.HandleFunc("POST /api/v1/widget/conversations/{id}/handoff", a.requireWidget(a.widgetHandoff))
 
 	// Realtime. The visitor token travels in the query string because browsers
 	// cannot set headers on the WebSocket handshake.
@@ -96,14 +99,15 @@ func (a *API) registerWidget(mux *http.ServeMux) {
 }
 
 type bootstrapRequest struct {
-	InboxKey    string         `json:"inboxKey"`
-	ExternalID  string         `json:"externalId"`
-	DisplayName string         `json:"displayName"`
-	Email       string         `json:"email"`
-	Phone       string         `json:"phone"`
-	Locale      string         `json:"locale"`
-	Attributes  map[string]any `json:"attributes"`
-	Referrer    string         `json:"referrer"`
+	InboxKey      string         `json:"inboxKey"`
+	IdentityToken string         `json:"identityToken"`
+	ExternalID    string         `json:"externalId"`
+	DisplayName   string         `json:"displayName"`
+	Email         string         `json:"email"`
+	Phone         string         `json:"phone"`
+	Locale        string         `json:"locale"`
+	Attributes    map[string]any `json:"attributes"`
+	Referrer      string         `json:"referrer"`
 }
 
 func (a *API) widgetBootstrap(w http.ResponseWriter, r *http.Request) {
@@ -118,6 +122,19 @@ func (a *API) widgetBootstrap(w http.ResponseWriter, r *http.Request) {
 	inbox, err := a.loadInbox(r.Context(), in.InboxKey)
 	if err != nil {
 		fail(w, 404, err.Error())
+		return
+	}
+	if in.IdentityToken != "" {
+		identity, verifyErr := a.tokens.Verify(in.IdentityToken)
+		if verifyErr != nil || identity.Kind != auth.KindIdentity || identity.TenantID != inbox.TenantID || identity.InboxID != inbox.ID || identity.ExternalID == "" {
+			failCode(w, 401, "IDENTITY_TOKEN_INVALID", "访客身份票据无效、已过期或不属于当前客服入口")
+			return
+		}
+		// 登录身份只信任客户后端签发的票据，不能被前端 externalId 覆盖。
+		in.ExternalID = identity.ExternalID
+		in.DisplayName = identity.Name
+	} else if strings.TrimSpace(in.ExternalID) != "" {
+		failCode(w, 401, "IDENTITY_TOKEN_REQUIRED", "接入登录用户须由业务服务端签发 identityToken；匿名咨询请勿传 externalId")
 		return
 	}
 	attributes, _ := json.Marshal(orEmpty(in.Attributes))
@@ -186,12 +203,13 @@ func (a *API) widgetBootstrap(w http.ResponseWriter, r *http.Request) {
 		where visitor_id=$1 and status <> 'RESOLVED'`, visitorID).Scan(&openConversations)
 
 	respond(w, 200, map[string]any{
-		"visitorId":         visitorID,
-		"displayName":       in.DisplayName,
-		"token":             token,
-		"expiresIn":         int(a.cfg.WidgetTokenTTL.Seconds()),
-		"inbox":             map[string]any{"id": inbox.ID, "name": inbox.Name, "welcomeMessage": inbox.WelcomeMessage, "offlineMessage": inbox.OfflineMessage},
-		"aiEnabled":         inbox.AIEnabled && a.ai.Available() && a.cfg.AI.AutoReplyEnabled,
+		"visitorId":   visitorID,
+		"displayName": in.DisplayName,
+		"token":       token,
+		"expiresIn":   int(a.cfg.WidgetTokenTTL.Seconds()),
+		"inbox": map[string]any{"id": inbox.ID, "name": inbox.Name, "welcomeMessage": inbox.WelcomeMessage, "offlineMessage": inbox.OfflineMessage, "automation": a.publicAutomation(r.Context(), inbox.ID),
+			"logoUrl": inbox.LogoURL, "avatarUrl": inbox.AvatarURL, "fontFamily": inbox.FontFamily, "bubbleRadius": inbox.BubbleRadius, "customCss": inbox.CustomCSS},
+		"aiEnabled":         inbox.AIEnabled && a.tenantHasFeature(r.Context(), inbox.TenantID, "ai") && a.ai.Available() && a.cfg.AI.AutoReplyEnabled,
 		"agentsOnline":      inbox.AgentsAvailable,
 		"openConversations": openConversations,
 		"serverTime":        nowUTC(),
@@ -267,11 +285,11 @@ func (a *API) listConversations(w http.ResponseWriter, r *http.Request, p auth.P
 		select c.id, c.tenant_id, c.inbox_id, c.visitor_id, coalesce(c.subject,''), c.status, c.assignee_id,
 		       coalesce(ag.display_name,''), c.priority, c.source, c.last_sequence,
 		       coalesce(c.last_message_preview,''), c.last_message_at, c.agent_unread, c.visitor_unread,
-		       coalesce(v.display_name,''), c.created_at, c.updated_at
+		       coalesce(v.display_name,''), c.created_at, c.updated_at, c.accepted_at, c.assignment_expires_at
 		  from conversation c
 		  join visitor v on v.id = c.visitor_id
 		  left join agent ag on ag.id = c.assignee_id
-		 where c.tenant_id=$1 and c.inbox_id=$2 and c.visitor_id=$3 and c.status <> 'RESOLVED'
+		 where c.tenant_id=$1 and c.inbox_id=$2 and c.visitor_id=$3
 		 order by coalesce(c.last_message_at, c.created_at) desc
 		 limit 50`, p.TenantID, p.InboxID, p.VisitorID)
 	if err != nil {
@@ -288,7 +306,16 @@ func (a *API) listConversations(w http.ResponseWriter, r *http.Request, p auth.P
 		}
 		items = append(items, item)
 	}
-	respond(w, 200, map[string]any{"items": items})
+	var online int
+	var aiEnabled bool
+	var welcome, offline string
+	if err := a.db.QueryRow(r.Context(), `select coalesce(i.welcome_message,''), coalesce(i.offline_message,''), coalesce(s.enabled,false),
+	 (select count(*)::int from agent_presence ap join agent ag on ag.id=ap.agent_id join agent_inbox ai on ai.agent_id=ag.id where ai.inbox_id=i.id and ag.status='ACTIVE' and ap.status='ONLINE')
+	 from inbox i left join ai_setting s on s.inbox_id=i.id where i.id=$1 and i.tenant_id=$2 and i.status='ACTIVE'`, p.InboxID, p.TenantID).Scan(&welcome, &offline, &aiEnabled, &online); err != nil {
+		fail(w, 404, "客服入口已停用")
+		return
+	}
+	respond(w, 200, map[string]any{"items": items, "agentsOnline": online, "aiEnabled": aiEnabled && a.tenantHasFeature(r.Context(), p.TenantID, "ai") && a.ai.Available() && a.cfg.AI.AutoReplyEnabled, "welcomeMessage": welcome, "offlineMessage": offline, "automation": a.publicAutomation(r.Context(), p.InboxID)})
 }
 
 func (a *API) getConversation(w http.ResponseWriter, r *http.Request, p auth.Principal) {
@@ -326,10 +353,19 @@ func (a *API) listMessages(w http.ResponseWriter, r *http.Request, p auth.Princi
 	if page.LastSequence == 0 {
 		page.LastSequence = lastSequence
 	}
+	// 坐席侧游标：访客自己气泡上的「未读 / 已送达 / 已读」取所有坐席的最大值。
+	var agentLastRead, agentLastDelivered int64
+	_ = a.db.QueryRow(r.Context(), `
+		select coalesce(max(last_read_sequence),0), coalesce(max(last_delivered_sequence),0)
+		from conversation_read
+		where conversation_id=$1 and reader_type='AGENT'`, id).
+		Scan(&agentLastRead, &agentLastDelivered)
 	respond(w, 200, map[string]any{
 		"items": page.Items, "hasMore": page.HasMore, "hasOlder": page.HasOlder,
 		"firstSequence": page.FirstSequence, "lastSequence": page.LastSequence,
-		"visitorUnread": visitorUnread,
+		"visitorUnread":              visitorUnread,
+		"agentLastReadSequence":      agentLastRead,
+		"agentLastDeliveredSequence": agentLastDelivered,
 	})
 }
 
@@ -401,6 +437,9 @@ func (a *API) postMessage(w http.ResponseWriter, r *http.Request, p auth.Princip
 			return
 		}
 		a.logger.Error("visitor message failed", "error", err)
+		if failServiceError(w, err) {
+			return
+		}
 		fail(w, 500, "发送消息失败")
 		return
 	}
@@ -416,7 +455,14 @@ func (a *API) markVisitorRead(w http.ResponseWriter, r *http.Request, p auth.Pri
 	if !decode(w, r, &in) {
 		return
 	}
-	a.markRead(r.Context(), id, p.TenantID, "VISITOR", p.VisitorID, in.Sequence)
+	if in.Sequence <= 0 {
+		fail(w, 400, "sequence 必须大于零")
+		return
+	}
+	if err := a.markRead(r.Context(), id, p.TenantID, "VISITOR", p.VisitorID, in.Sequence); err != nil {
+		fail(w, 500, "更新回执失败")
+		return
+	}
 	respond(w, 200, map[string]any{"status": "OK"})
 }
 
@@ -429,7 +475,14 @@ func (a *API) markVisitorDelivered(w http.ResponseWriter, r *http.Request, p aut
 	if !decode(w, r, &in) {
 		return
 	}
-	a.markDelivered(r.Context(), id, p.TenantID, "VISITOR", p.VisitorID, in.Sequence)
+	if in.Sequence <= 0 {
+		fail(w, 400, "sequence 必须大于零")
+		return
+	}
+	if err := a.markDelivered(r.Context(), id, p.TenantID, "VISITOR", p.VisitorID, in.Sequence); err != nil {
+		fail(w, 500, "更新回执失败")
+		return
+	}
 	respond(w, 200, map[string]any{"status": "OK"})
 }
 
@@ -475,6 +528,21 @@ func (a *API) rateConversation(w http.ResponseWriter, r *http.Request, p auth.Pr
 		Data: map[string]any{"score": in.Score},
 	})
 	respond(w, 201, map[string]any{"status": "OK"})
+}
+
+// widgetHandoff lets a visitor ask a human to take over from the AI. It mirrors
+// the low-confidence path in the AI answer flow: pause the bot, assign an agent,
+// post the handoff notice and notify the console.
+func (a *API) widgetHandoff(w http.ResponseWriter, r *http.Request, p auth.Principal) {
+	id, ok := a.visitorConversation(w, r, p)
+	if !ok {
+		return
+	}
+	if _, _, err := a.completeHandoff(r.Context(), p.TenantID, id); err != nil {
+		fail(w, 500, "转接人工失败")
+		return
+	}
+	respond(w, 200, map[string]any{"status": "OK"})
 }
 
 // visitorConversation validates that the path conversation belongs to the

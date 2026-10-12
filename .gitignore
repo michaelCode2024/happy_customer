@@ -43,3 +43,25 @@ pubspec.lock
 # Locally built binaries (the image build produces these outside Docker)
 .relaydesk-server
 .relaydesk-entrypoint
+server
+server.exe
+server-linux
+server-linux-next
+.server-linux-before-saas
+
+# Local-only debug / deploy / static scratch
+.local-deploy/
+.local-static/
+.local-full-audit/
+.playwright-mcp/
+.workbuddy/
+data/
+.analyze.txt
+.bodysample.txt
+.inspect.js
+.inspect.out.txt
+.mkmessage.js
+.pubget.txt
+.rawcommit.txt
+.subject.txt
+.test.txt

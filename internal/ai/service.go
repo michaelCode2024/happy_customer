@@ -2,6 +2,10 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -58,9 +62,11 @@ type Request struct {
 // behaviour stay consistent across the widget, the console preview and the open
 // API.
 type Service struct {
-	pool      *pgxpool.Pool
-	provider  Provider
-	threshold float64
+	pool       *pgxpool.Pool
+	provider   Provider
+	threshold  float64
+	embeddings *EmbeddingProvider
+	tools      []Tool
 }
 
 func NewService(pool *pgxpool.Pool, provider Provider, threshold float64) *Service {
@@ -68,6 +74,29 @@ func NewService(pool *pgxpool.Pool, provider Provider, threshold float64) *Servi
 		threshold = 0.35
 	}
 	return &Service{pool: pool, provider: provider, threshold: threshold}
+}
+
+// WithEmbeddings attaches an embedding provider so the service can generate
+// dense vectors for knowledge entries. Returns a new Service so the original
+// stays immutable — useful in tests and in the server constructor.
+func (s *Service) WithEmbeddings(ep *EmbeddingProvider) *Service {
+	s2 := *s
+	s2.embeddings = ep
+	return &s2
+}
+
+// WithTools registers domain tools (order lookup, logistics query, etc.)
+// that the assistant can call when answering. The tools are appended;
+// re-registering replaces the full list.
+func (s *Service) WithTools(tools ...Tool) *Service {
+	s2 := *s
+	s2.tools = tools
+	return &s2
+}
+
+// HasEmbeddings reports whether an embedding provider is configured.
+func (s *Service) HasEmbeddings() bool {
+	return s.embeddings != nil
 }
 
 // Available reports whether a usable model is configured. The platform runs
@@ -100,7 +129,7 @@ func (s *Service) AnswerWith(ctx context.Context, request Request) (Reply, error
 	if question == "" {
 		return Reply{Reason: ReasonNoKnowledge, Handoff: true, Provider: s.ProviderName()}, nil
 	}
-	entries, err := s.search(ctx, request.TenantID, question, true)
+	entries, err := s.SearchHybrid(ctx, request.TenantID, question, true)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -166,7 +195,7 @@ func (s *Service) Stream(ctx context.Context, request Request) (<-chan string, e
 	if question == "" {
 		return nil, nil
 	}
-	entries, err := s.search(ctx, request.TenantID, question, true)
+	entries, err := s.SearchHybrid(ctx, request.TenantID, question, true)
 	if err != nil {
 		return nil, err
 	}
@@ -177,11 +206,257 @@ func (s *Service) Stream(ctx context.Context, request Request) (<-chan string, e
 	return s.provider.Stream(ctx, messages)
 }
 
+// StreamAnswer runs the retrieval + confidence gate, then returns a channel of
+// answer tokens for live, token-by-token rendering on the visitor side. It keeps
+// the gating identical to AnswerWith so a low-confidence question still hands off
+// instead of streaming a confident-but-wrong answer. The caller aggregates the
+// tokens, runs LooksInjected on the full text, and stores the final message.
+// When the pipeline decides to hand off (gate.Handoff == true) no channel is
+// returned; the caller should post the handoff notice.
+func (s *Service) StreamAnswer(ctx context.Context, request Request) (<-chan string, Reply, error) {
+	gate := Reply{Provider: s.ProviderName()}
+	if !s.Available() {
+		gate.Reason = ReasonDisabled
+		gate.Handoff = true
+		return nil, gate, nil
+	}
+	question := strings.TrimSpace(request.Question)
+	if question == "" {
+		gate.Reason = ReasonNoKnowledge
+		gate.Handoff = true
+		return nil, gate, nil
+	}
+	entries, err := s.SearchHybrid(ctx, request.TenantID, question, true)
+	if err != nil {
+		return nil, gate, err
+	}
+	if len(entries) == 0 {
+		gate.Reason = ReasonNoKnowledge
+		gate.Handoff = true
+		return nil, gate, nil
+	}
+	best := 0.0
+	for _, entry := range entries {
+		if entry.score > best {
+			best = entry.score
+		}
+	}
+	if threshold := s.effectiveThreshold(request.Threshold); best < threshold {
+		gate.Score = best
+		gate.Reason = ReasonLowScore
+		gate.Handoff = true
+		gate.Sources = titles(entries)
+		return nil, gate, nil
+	}
+	messages := s.buildMessages(entries, question, request.History)
+	ch, err := s.provider.Stream(ctx, messages)
+	if err != nil {
+		gate.Reason = ReasonProviderFail
+		gate.Handoff = true
+		return nil, gate, err
+	}
+	if ch == nil {
+		// Provider cannot stream; the caller falls back to AnswerWith.
+		gate.Reason = ReasonProviderFail
+		gate.Handoff = true
+		return nil, gate, nil
+	}
+	gate.Score = best
+	gate.Sources = titles(entries)
+	return ch, gate, nil
+}
+
+// LooksInjected exposes the prompt-injection guard so callers that assemble the
+// answer from streamed tokens can reject a jailbroken completion.
+func (s *Service) LooksInjected(text string) bool {
+	return looksInjected(text)
+}
+
 func (s *Service) effectiveThreshold(override *float64) float64 {
 	if override != nil && *override > 0 && *override <= 1 {
 		return *override
 	}
 	return s.threshold
+}
+
+// Embedding returns the stored vector for a knowledge entry, if any. A nil
+// result means the entry has not been embedded yet and the lexical path
+// should be used instead.
+func (s *Service) Embedding(ctx context.Context, id uuid.UUID) ([]float64, error) {
+	if s.embeddings == nil {
+		return nil, nil
+	}
+	var vecJSON string
+	err := s.pool.QueryRow(ctx, `select embedding from knowledge_entry where id=$1`, id).Scan(&vecJSON)
+	if err != nil {
+		return nil, err
+	}
+	if vecJSON == "" {
+		return nil, nil
+	}
+	return JSONToVector(vecJSON)
+}
+
+// EmbedEntry embeds a single knowledge entry using the configured provider.
+// It returns the vector so the caller can upsert it in one shot. The text
+// fed to the model is title + content so the embedding captures both what
+// the article is about and what it says.
+func (s *Service) EmbedEntry(ctx context.Context, id uuid.UUID, title, content string) ([]float64, error) {
+	if s.embeddings == nil {
+		return nil, errors.New("embedding provider not configured")
+	}
+	text := strings.TrimSpace(title) + " " + strings.TrimSpace(content)
+	if text == "" {
+		return nil, nil
+	}
+	vec, err := s.embeddings.EmbedOne(ctx, text)
+	if err != nil {
+		return nil, fmt.Errorf("embed knowledge entry %s: %w", id, err)
+	}
+	vecJSON, err := VectorToJSON(vec)
+	if err != nil {
+		return nil, err
+	}
+	_, err = s.pool.Exec(ctx,
+		`update knowledge_entry set embedding=$1, embed_updated_at=now() where id=$2`,
+		vecJSON, id)
+	return vec, err
+}
+
+// SearchHybrid runs lexical retrieval first, then enriches results with
+// semantic similarity when an embedding provider is available. The two
+// scores are merged with a simple weighted average so keyword hits are
+// never outranked by a loose semantic match.
+func (s *Service) SearchHybrid(ctx context.Context, tenantID uuid.UUID, question string, countHits bool) ([]knowledgeEntry, error) {
+	// Lexical pass always runs.
+	lexical, err := s.search(ctx, tenantID, question, countHits)
+	if err != nil {
+		return nil, err
+	}
+	if s.embeddings == nil {
+		return lexical, nil
+	}
+	qVec, err := s.embeddings.EmbedOne(ctx, question)
+	if err != nil {
+		// Embedding failure is non-fatal: fall back to lexical.
+		return lexical, nil
+	}
+	if len(qVec) == 0 {
+		return lexical, nil
+	}
+	semantic, err := s.searchSemantic(ctx, tenantID, qVec)
+	if err != nil {
+		return lexical, nil
+	}
+	// Merge by ID, weighting lexical 60% + semantic 40%.
+	lexMap := make(map[uuid.UUID]float64, len(lexical))
+	for _, e := range lexical {
+		lexMap[e.id] = e.score
+	}
+	semMap := make(map[uuid.UUID]float64, len(semantic))
+	for _, e := range semantic {
+		semMap[e.id] = e.score
+	}
+	ids := make([]uuid.UUID, 0, len(lexMap)+len(semMap))
+	seen := map[uuid.UUID]bool{}
+	for id := range lexMap {
+		if !seen[id] { ids = append(ids, id); seen[id] = true }
+	}
+	for id := range semMap {
+		if !seen[id] { ids = append(ids, id); seen[id] = true }
+	}
+	merged := make([]knowledgeEntry, 0, len(ids))
+	for _, id := range ids {
+		l := lexMap[id]
+		sm := semMap[id]
+		combined := 0.6*l + 0.4*sm
+		if combined < 1e-6 {
+			continue
+		}
+		// Find the full entry to carry title/content/examples.
+		var entry knowledgeEntry
+		for _, e := range lexical {
+			if e.id == id { entry = e; break }
+		}
+		if entry.id == uuid.Nil {
+			for _, e := range semantic {
+				if e.id == id { entry = e; break }
+			}
+		}
+		entry.score = combined
+		merged = append(merged, entry)
+	}
+	sort.SliceStable(merged, func(i, j int) bool { return merged[i].score > merged[j].score })
+	if len(merged) > 5 {
+		merged = merged[:5]
+	}
+	return merged, nil
+}
+
+// searchSemantic finds the top-k knowledge entries by inner-product similarity
+// to the query vector. We store embeddings as JSON float arrays.
+// Since OpenAI embeddings are L2-normalized, dot product equals cosine similarity.
+func (s *Service) searchSemantic(ctx context.Context, tenantID uuid.UUID, qVec []float64) ([]knowledgeEntry, error) {
+	// Fetch all embeddings for this tenant, compute dot product in Go
+	rows, err := s.pool.Query(ctx, `
+		select id, title, content, question_examples, embedding
+		  from knowledge_entry
+		 where tenant_id = $1
+		   and embedding is not null
+		   and embedding <> '[]'::jsonb
+		   and status = 'ACTIVE'
+		order by created_at desc
+		limit 50`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("semantic search: %w", err)
+	}
+	defer rows.Close()
+
+	type rawEntry struct {
+		id, title, content, examples, embedding string
+	}
+	var raws []rawEntry
+	for rows.Next() {
+		var r rawEntry
+		if err := rows.Scan(&r.id, &r.title, &r.content, &r.examples, &r.embedding); err != nil {
+			return nil, err
+		}
+		raws = append(raws, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Compute dot product in Go
+	var entries []knowledgeEntry
+	for _, r := range raws {
+		var emb []float64
+		if err := json.Unmarshal([]byte(r.embedding), &emb); err != nil {
+			continue
+		}
+		if len(emb) != len(qVec) {
+			continue
+		}
+		dot := 0.0
+		for i := range qVec {
+			dot += qVec[i] * emb[i]
+		}
+		if dot > 0.15 {
+			entryID, _ := uuid.Parse(r.id)
+			entries = append(entries, knowledgeEntry{
+				id:       entryID,
+				title:    r.title,
+				content:  r.content,
+				examples: r.examples,
+				score:    dot,
+			})
+		}
+	}
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].score > entries[j].score })
+	if len(entries) > 5 {
+		entries = entries[:5]
+	}
+	return entries, nil
 }
 
 // buildMessages assembles the prompt. Two details matter for safety and quality:

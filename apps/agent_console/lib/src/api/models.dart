@@ -78,7 +78,7 @@ class AgentProfile {
   final String email;
   final String displayName;
 
-  /// OWNER, ADMIN, SUPERVISOR or AGENT.
+  /// SUPERVISOR or AGENT; legacy OWNER/ADMIN remain readable.
   final String role;
 
   /// ONLINE, AWAY, OFFLINE, or null before the first presence frame.
@@ -100,17 +100,21 @@ class AgentProfile {
 }
 
 class TenantInfo {
-  const TenantInfo({required this.id, required this.name});
+  const TenantInfo({required this.id, required this.name, this.slug = ''});
 
   factory TenantInfo.fromJson(Map<String, dynamic> json) => TenantInfo(
         id: asString(json['id']),
         name: asString(json['name']),
+        slug: asString(json['slug']),
       );
 
   final String id;
   final String name;
 
-  Map<String, dynamic> toJson() => <String, dynamic>{'id': id, 'name': name};
+  final String slug;
+
+  Map<String, dynamic> toJson() =>
+      <String, dynamic>{'id': id, 'name': name, 'slug': slug};
 }
 
 class InboxInfo {
@@ -401,7 +405,8 @@ class ChatMessage {
     this.error,
   });
 
-  factory ChatMessage.fromJson(Map<String, dynamic> json, {String selfId = ''}) {
+  factory ChatMessage.fromJson(Map<String, dynamic> json,
+      {String selfId = ''}) {
     final replyTo = asMap(json['replyTo']);
     return ChatMessage(
       id: asString(json['id']),
@@ -422,7 +427,8 @@ class ChatMessage {
       // because a message written before the column existed is still in the
       // transcript, and a note rendered as a normal reply would be sent to the
       // visitor by mistake.
-      isPrivate: asBool(json['private']) || asBool(asMap(json['metadata'])['private']),
+      isPrivate:
+          asBool(json['private']) || asBool(asMap(json['metadata'])['private']),
       replyToId: asNullableString(json['replyToId']),
       replyTo: replyTo.isEmpty ? null : QuotedMessage.fromJson(replyTo),
       editedAt: asDate(json['editedAt']),
@@ -435,6 +441,7 @@ class ChatMessage {
       delivery: DeliveryState.sent,
     );
   }
+
   /// A locally created message that has not been acknowledged yet. [localId] is
   /// the idempotency key sent to the server, so a retry cannot duplicate it.
   factory ChatMessage.optimistic({
@@ -448,6 +455,7 @@ class ChatMessage {
     String? senderId,
     bool isPrivate = false,
     QuotedMessage? replyTo,
+    Map<String, dynamic> metadata = const {},
   }) =>
       ChatMessage(
         id: localId,
@@ -460,7 +468,7 @@ class ChatMessage {
         messageType: isPrivate ? 'EVENT' : messageType,
         content: content,
         attachments: attachments,
-        metadata: const <String, dynamic>{},
+        metadata: metadata,
         createdAt: DateTime.now(),
         isPrivate: isPrivate,
         replyToId: replyTo?.id,
@@ -593,8 +601,56 @@ class ChatMessage {
       );
 }
 
-/// The lifecycle of an outgoing message on the agent's screen.
+/// 本地发送生命周期：发出前 / 服务端已确认 / 失败可重试。
 enum DeliveryState { sending, sent, failed }
+
+/// 坐席气泡下展示的投递回执：发送中 → 未读 → 已送达 → 已读；失败单独一态。
+enum MessageReceipt { none, sending, failed, unread, delivered, read }
+
+extension MessageReceiptLabel on MessageReceipt {
+  String get label => switch (this) {
+        MessageReceipt.none => '',
+        MessageReceipt.sending => '发送中',
+        MessageReceipt.failed => '发送失败',
+        MessageReceipt.unread => '未读',
+        MessageReceipt.delivered => '已送达',
+        MessageReceipt.read => '已读',
+      };
+}
+
+/// 坐席 AI 助手的单次返回。text 始终存在（成功时），其余为任务相关字段。
+class AssistResult {
+  const AssistResult({
+    required this.task,
+    required this.text,
+    this.label = '',
+    this.score = 0.0,
+    this.sources = const <String>[],
+    this.provider = '',
+    this.available = false,
+  });
+
+  factory AssistResult.fromJson(Map<String, dynamic> json) => AssistResult(
+        task: asString(json['task']),
+        text: asString(json['text']),
+        label: asString(json['label']),
+        score: asDouble(json['score']),
+        sources: (json['sources'] as List?)
+                ?.whereType<String>()
+                .toList(growable: false) ??
+            const <String>[],
+        provider: asString(json['provider']),
+        available: asBool(json['available']),
+      );
+
+  final String task;
+  final String text;
+  final String label;
+  final double score;
+  final List<String> sources;
+  final String provider;
+  final bool available;
+}
 
 /// ----------------------------------------------------------------- conversations
 
@@ -607,6 +663,8 @@ class Conversation {
     required this.status,
     required this.assigneeId,
     required this.assigneeName,
+    this.acceptedAt,
+    this.assignmentExpiresAt,
     required this.priority,
     required this.source,
     required this.lastSequence,
@@ -628,6 +686,8 @@ class Conversation {
         status: asString(json['status']),
         assigneeId: asNullableString(json['assigneeId']),
         assigneeName: asString(json['assigneeName']),
+        acceptedAt: asDate(json['acceptedAt']),
+        assignmentExpiresAt: asDate(json['assignmentExpiresAt']),
         priority: asInt(json['priority']),
         source: asString(json['source']),
         lastSequence: asInt(json['lastSequence']),
@@ -652,6 +712,10 @@ class Conversation {
   final String status;
   final String? assigneeId;
   final String assigneeName;
+  final DateTime? acceptedAt;
+  final DateTime? assignmentExpiresAt;
+  bool get needsAcceptance =>
+      !isUnassigned && acceptedAt == null && assignmentExpiresAt != null;
   final int priority;
   final String source;
   final int lastSequence;
@@ -668,19 +732,17 @@ class Conversation {
 
   bool get isUnassigned => assigneeId == null || assigneeId!.isEmpty;
 
-  /// What the list row shows as the title: the subject if the visitor gave one,
-  /// otherwise the visitor's own name, otherwise the newest message.
+  /// 聊天标题保持客户或会话身份稳定，最新消息只显示在预览中。
   String get title {
-    if (subject.trim().isNotEmpty) {
-      return subject.trim();
-    }
     if (visitorName.trim().isNotEmpty) {
       return visitorName.trim();
     }
-    if (lastMessagePreview.trim().isNotEmpty) {
-      return lastMessagePreview.trim();
+    if (subject.trim().isNotEmpty) {
+      return subject.trim();
     }
-    return '访客会话';
+    return visitorId.isEmpty
+        ? '访客会话'
+        : '访客 ${visitorId.substring(0, visitorId.length < 6 ? visitorId.length : 6)}';
   }
 
   Conversation copyWith({
@@ -689,6 +751,7 @@ class Conversation {
     String? assigneeName,
     int? priority,
     int? agentUnread,
+    int? visitorUnread,
     int? lastSequence,
     String? lastMessagePreview,
     DateTime? lastMessageAt,
@@ -703,13 +766,15 @@ class Conversation {
         status: status ?? this.status,
         assigneeId: clearAssignee ? null : (assigneeId ?? this.assigneeId),
         assigneeName: assigneeName ?? this.assigneeName,
+        acceptedAt: clearAssignee ? null : acceptedAt,
+        assignmentExpiresAt: clearAssignee ? null : assignmentExpiresAt,
         priority: priority ?? this.priority,
         source: source,
         lastSequence: lastSequence ?? this.lastSequence,
         lastMessagePreview: lastMessagePreview ?? this.lastMessagePreview,
         lastMessageAt: lastMessageAt ?? this.lastMessageAt,
         agentUnread: agentUnread ?? this.agentUnread,
-        visitorUnread: visitorUnread,
+        visitorUnread: visitorUnread ?? this.visitorUnread,
         visitorName: visitorName,
         tags: tags ?? this.tags,
         createdAt: createdAt,
@@ -880,7 +945,8 @@ class CannedResponse {
   final String? inboxId;
 
   /// A canned response with no inbox applies everywhere.
-  bool appliesTo(String inboxIdValue) => inboxId == null || inboxId == inboxIdValue;
+  bool appliesTo(String inboxIdValue) =>
+      inboxId == null || inboxId == inboxIdValue;
 }
 
 class TagInfo {
@@ -909,6 +975,7 @@ class TagInfo {
 class KnowledgeEntry {
   const KnowledgeEntry({
     required this.id,
+    this.categoryId = '',
     required this.title,
     required this.content,
     required this.questionExamples,
@@ -918,7 +985,7 @@ class KnowledgeEntry {
   });
 
   factory KnowledgeEntry.fromJson(Map<String, dynamic> json) => KnowledgeEntry(
-        id: asString(json['id']),
+        id: asString(json['id']), categoryId: asString(json['categoryId']),
         title: asString(json['title']),
         content: asString(json['content']),
         // The server keeps the example phrasings as one text block, one per
@@ -929,7 +996,7 @@ class KnowledgeEntry {
         updatedAt: asDate(json['updatedAt']),
       );
 
-  final String id;
+  final String id, categoryId;
   final String title;
   final String content;
   final List<String> questionExamples;
@@ -984,7 +1051,8 @@ class KnowledgeAnswer {
     required this.sources,
   });
 
-  factory KnowledgeAnswer.fromJson(Map<String, dynamic> json) => KnowledgeAnswer(
+  factory KnowledgeAnswer.fromJson(Map<String, dynamic> json) =>
+      KnowledgeAnswer(
         answer: asString(json['answer']),
         score: asDouble(json['score']),
         provider: asString(json['provider']),

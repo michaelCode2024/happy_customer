@@ -28,8 +28,6 @@ class PlatformApi {
 
   String get server => _server;
 
-  /// The short-lived bearer token exchanged from the deployment's static
-  /// PLATFORM_ADMIN_TOKEN. Empty until [exchange] or [restore] succeeds.
   String token = '';
 
   bool get hasToken => token.isNotEmpty;
@@ -38,35 +36,41 @@ class PlatformApi {
 
   /// ------------------------------------------------------------------ session
 
-  /// Trades the static platform token for a 24-hour bearer token.
-  ///
-  /// Typing the deployment secret into a long-lived console is the thing this
-  /// exchange exists to avoid: the secret is used once, and what stays in
-  /// storage is a token that expires and that the server can stop issuing.
-  Future<void> exchange(String staticToken, {String label = ''}) async {
-    final body = await _send(
-      'POST',
-      '/api/v1/platform/token',
-      body: <String, dynamic>{
-        'token': staticToken,
-        'label': label.isEmpty ? 'platform-console' : label,
-      },
-      authorized: false,
-    );
-    final issued = asString(body['token']);
-    if (issued.isEmpty) {
+  Future<void> login(String email, String password) async {
+    final body = await _send('POST', '/api/v1/platform/login',
+        body: <String, dynamic>{'email': email.trim(), 'password': password},
+        authorized: false);
+    token = asString(body['token']);
+    if (token.isEmpty) {
       throw const ApiException(
-        statusCode: 500,
-        code: 'TOKEN_MISSING',
-        message: '服务器未返回令牌',
-      );
+          statusCode: 500, code: 'TOKEN_MISSING', message: '服务器未返回登录凭证');
     }
-    token = issued;
+  }
+
+  Future<Map<String, dynamic>> quotas({String query = '', int offset = 0}) =>
+      _send('GET', '/api/v1/platform/quotas',
+          query: {'q': query, 'offset': '$offset', 'limit': '100'});
+  Future<Map<String, dynamic>> quota(String id) =>
+      _send('GET', '/api/v1/platform/tenants/$id/quota');
+  Future<Map<String, dynamic>> allocateQuota(
+          String id, Map<String, dynamic> body) =>
+      _send('POST', '/api/v1/platform/tenants/$id/quota', body: body);
+  Future<Map<String, dynamic>> quotaHistory({int offset = 0}) =>
+      _send('GET', '/api/v1/platform/quota-adjustments',
+          query: {'offset': '$offset'});
+
+  Future<void> logout() async {
+    await _send('POST', '/api/v1/platform/logout');
+  }
+
+  Future<Map<String, dynamic>> profile() => _send('GET', '/api/v1/platform/me');
+  Future<void> changePassword(String current, String next) async {
+    await _send('POST', '/api/v1/platform/me/password',
+        body: {'currentPassword': current, 'newPassword': next});
   }
 
   /// Verifies a stored token by making the cheapest authenticated call.
   ///
-  /// The platform API has no `/me`, and it does not need one: a 200 from the
   /// overview proves the token is accepted and unexpired, which is all the
   /// console needs before it shows anything.
   Future<PlatformOverview> restore(String storedToken) async {
@@ -81,13 +85,15 @@ class PlatformApi {
     return PlatformOverview.fromJson(body);
   }
 
-  Future<List<TenantSummary>> tenants({String query = '', int limit = 100}) async {
+  Future<List<TenantSummary>> tenants(
+      {String query = '', int limit = 100, int offset = 0}) async {
     final body = await _send(
       'GET',
       '/api/v1/platform/tenants',
       query: <String, String>{
         if (query.trim().isNotEmpty) 'q': query.trim(),
         'limit': '$limit',
+        'offset': '$offset',
       },
     );
     return asMapList(body['items']).map(TenantSummary.fromJson).toList();
@@ -111,6 +117,10 @@ class PlatformApi {
     final body = await _send('GET', '/api/v1/platform/release-notes');
     return PlatformMeta.fromJson(body);
   }
+
+  Future<Map<String, dynamic>> createAgent(
+          String tenantId, Map<String, dynamic> data) =>
+      _send('POST', '/api/v1/platform/tenants/$tenantId/agents', body: data);
 
   /// ------------------------------------------------------------------ writing
 
@@ -148,6 +158,7 @@ class PlatformApi {
     String name = '',
     String status = '',
     String plan = '',
+    String planStatus = '',
     int? seatLimit,
     int? monthlyMessageLimit,
     int? trialDays,
@@ -159,6 +170,7 @@ class PlatformApi {
         if (name.isNotEmpty) 'name': name,
         if (status.isNotEmpty) 'status': status,
         if (plan.isNotEmpty) 'plan': plan,
+        if (planStatus.isNotEmpty) 'planStatus': planStatus,
         if (seatLimit != null && seatLimit > 0) 'seatLimit': seatLimit,
         if (monthlyMessageLimit != null && monthlyMessageLimit > 0)
           'monthlyMessageLimit': monthlyMessageLimit,

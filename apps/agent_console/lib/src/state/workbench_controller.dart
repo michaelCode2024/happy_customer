@@ -59,6 +59,9 @@ class WorkbenchController extends ChangeNotifier {
 
   List<Conversation> _conversations = const <Conversation>[];
   int _queued = 0;
+
+  /// 服务端汇总的坐席未读条数；侧栏「客户消息」角标只用这个，不用待接待数顶替。
+  int _unread = 0;
   bool _loadingList = false;
   String? _listError;
 
@@ -141,6 +144,9 @@ class WorkbenchController extends ChangeNotifier {
   /// How many conversations are waiting for any agent, shown on the queue badge
   /// regardless of the current filter.
   int get queued => _queued;
+
+  /// 未读消息条数（跨当前筛选），给侧栏角标用。
+  int get unread => _unread;
 
   bool get loadingList => _loadingList;
 
@@ -593,6 +599,7 @@ class WorkbenchController extends ChangeNotifier {
         }
       }
       _queued = page.queued;
+      _unread = page.unread;
       _listError = null;
       // A conversation that vanished from the filter (because someone else
       // claimed it) should not stay open in the reading pane.
@@ -899,8 +906,14 @@ class WorkbenchController extends ChangeNotifier {
     List<Attachment> attachments = const <Attachment>[],
     bool private = false,
     String? clientMessageId,
+    Map<String, dynamic>? metadata,
     QuotedMessage? quote,
   }) async {
+    if (!private && selected?.needsAcceptance == true) {
+      _threadError = '请先点击“确认接单”，再回复客户';
+      _notify();
+      return false;
+    }
     final id = _selectedId;
     if (id == null) {
       return false;
@@ -913,7 +926,9 @@ class WorkbenchController extends ChangeNotifier {
         clientMessageId ?? 'local-${DateTime.now().microsecondsSinceEpoch}';
     final messageType = attachments.isEmpty
         ? 'TEXT'
-        : (attachments.every((item) => item.isImage) ? 'IMAGE' : 'FILE');
+        : attachments.every((item) => item.isAudio)
+            ? 'AUDIO'
+            : (attachments.every((item) => item.isImage) ? 'IMAGE' : 'FILE');
     final optimistic = ChatMessage.optimistic(
       localId: localId,
       conversationId: id,
@@ -924,6 +939,7 @@ class WorkbenchController extends ChangeNotifier {
       senderName: _detail?.conversation.assigneeName ?? '',
       isPrivate: private,
       replyTo: quoted,
+      metadata: metadata ?? const {},
     );
     _messages = _trimHistory(<ChatMessage>[..._messages, optimistic]);
     _replyTo = null;
@@ -939,6 +955,7 @@ class WorkbenchController extends ChangeNotifier {
         private: private,
         replyToId: quoted?.id,
         selfId: selfId,
+        metadata: metadata,
       );
       _replaceLocal(localId, saved.copyWith(delivery: DeliveryState.sent));
       _lastSequence = math.max(_lastSequence, saved.sequence);
@@ -993,6 +1010,7 @@ class WorkbenchController extends ChangeNotifier {
     return send(
       content: message.content,
       attachments: message.attachments,
+      metadata: message.metadata,
       private: message.isPrivate,
       clientMessageId: localId,
       quote: message.replyTo,
@@ -1331,13 +1349,17 @@ class WorkbenchController extends ChangeNotifier {
       await api.markRead(conversationId, sequence: boundary);
       _readAcknowledged[conversationId] = boundary;
       if (_selectedId == conversationId) {
+        final matched = _conversations.where((c) => c.id == conversationId);
+        final previous = matched.isEmpty ? 0 : matched.first.agentUnread;
+        final next = _messages
+            .where((m) => m.sequence > boundary && m.isFromVisitor)
+            .length;
         _patchLocal(
           conversationId,
-          (conversation) => conversation.copyWith(
-              agentUnread: _messages
-                  .where((m) => m.sequence > boundary && m.isFromVisitor)
-                  .length),
+          (conversation) => conversation.copyWith(agentUnread: next),
         );
+        // 侧栏未读角标跟服务端汇总对齐：本地已读后立刻扣掉差额，不等整表刷新。
+        _unread = math.max(0, _unread - previous + next);
       }
       _notify();
     } on ApiException {

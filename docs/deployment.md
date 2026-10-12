@@ -23,7 +23,7 @@ Northflank 的[计费文档](https://northflank.com/docs/v1/application/billing/
     - `PUBLIC_BASE_URL`：Service 的公开 HTTPS 地址（不能包含尾部斜杠；安装链接依赖它）
     - `WIDGET_TOKEN_SECRET`：至少 32 字符的随机密钥
     - `WIDGET_TOKEN_TTL=12h`
-    - `PLATFORM_ADMIN_TOKEN`：随机强密钥，不能使用 `local-platform-admin-token`
+    - `PLATFORM_ADMIN_EMAIL`、`PLATFORM_ADMIN_PASSWORD`：首次启动创建平台账号；生产必须使用独立邮箱和强密码
     - `ALLOWED_ORIGINS`：托管客服组件的网站来源和客服后台来源，逗号分隔；不要在真实客户环境使用 `*`
     - `DEMO_ENABLED=false`
     - `STORAGE_DRIVER=local` 且上传目录挂载持久卷，或配置 `STORAGE_DRIVER=s3` 及 S3 兼容对象存储。容器文件系统本身是临时的，不能存客户附件。

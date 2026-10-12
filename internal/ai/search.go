@@ -66,7 +66,8 @@ func (s *Service) search(ctx context.Context, tenantID uuid.UUID, question strin
 		    -- term absent from the corpus score highest instead of zero.
 		    select q.term,
 		           count(c.id)::numeric as docs,
-		           ln((s.total + 1) / (count(c.id) + 1)) as idf
+		           -- 单条知识也必须可检索；全部条目都出现的词不能变成零权重。
+		           greatest(ln((s.total + 1) / (count(c.id) + 1)), 0.05) as idf
 		      from q
 		      cross join stats s
 		      left join corpus c
@@ -131,7 +132,7 @@ type Hit struct {
 // model. Operators use it to test whether a question can be answered at all
 // before blaming the model, and it costs nothing to run.
 func (s *Service) Retrieve(ctx context.Context, tenantID uuid.UUID, question string) ([]Hit, error) {
-	entries, err := s.search(ctx, tenantID, question, false)
+	entries, err := s.SearchHybrid(ctx, tenantID, question, false)
 	if err != nil {
 		return nil, err
 	}

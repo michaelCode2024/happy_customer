@@ -19,6 +19,7 @@ import (
 
 // messageInput is the common description of a message regardless of who sends it.
 type messageInput struct {
+	ReceptionExempt        bool // 仅由服务端的AI或第三方消息入口设置，客户端元数据不能绕过接单。
 	AutomationOnly         bool
 	AutomationRespectAgent bool
 	SenderType             string
@@ -134,6 +135,16 @@ func (a *API) appendMessage(ctx context.Context, tenantID, conversationID uuid.U
 		}
 		if err = a.checkMessageQuota(ctx, tx, tenantID); err != nil {
 			return messageView{}, err
+		}
+	}
+
+	if in.SenderType == "AGENT" && !in.Private && !in.ReceptionExempt && in.SenderID != nil {
+		var allowed bool
+		if err = tx.QueryRow(ctx, `select assignee_id=$3 and accepted_at is not null from conversation where id=$1 and tenant_id=$2 for update`, conversationID, tenantID, *in.SenderID).Scan(&allowed); err != nil {
+			return messageView{}, err
+		}
+		if !allowed {
+			return messageView{}, fmt.Errorf("请先确认接单，再回复客户")
 		}
 	}
 
@@ -387,7 +398,6 @@ func (a *API) autoAssign(ctx context.Context, tx pgx.Tx, tenantID, conversationI
 				return fixed, nil
 			}
 		}
-		return nil, nil
 	}
 
 	if strategy == "ROUND_ROBIN" {
@@ -395,11 +405,14 @@ func (a *API) autoAssign(ctx context.Context, tx pgx.Tx, tenantID, conversationI
 		// from how many conversations the inbox has already handed out, which
 		// keeps it stateless: no cursor table to keep in sync across instances,
 		// and an agent added mid-shift joins the rotation on the next message.
-		candidate, err := a.roundRobinCandidate(ctx, tx, tenantID, inboxID, maxConcurrent)
+		candidate, err := a.roundRobinCandidate(ctx, tx, tenantID, inboxID, conversationID, maxConcurrent)
 		if err != nil {
 			return nil, nil //nolint:nilerr // nobody eligible: leave it queued
 		}
 		if err := a.setAssignee(ctx, tx, tenantID, conversationID, candidate); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, nil
+			}
 			return nil, err
 		}
 		return &candidate, nil
@@ -419,20 +432,24 @@ func (a *API) autoAssign(ctx context.Context, tx pgx.Tx, tenantID, conversationI
 		  ) load on true
 		 where ag.tenant_id = $1 and ag.status = 'ACTIVE'
 		   and coalesce(ap.status, 'OFFLINE') = 'ONLINE'
+           and not exists(select 1 from reception_timeout rt where rt.agent_id=ag.id and rt.conversation_id=$3)
 		   and (ag.max_concurrent = 0 or load.load < ag.max_concurrent)
 		 order by load.load asc nulls first, load.last_assigned asc nulls first, ag.created_at asc
-		 limit 1`, tenantID, inboxID).Scan(&candidate)
+		 limit 1`, tenantID, inboxID, conversationID).Scan(&candidate)
 	if err != nil {
 		return nil, nil //nolint:nilerr // nobody online: leave it in the queue
 	}
 	if err := a.setAssignee(ctx, tx, tenantID, conversationID, candidate); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &candidate, nil
 }
 
 // completeHandoff 暂停机器人并按路由规则分配客服。
-// 可重复调用：已暂停时仍会尝试补分配；返回给访客看的下一句状态（已接入 / 已排队）。
+// 可重复调用：已暂停时仍会尝试补分配；分配与接单使用独立状态通知。
 func (a *API) completeHandoff(ctx context.Context, tenantID, conversationID uuid.UUID) (*uuid.UUID, string, error) {
 	tx, err := a.db.Begin(ctx)
 	if err != nil {
@@ -442,15 +459,36 @@ func (a *API) completeHandoff(ctx context.Context, tenantID, conversationID uuid
 
 	var current *uuid.UUID
 	var paused bool
+	var accepted *time.Time
 	if err := tx.QueryRow(ctx, `
-		select assignee_id, bot_paused
+		select assignee_id, bot_paused, accepted_at
 		  from conversation
 		 where id = $1 and tenant_id = $2
-		 for update`, conversationID, tenantID).Scan(&current, &paused); err != nil {
+		 for update`, conversationID, tenantID).Scan(&current, &paused, &accepted); err != nil {
 		return nil, "", err
 	}
+	if _, err = tx.Exec(ctx, `update conversation set handoff_requested_at=coalesce(handoff_requested_at,now()) where id=$1`, conversationID); err != nil {
+		return nil, "", err
+	}
+	if paused && current != nil {
+		name := "人工客服"
+		if err = tx.QueryRow(ctx, `select display_name from agent where id=$1`, *current).Scan(&name); err != nil {
+			return nil, "", err
+		}
+		state, content := "ASSIGNED", fmt.Sprintf("已分配给客服「%s」，等待客服接待。", name)
+		if accepted != nil {
+			state = "ACCEPTED"
+			content = fmt.Sprintf("客服「%s」已在接待中，请直接描述您的问题。", name)
+		}
+		if err = receptionNotice(ctx, tx, tenantID, conversationID, content, state); err != nil {
+			return nil, "", err
+		}
+	}
 	if !paused {
-		if _, err := tx.Exec(ctx, `update conversation set bot_paused = true, updated_at = now() where id = $1`, conversationID); err != nil {
+		if err := receptionNotice(ctx, tx, tenantID, conversationID, "正在为您转接人工客服。", "TRANSFERRING"); err != nil {
+			return nil, "", err
+		}
+		if _, err := tx.Exec(ctx, `update conversation set bot_paused = true, handoff_requested_at=coalesce(handoff_requested_at,now()), updated_at = now() where id = $1`, conversationID); err != nil {
 			return nil, "", err
 		}
 	}
@@ -458,9 +496,15 @@ func (a *API) completeHandoff(ctx context.Context, tenantID, conversationID uuid
 	if err != nil {
 		return nil, "", err
 	}
+	if assignee == nil {
+		if err := receptionNotice(ctx, tx, tenantID, conversationID, "暂无客服可以接单，已为您排队。", "QUEUED"); err != nil {
+			return nil, "", err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, "", err
 	}
+	a.flushReceptionNotices(ctx)
 	if assignee == nil {
 		// 无人可接时保留待接队列，但必须告诉访客，避免停在「请稍候」无下文。
 		return nil, "暂无客服立即接待，已为您排队，上线后会尽快回复。", nil
@@ -470,13 +514,16 @@ func (a *API) completeHandoff(ctx context.Context, tenantID, conversationID uuid
 	if strings.TrimSpace(name) == "" {
 		name = "人工客服"
 	}
-	return assignee, fmt.Sprintf("客服「%s」已接入，请继续描述您的问题。", name), nil
+	if accepted != nil {
+		return assignee, fmt.Sprintf("客服「%s」已在接待中，请直接描述您的问题。", name), nil
+	}
+	return assignee, fmt.Sprintf("已分配给客服「%s」，等待客服接待。", name), nil
 }
 
 // roundRobinCandidate returns the agent whose turn it is. `nth` is the total
 // number of conversations the inbox has ever started, so the order advances by
 // exactly one per assigned conversation even when several instances are running.
-func (a *API) roundRobinCandidate(ctx context.Context, tx pgx.Tx, tenantID, inboxID uuid.UUID, maxConcurrent int) (uuid.UUID, error) {
+func (a *API) roundRobinCandidate(ctx context.Context, tx pgx.Tx, tenantID, inboxID, conversationID uuid.UUID, maxConcurrent int) (uuid.UUID, error) {
 	var eligible []uuid.UUID
 	rows, err := tx.Query(ctx, `
 		select ag.id
@@ -489,8 +536,9 @@ func (a *API) roundRobinCandidate(ctx context.Context, tx pgx.Tx, tenantID, inbo
 		  ) load on true
 		 where ag.tenant_id = $1 and ag.status = 'ACTIVE'
 		   and coalesce(ap.status, 'OFFLINE') = 'ONLINE'
+           and not exists(select 1 from reception_timeout rt where rt.agent_id=ag.id and rt.conversation_id=$3)
 		   and (ag.max_concurrent = 0 or load.load < ag.max_concurrent)
-		 order by ag.created_at asc, ag.id asc`, tenantID, inboxID)
+		 order by ag.created_at asc, ag.id asc`, tenantID, inboxID, conversationID)
 	if err != nil {
 		return uuid.Nil, err
 	}
@@ -516,11 +564,32 @@ func (a *API) roundRobinCandidate(ctx context.Context, tx pgx.Tx, tenantID, inbo
 }
 
 func (a *API) setAssignee(ctx context.Context, tx pgx.Tx, tenantID, conversationID, agentID uuid.UUID) error {
-	_, err := tx.Exec(ctx, `update conversation set assignee_id = $3, assigned_at = now(), updated_at = now()
-		where id = $1 and tenant_id = $2 and assignee_id is null`, conversationID, tenantID, agentID)
+	var capacity int
+	if err := tx.QueryRow(ctx, `select max_concurrent from agent where id=$1 and tenant_id=$2 for update`, agentID, tenantID).Scan(&capacity); err != nil {
+		return err
+	}
+	var load int
+	if err := tx.QueryRow(ctx, `select count(*) from conversation where assignee_id=$1 and status<>'RESOLVED'`, agentID).Scan(&load); err != nil {
+		return err
+	}
+	if capacity > 0 && load >= capacity {
+		return pgx.ErrNoRows
+	}
+	var name string
+	if err := tx.QueryRow(ctx, `select display_name from agent ag where id=$1 and tenant_id=$2 and status='ACTIVE' and exists(select 1 from agent_inbox ai join conversation c on c.inbox_id=ai.inbox_id where ai.agent_id=ag.id and c.id=$3) and exists(select 1 from agent_presence ap where ap.agent_id=ag.id and ap.status='ONLINE') and not exists(select 1 from reception_timeout rt where rt.agent_id=ag.id and rt.conversation_id=$3)`, agentID, tenantID, conversationID).Scan(&name); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `update conversation c set assignee_id=$3,assigned_at=now(),accepted_at=null,bot_paused=true,handoff_requested_at=coalesce(handoff_requested_at,now()),assignment_expires_at=now()+make_interval(secs=>coalesce((select acceptance_timeout_seconds from routing_rule rr where rr.tenant_id=$2 and rr.enabled and (rr.inbox_id=c.inbox_id or rr.inbox_id is null) order by rr.inbox_id nulls last limit 1),60)),updated_at=now() where id=$1 and tenant_id=$2 and assignee_id is null`, conversationID, tenantID, agentID)
 	if err != nil {
 		return err
 	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	if err = receptionNotice(ctx, tx, tenantID, conversationID, fmt.Sprintf("已分配给客服「%s」，等待客服接待。", name), "ASSIGNED"); err != nil {
+		return err
+	}
+
 	// The detail document is built in Go rather than in SQL. Passing the same
 	// placeholder as both the uuid actor_id column and, behind a cast, as a
 	// jsonb field leaves PostgreSQL with two candidate types for one parameter
@@ -876,7 +945,7 @@ func (a *API) queryConversation(ctx context.Context, conversationID uuid.UUID, v
 		select c.id, c.tenant_id, c.inbox_id, c.visitor_id, coalesce(c.subject,''), c.status, c.assignee_id,
 		       coalesce(ag.display_name,''), c.priority, c.source, c.last_sequence,
 		       coalesce(c.last_message_preview,''), c.last_message_at, c.agent_unread, c.visitor_unread,
-		       coalesce(v.display_name,''), c.created_at, c.updated_at
+		       coalesce(v.display_name,''), c.created_at, c.updated_at, c.accepted_at, c.assignment_expires_at
 		  from conversation c
 		  join visitor v on v.id = c.visitor_id
 		  left join agent ag on ag.id = c.assignee_id
@@ -903,7 +972,7 @@ func scanConversationRow(row rowScanner, view *conversationView) error {
 	return row.Scan(&view.ID, &view.TenantID, &view.InboxID, &view.VisitorID, &view.Subject, &view.Status,
 		&view.AssigneeID, &view.AssigneeName, &view.Priority, &view.Source, &view.LastSequence,
 		&view.LastMessagePreview, &view.LastMessageAt, &view.AgentUnread, &view.VisitorUnread,
-		&view.VisitorName, &view.CreatedAt, &view.UpdatedAt)
+		&view.VisitorName, &view.CreatedAt, &view.UpdatedAt, &view.AcceptedAt, &view.AssignmentExpiresAt)
 }
 
 func (a *API) conversationTags(ctx context.Context, conversationID uuid.UUID) ([]string, error) {
@@ -964,60 +1033,86 @@ func (a *API) maybeAIReply(ctx context.Context, tenantID, conversationID uuid.UU
 	// first: the inbox is configured that way, and the handoff below hands over
 	// cleanly when the bot cannot answer.
 
+	finish, quotaErr := a.reserveAIQuota(ctx, tenantID)
+	if quotaErr != nil {
+		_, _, _ = a.completeHandoff(ctx, tenantID, conversationID)
+		return
+	}
+	success := false
+	defer func() { finish(success) }()
 	started := time.Now()
-	reply, err := a.ai.AnswerWith(ctx, ai.Request{
+	botAgentID = a.botAgentID(ctx, tenantID)
+	interactionID := uuid.New()
+	aiReq := ai.Request{
 		TenantID:     tenantID,
 		Question:     question.Content,
 		History:      a.recentTranscript(ctx, conversationID, question.Sequence, 8),
 		Threshold:    inboxThreshold,
 		Conversation: conversationID,
-	})
+	}
+
+	// 流式优先：逐字推送访客，贴合「正在输入→逐字」的即时手感；不支持流式或失败则回退一次性生成。
+	if tokens, gate, streamErr := a.ai.StreamAnswer(ctx, aiReq); streamErr == nil && tokens != nil {
+		var builder strings.Builder
+		channels := a.conversationChannels(ctx, conversationID)
+		for tok := range tokens {
+			builder.WriteString(tok)
+			a.publish(ctx, channels, realtime.Event{
+				Type: "conversation.aiToken", TenantID: tenantID.String(), ConversationID: conversationID.String(),
+				Data: map[string]any{"token": tok},
+			})
+		}
+		latency := time.Since(started).Milliseconds()
+		full := strings.TrimSpace(builder.String())
+		if full == "" || a.ai.LooksInjected(full) {
+			gate.Reason = ai.ReasonProviderFail
+			gate.Handoff = true
+			a.storeAIHandoff(ctx, tenantID, conversationID, question, interactionID, gate, handoffMessage, latency)
+			return
+		}
+		success = true
+		a.storeAIMessage(ctx, tenantID, conversationID, question.ID, botAgentID, full, gate, interactionID, latency)
+		return
+	}
+
+	reply, err := a.ai.AnswerWith(ctx, aiReq)
 	latency := time.Since(started).Milliseconds()
-	botAgentID = a.botAgentID(ctx, tenantID)
-	interactionID := uuid.New()
 	if err != nil {
 		a.logger.Warn("ai answer failed", "error", err, "conversation", conversationID)
 	}
 	if reply.Handoff || strings.TrimSpace(reply.Content) == "" {
-		_, _ = a.db.Exec(ctx, `insert into ai_interaction(id, tenant_id, conversation_id, question_message_id, provider, score, answered, reason, latency_ms, sources)
-			values($1,$2,$3,$4,$5,$6,false,$7,$8,$9)`,
-			interactionID, tenantID, conversationID, question.ID, a.ai.ProviderName(), reply.Score,
-			string(reply.Reason), latency, reply.Sources)
-		a.bumpDailyStat(ctx, tenantID, "ai_handoff")
-		// AI 低置信度转人工以前只落一句提示、不暂停机器人也不分配，访客会一直停在「请稍候」。
-		assigneeID, statusLine, handoffErr := a.completeHandoff(ctx, tenantID, conversationID)
-		if handoffErr != nil {
-			a.logger.Warn("ai handoff assign failed", "error", handoffErr, "conversation", conversationID)
-		}
-		content := strings.TrimSpace(handoffMessage)
-		if content == "" {
-			content = "正在为你转接人工客服，请稍候。"
-		}
-		if statusLine != "" {
-			content = content + "\n" + statusLine
-		}
-		meta := map[string]any{"ai": true, "handoff": true, "reason": string(reply.Reason), "queued": assigneeID == nil}
-		if assigneeID != nil {
-			meta["assigneeId"] = assigneeID.String()
-		}
-		if _, err := a.appendMessage(ctx, tenantID, conversationID, messageInput{
-			SenderType: "SYSTEM", MessageType: "SYSTEM", Content: content, Metadata: meta,
-		}); err != nil {
-			a.logger.Debug("store handoff message failed", "error", err)
-		}
-		a.publish(ctx, a.conversationChannels(ctx, conversationID), realtime.Event{
-			Type: "conversation.handoff", TenantID: tenantID.String(), ConversationID: conversationID.String(),
-			Data: map[string]any{"message": content, "reason": string(reply.Reason)},
-		})
+		a.storeAIHandoff(ctx, tenantID, conversationID, question, interactionID, reply, handoffMessage, latency)
 		return
 	}
+	success = true
+	a.storeAIMessage(ctx, tenantID, conversationID, question.ID, botAgentID, reply.Content, reply, interactionID, latency)
+}
 
-	content := reply.Content
+// storeAIHandoff records a low-confidence / empty / injected AI outcome and asks a
+// human to take over. It is the single handoff write path shared by the streaming
+// and one-shot answer flows.
+func (a *API) storeAIHandoff(ctx context.Context, tenantID, conversationID uuid.UUID, question messageView, interactionID uuid.UUID, reply ai.Reply, handoffMessage string, latency int64) {
+	_, _ = a.db.Exec(ctx, `insert into ai_interaction(id, tenant_id, conversation_id, question_message_id, provider, score, answered, reason, latency_ms, sources)
+		values($1,$2,$3,$4,$5,$6,false,$7,$8,$9)`,
+		interactionID, tenantID, conversationID, question.ID, reply.Provider, reply.Score,
+		string(reply.Reason), latency, reply.Sources)
+	a.bumpDailyStat(ctx, tenantID, "ai_handoff")
+	// AI 低置信度转人工以前只落一句提示、不暂停机器人也不分配，访客会一直停在「请稍候」。
+	if _, _, err := a.completeHandoff(ctx, tenantID, conversationID); err != nil {
+		a.logger.Warn("ai handoff failed", "error", err)
+	}
+}
+
+// storeAIMessage persists a generated AI answer as an agent message and records the
+// interaction. It is the single answer write path shared by the streaming and
+// one-shot flows.
+func (a *API) storeAIMessage(ctx context.Context, tenantID, conversationID, questionID uuid.UUID, botAgentID *uuid.UUID, content string, reply ai.Reply, interactionID uuid.UUID, latency int64) {
 	view, err := a.appendMessage(ctx, tenantID, conversationID, messageInput{
-		SenderType:  "AGENT",
-		SenderID:    botAgentID,
-		MessageType: "TEXT",
-		Content:     content,
+		ReceptionExempt: true,
+		SenderType:      "AGENT",
+		SenderID:        botAgentID,
+		MessageType:     "TEXT",
+		Content:         content,
 		Metadata: map[string]any{
 			"ai":       true,
 			"provider": reply.Provider,
@@ -1031,7 +1126,7 @@ func (a *API) maybeAIReply(ctx context.Context, tenantID, conversationID uuid.UU
 	}
 	_, _ = a.db.Exec(ctx, `insert into ai_interaction(id, tenant_id, conversation_id, question_message_id, answer_message_id, provider, score, answered, latency_ms, sources)
 		values($1,$2,$3,$4,$5,$6,$7,true,$8,$9)`,
-		interactionID, tenantID, conversationID, question.ID, view.ID, reply.Provider, reply.Score, latency, reply.Sources)
+		interactionID, tenantID, conversationID, questionID, view.ID, reply.Provider, reply.Score, latency, reply.Sources)
 	a.bumpDailyStat(ctx, tenantID, "ai_answered")
 }
 

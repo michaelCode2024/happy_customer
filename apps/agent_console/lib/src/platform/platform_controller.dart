@@ -11,7 +11,7 @@ import 'package:relaydesk_agent_console/src/state/credential_store.dart';
 enum PlatformPhase { booting, locked, signingIn, ready }
 
 /// What the operator is looking at inside the console.
-enum PlatformSection { overview, tenants, ai, about }
+enum PlatformSection { overview, tenants, plans, ai, about, account, history }
 
 /// Owns the operations console: the bearer token, the tenant list and whichever
 /// detail is open.
@@ -36,14 +36,35 @@ class PlatformController extends ChangeNotifier {
   bool _busy = false;
   bool _disposed = false;
 
+  Map<String, dynamic> _profile = {};
+  bool get isSuperAdmin => _profile['role'] == 'SUPER_ADMIN';
+  String get operatorName => (_profile['displayName'] ?? '平台管理员').toString();
   String _server = '';
   PlatformOverview? _overview;
   List<TenantSummary> _tenants = const <TenantSummary>[];
   PlatformAiUsage? _aiUsage;
   PlatformMeta? _meta;
   TenantDetail? _detail;
+  String? _assignmentPlan;
+  String? get assignmentPlan => _assignmentPlan;
+
+  void beginPlanAssignment(String plan) {
+    _assignmentPlan = plan;
+    _detail = null;
+    selectSection(PlatformSection.tenants);
+    _notify();
+  }
+
+  void clearPlanAssignment() {
+    _assignmentPlan = null;
+    _notify();
+  }
+
   String _tenantQuery = '';
   int _aiDays = 14;
+  bool _hasMoreTenants = false;
+  int _tenantRevision = 0;
+  bool get hasMoreTenants => _hasMoreTenants;
   Timer? _searchDebounce;
 
   PlatformPhase get phase => _phase;
@@ -55,6 +76,8 @@ class PlatformController extends ChangeNotifier {
   bool get busy => _busy;
 
   String get server => _server;
+
+  PlatformApi get api => _api!;
 
   PlatformOverview? get overview => _overview;
 
@@ -70,12 +93,14 @@ class PlatformController extends ChangeNotifier {
 
   int get aiDays => _aiDays;
 
+  /// 登录页预填用；密码永不通过此接口暴露。
+  Future<String?> rememberedEmail() => _store.loadPlatformEmail();
+
   /// ------------------------------------------------------------------ session
 
   /// Restores a stored operator token, then proves it still works.
   ///
   /// A stale token is not an error worth alarming the operator with: it is the
-  /// ordinary end of a 24-hour shift, so the console simply comes back locked.
   Future<void> bootstrap() async {
     _server = await _store.loadServer() ?? '';
     if (_server.isEmpty) {
@@ -93,6 +118,7 @@ class PlatformController extends ChangeNotifier {
     try {
       _overview = await api.restore(stored);
       _meta = await api.meta();
+      _profile = await api.profile();
       _setPhase(PlatformPhase.ready);
       unawaited(refreshTenants());
       unawaited(refreshAiUsage());
@@ -111,11 +137,11 @@ class PlatformController extends ChangeNotifier {
     }
   }
 
-  /// Exchanges the deployment's static token for a bearer token and enters the
   /// console.
   Future<bool> signIn({
     required String server,
-    required String staticToken,
+    required String email,
+    required String password,
   }) async {
     final origin = PlatformApi(server: server).server;
     if (origin.isEmpty) {
@@ -123,8 +149,8 @@ class PlatformController extends ChangeNotifier {
       _notify();
       return false;
     }
-    if (staticToken.trim().isEmpty) {
-      _error = '请填写平台管理令牌';
+    if (email.trim().isEmpty || password.isEmpty) {
+      _error = '请填写账号和密码';
       _notify();
       return false;
     }
@@ -135,14 +161,19 @@ class PlatformController extends ChangeNotifier {
     final api = _makeApi(origin);
     _api = api;
     try {
-      await api.exchange(staticToken.trim());
+      await api.login(email, password);
       final overview = await api.overview();
       final meta = await api.meta();
+      _profile = await api.profile();
       await _store.saveServer(origin);
       await _store.savePlatformToken(api.token);
+      // 记住用户名方便回访；密码绝不落盘。
+      await _store.savePlatformEmail(email.trim());
       _server = origin;
       _overview = overview;
       _meta = meta;
+      // 登录成功一律落在运营主页，而不是上次停留的子页。
+      _section = PlatformSection.overview;
       _busy = false;
       _setPhase(PlatformPhase.ready);
       unawaited(refreshTenants());
@@ -160,17 +191,22 @@ class PlatformController extends ChangeNotifier {
     }
   }
 
-  /// Leaves the console. The static token is never stored, so signing out really
-  /// does mean the operator has to produce the deployment secret again.
   Future<void> signOut() async {
+    try {
+      await _api?.logout();
+    } catch (_) {/* 即使会话已过期，也清除本地凭证。 */}
     _api?.close();
     _api = null;
     _overview = null;
+    _profile = {};
     _tenants = const <TenantSummary>[];
     _aiUsage = null;
     _detail = null;
     _tenantQuery = '';
+    _section = PlatformSection.overview;
+    _error = null;
     await _store.clearPlatformToken();
+    // locked → 根路由回到平台登录页；不切换到客服门面。
     _setPhase(PlatformPhase.locked);
   }
 
@@ -181,6 +217,12 @@ class PlatformController extends ChangeNotifier {
     _section = section;
     _notify();
     switch (section) {
+      case PlatformSection.history:
+        break;
+      case PlatformSection.account:
+      case PlatformSection.plans:
+        // 套餐页是静态营销内容，无需额外拉取。
+        break;
       case PlatformSection.overview:
         unawaited(refreshOverview());
       case PlatformSection.tenants:
@@ -223,10 +265,14 @@ class PlatformController extends ChangeNotifier {
     if (api == null) {
       return;
     }
+    final revision = ++_tenantRevision;
     _busy = true;
     _notify();
     try {
-      _tenants = await api.tenants(query: _tenantQuery);
+      final rows = await api.tenants(query: _tenantQuery);
+      if (revision != _tenantRevision) return;
+      _tenants = rows;
+      _hasMoreTenants = rows.length == 100;
       _error = null;
     } on ApiException catch (failure) {
       _error = failure.message;
@@ -237,6 +283,29 @@ class PlatformController extends ChangeNotifier {
     }
     _busy = false;
     _notify();
+  }
+
+  Future<void> loadMoreTenants() async {
+    final api = _api;
+    if (api == null || _busy || !_hasMoreTenants) return;
+    final revision = _tenantRevision;
+    _busy = true;
+    _notify();
+    try {
+      final rows =
+          await api.tenants(query: _tenantQuery, offset: _tenants.length);
+      if (revision != _tenantRevision) return;
+      _tenants = [..._tenants, ...rows];
+      _hasMoreTenants = rows.length == 100;
+    } on ApiException catch (failure) {
+      _error = failure.message;
+      if (failure.isUnauthorized) await _expire();
+    } finally {
+      if (revision == _tenantRevision) {
+        _busy = false;
+        _notify();
+      }
+    }
   }
 
   /// Debounces the search box, so typing a slug is one request rather than one
@@ -335,6 +404,7 @@ class PlatformController extends ChangeNotifier {
     required String publicKey,
     required String plan,
     required int trialDays,
+    bool inlineFailure = false,
   }) async {
     final api = _api;
     if (api == null) {
@@ -360,8 +430,14 @@ class PlatformController extends ChangeNotifier {
       await refreshOverview();
       return created;
     } on ApiException catch (failure) {
-      _error = failure.message;
       _busy = false;
+      if (inlineFailure && !failure.isUnauthorized) {
+        // 对话框负责展示创建错误，避免同一错误同时出现在背景页面。
+        _error = null;
+        _notify();
+        rethrow;
+      }
+      _error = failure.message;
       if (failure.isUnauthorized) {
         await _expire();
         return null;
@@ -378,6 +454,7 @@ class PlatformController extends ChangeNotifier {
     String name = '',
     String status = '',
     String plan = '',
+    String planStatus = '',
     int? seatLimit,
     int? monthlyMessageLimit,
     int? trialDays,
@@ -396,6 +473,7 @@ class PlatformController extends ChangeNotifier {
         name: name,
         status: status,
         plan: plan,
+        planStatus: planStatus,
         seatLimit: seatLimit,
         monthlyMessageLimit: monthlyMessageLimit,
         trialDays: trialDays,

@@ -4,16 +4,16 @@ import 'package:relaydesk_agent_console/src/ui/product_brand.dart';
 /// 品牌字号档位：侧栏用紧凑，登录英雄区放大，保证第一眼先看到产品名。
 enum TongYuBrandSize { compact, regular, large, hero }
 
-/// 兼容旧调用名；实现已统一为通语标识。
+/// 兼容旧调用名；实现已统一为语聊标识。
 typedef LiaoQiaoBrandSize = TongYuBrandSize;
 
-/// 展示品牌「通语」；RelayDesk 协议与存储键不变，已有客户无需迁移。
+/// 展示品牌「语聊」；RelayDesk 协议与存储键不变，已有客户无需迁移。
 class TongYuBrand extends StatelessWidget {
   const TongYuBrand({
     super.key,
     this.compact = false,
     this.size = TongYuBrandSize.regular,
-    this.showEnglish = true,
+    this.showEnglish = false,
   });
 
   /// 兼容旧调用；与 [size] 同时传入时以 [size] 为准，除非仍是默认 regular。
@@ -91,11 +91,11 @@ class LiaoQiaoBrand extends TongYuBrand {
     super.key,
     super.compact = false,
     super.size = TongYuBrandSize.regular,
-    super.showEnglish = true,
+    super.showEnglish = false,
   });
 }
 
-/// 通语 Logo 图形：蓝底圆角方块 + 双对话气泡（对齐正式横排标识）。
+/// 语聊 Logo 图形：蓝底圆角方块 + 白色对话气泡与三点。
 class TongYuLogoMark extends StatelessWidget {
   const TongYuLogoMark({super.key, this.size = 36});
 
@@ -120,33 +120,25 @@ class _TongYuMarkPainter extends CustomPainter {
       Rect.fromLTWH(0, 0, r, r),
       Radius.circular(radius),
     );
-    canvas.drawRRect(bg, Paint()..color = const Color(0xFF2F6BFF));
+    canvas.drawRRect(bg, Paint()..color = const Color(0xFF5E78FA));
 
     // 左侧主气泡
     final left = RRect.fromRectAndRadius(
-      Rect.fromLTWH(r * 0.16, r * 0.18, r * 0.48, r * 0.42),
+      Rect.fromLTWH(r * 0.16, r * 0.18, r * 0.68, r * 0.56),
       Radius.circular(r * 0.12),
     );
     canvas.drawRRect(left, Paint()..color = Colors.white);
     final leftTail = Path()
-      ..moveTo(r * 0.22, r * 0.56)
-      ..lineTo(r * 0.18, r * 0.72)
-      ..lineTo(r * 0.36, r * 0.58)
+      ..moveTo(r * 0.22, r * 0.68)
+      ..lineTo(r * 0.18, r * 0.84)
+      ..lineTo(r * 0.38, r * 0.70)
       ..close();
     canvas.drawPath(leftTail, Paint()..color = Colors.white);
 
-    // 右侧叠放气泡，略浅以区分层次
-    final right = RRect.fromRectAndRadius(
-      Rect.fromLTWH(r * 0.40, r * 0.36, r * 0.42, r * 0.36),
-      Radius.circular(r * 0.11),
-    );
-    canvas.drawRRect(right, Paint()..color = const Color(0xFFE8F0FF));
-    final rightTail = Path()
-      ..moveTo(r * 0.72, r * 0.68)
-      ..lineTo(r * 0.82, r * 0.82)
-      ..lineTo(r * 0.62, r * 0.70)
-      ..close();
-    canvas.drawPath(rightTail, Paint()..color = const Color(0xFFE8F0FF));
+    for (final x in [0.34, 0.50, 0.66]) {
+      canvas.drawCircle(Offset(r * x, r * 0.45), r * 0.035,
+          Paint()..color = const Color(0xFF5E78FA));
+    }
   }
 
   @override
@@ -226,13 +218,15 @@ class WorkspaceSidebar extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
                   color: dark
                       ? scheme.surfaceContainerHighest.withOpacity(0.45)
                       : Colors.white,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: scheme.outlineVariant.withOpacity(0.8)),
+                  border:
+                      Border.all(color: scheme.outlineVariant.withOpacity(0.8)),
                 ),
                 child: leading!,
               ),
@@ -342,12 +336,15 @@ class WorkspaceSidebar extends StatelessWidget {
             ),
           ),
           if (footer != null)
-            Padding(padding: const EdgeInsets.fromLTRB(14, 4, 14, 8), child: footer!),
+            Padding(
+                padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),
+                child: footer!),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 16, 16),
             child: Text(
-              '通语工作台',
-              style: TextStyle(fontSize: 11, color: scheme.outline, height: 1.35),
+              '语聊工作台',
+              style:
+                  TextStyle(fontSize: 11, color: scheme.outline, height: 1.35),
             ),
           ),
         ],
@@ -368,6 +365,7 @@ class ConsoleIconRail extends StatelessWidget {
     this.avatar,
     this.footer,
     this.expanded = true,
+    this.showBrand = true,
   });
 
   final List<WorkspaceNavItem> items;
@@ -376,160 +374,95 @@ class ConsoleIconRail extends StatelessWidget {
   final Widget? avatar;
   final Widget? footer;
 
-  /// true：图标下显示菜单名；false：仅图标（兼容极窄布局）。
+  /// true：图标旁显示菜单名；false：仅图标（兼容极窄布局）。
   final bool expanded;
+  final bool showBrand;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final dark = scheme.brightness == Brightness.dark;
     return Container(
-      width: expanded ? 88 : 72,
-      decoration: BoxDecoration(
-        color: dark ? const Color(0xFF141820) : const Color(0xFFF5F6F8),
-        border: Border(right: BorderSide(color: scheme.outlineVariant)),
-      ),
+      width: 76,
+      color: const Color(0xFF182334),
       child: SafeArea(
-        child: Column(
-          children: [
-            const SizedBox(height: 14),
-            // 侧轨宽度有限：Logo 下叠「通语 / TongYu」，对齐定稿横排标识的信息密度。
-            Column(
-              children: [
-                const TongYuLogoMark(size: 34),
-                const SizedBox(height: 6),
-                Text(
-                  ProductBrand.nameZh,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.2,
-                    color: scheme.onSurface,
-                    height: 1.1,
-                  ),
-                ),
-                Text(
-                  ProductBrand.nameEn,
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w500,
-                    letterSpacing: 0.6,
-                    color: scheme.onSurfaceVariant,
-                    height: 1.2,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            if (avatar != null) ...[
-              avatar!,
-              const SizedBox(height: 14),
-            ],
-            Expanded(
+        child: Column(children: [
+          const SizedBox(height: 24),
+          if (showBrand) const TongYuLogoMark(size: 36),
+          const SizedBox(height: 28),
+          Expanded(
               child: ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                children: [
-                  for (var i = 0; i < items.length; i++)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Builder(
-                        builder: (context) {
-                          // 展开态文案已可见，不必再挂 Tooltip；收起态才用悬停提示。
-                          final tile = Material(
-                            color: i == selectedIndex
-                                ? scheme.primaryContainer
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(14),
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(14),
-                              onTap: () => onSelected(i),
-                              child: SizedBox(
-                                height: expanded ? 58 : 46,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            children: [
+              for (var i = 0; i < items.length; i++)
+                Padding(
+                    padding: const EdgeInsets.only(bottom: 7),
+                    child: Tooltip(
+                        message: items[i].label,
+                        child: Material(
+                          color: i == selectedIndex
+                              ? const Color(0xFF2C3A52)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(10),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(10),
+                            onTap: () => onSelected(i),
+                            child: SizedBox(
+                                height: 58,
                                 child: Stack(
-                                  alignment: Alignment.center,
-                                  children: [
-                                    Column(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        Icon(
-                                          items[i].icon,
-                                          size: 22,
-                                          color: i == selectedIndex
-                                              ? scheme.primary
-                                              : scheme.onSurfaceVariant,
-                                        ),
-                                        if (expanded) ...[
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            // 四字菜单缩成短名，避免轨宽被撑破。
-                                            _railLabel(items[i].label),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: TextStyle(
-                                              fontSize: 11,
-                                              height: 1.1,
-                                              fontWeight: i == selectedIndex
-                                                  ? FontWeight.w700
-                                                  : FontWeight.w500,
-                                              color: i == selectedIndex
-                                                  ? scheme.primary
-                                                  : scheme.onSurfaceVariant,
-                                            ),
-                                          ),
-                                        ],
-                                      ],
-                                    ),
-                                    if (items[i].count > 0)
-                                      Positioned(
-                                        top: 4,
-                                        right: expanded ? 10 : 6,
-                                        child: Container(
-                                          constraints: const BoxConstraints(
-                                              minWidth: 16),
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 4,
-                                            vertical: 1,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: scheme.error,
-                                            borderRadius:
-                                                BorderRadius.circular(999),
-                                          ),
-                                          child: Text(
-                                            items[i].count > 99
-                                                ? '99+'
-                                                : '${items[i].count}',
-                                            textAlign: TextAlign.center,
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 9,
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          );
-                          if (expanded) return tile;
-                          return Tooltip(
-                              message: items[i].label, child: tile);
-                        },
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            if (footer != null)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(8, 0, 8, 14),
-                child: footer!,
-              ),
-          ],
-        ),
+                                    alignment: Alignment.center,
+                                    children: [
+                                      Column(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            Icon(items[i].icon,
+                                                size: 21,
+                                                color: i == selectedIndex
+                                                    ? const Color(0xFF96AAFF)
+                                                    : const Color(0xFF8593A9)),
+                                            const SizedBox(height: 5),
+                                            Text(_railLabel(items[i].label),
+                                                style: TextStyle(
+                                                    fontSize: 10,
+                                                    color: i == selectedIndex
+                                                        ? const Color(
+                                                            0xFFDCE5FF)
+                                                        : const Color(
+                                                            0xFF8593A9))),
+                                          ]),
+                                      if (items[i].count > 0)
+                                        Positioned(
+                                            top: 2,
+                                            right: 1,
+                                            child: Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 4,
+                                                        vertical: 1),
+                                                decoration: BoxDecoration(
+                                                    color:
+                                                        const Color(0xFF4263EB),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            5)),
+                                                child: Text(
+                                                    items[i].count > 99
+                                                        ? '99+'
+                                                        : '${items[i].count}',
+                                                    style: const TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 9)))),
+                                    ])),
+                          ),
+                        ))),
+            ],
+          )),
+          if (avatar != null)
+            Padding(padding: const EdgeInsets.only(bottom: 16), child: avatar!),
+          if (footer != null)
+            Padding(
+                padding: const EdgeInsets.fromLTRB(6, 0, 6, 16),
+                child: footer!),
+        ]),
       ),
     );
   }
@@ -538,10 +471,24 @@ class ConsoleIconRail extends StatelessWidget {
 /// 侧轨宽度有限：优先保留定稿里的短名，长名截到前两字。
 String _railLabel(String label) {
   switch (label) {
+    case '今天待办':
+      return '概览';
+    case '客户消息':
+      return '工作台';
+    case '我的设置':
+      return '设置';
+    case '接入网站':
+      return '接入';
+    case '渠道入口':
+      return '渠道';
+    case '同事账号':
+      return '企业';
+    case '自动接待':
+      return '自动';
     case '工作概览':
       return '概览';
     case '收件箱':
-      return '收件箱';
+      return '工作台';
     case '数据统计':
       return '统计';
     case '知识库':

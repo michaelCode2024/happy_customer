@@ -235,6 +235,87 @@ test('隐藏页面不自动已读，重复推送不重复计数，失败回执�
   } finally {store.destroy();globalThis.document=previousDocument;globalThis.WebSocket=previousWebSocket;}
 });
 
+test('有历史会话时不因空消息列表展示欢迎语条件', async () => {
+  // 与 ui.#shouldShowWelcome 同一套判定：刷新后 active 已选、消息尚未返回时不能当新会话。
+  const previousDocument = globalThis.document;
+  const previousWebSocket = globalThis.WebSocket;
+  let resolvePage;
+  globalThis.document = {visibilityState:'visible',hasFocus:()=>true,addEventListener(){},removeEventListener(){}};
+  globalThis.WebSocket = class {
+    static OPEN=1; readyState=1;
+    constructor(){} send(){} close(){}
+  };
+  VisitorSocket.prototype.connect=()=>{};
+  VisitorSocket.prototype.close=()=>{};
+  VisitorSocket.prototype.subscribe=()=>{};
+  VisitorApi.prototype.bootstrap=async()=>({token:'test',visitorId:'v1',expiresIn:3600,inbox:{},agentsOnline:1});
+  VisitorApi.prototype.listConversations=async()=>({items:[{id:'c1',visitorUnread:0,lastSequence:5,status:'OPEN',lastMessagePreview:'去'}]});
+  VisitorApi.prototype.pageMessages=()=>new Promise((resolve)=>{resolvePage=resolve;});
+  VisitorApi.prototype.markDelivered=async()=>({});
+  VisitorApi.prototype.markRead=async()=>({});
+  const store=new ChatStore(resolveOptions({endpoint:'http://localhost',inboxKey:'welcome-flash',storage:''}));
+  try {
+    const init=store.init();
+    await new Promise((r)=>setImmediate(r));
+    // 历史序号已知、消息未到：应处于 loadingThread，避免欢迎语。
+    assert.equal(store.snapshot.activeId,'c1');
+    assert.equal(store.snapshot.loadingThread,true);
+    assert.equal(store.snapshot.messages.length,0);
+    resolvePage({
+      items:[{id:'m1',conversationId:'c1',sequence:5,senderType:'VISITOR',messageType:'TEXT',content:'去',createdAt:new Date().toISOString()}],
+      hasOlder:false,lastSequence:5,visitorUnread:0,
+    });
+    await init;
+    assert.equal(store.snapshot.loadingThread,false);
+    assert.equal(store.snapshot.messages.length,1);
+  } finally {
+    store.destroy();
+    globalThis.document=previousDocument;
+    globalThis.WebSocket=previousWebSocket;
+  }
+});
+
+test('坐席送达/已读推送推进访客气泡回执水位', async () => {
+  const previousDocument = globalThis.document;
+  const previousWebSocket = globalThis.WebSocket;
+  let socket;
+  globalThis.document = {visibilityState:'visible',hasFocus:()=>true,addEventListener(){},removeEventListener(){}};
+  globalThis.WebSocket = class {
+    static OPEN=1; readyState=1;
+    constructor(){socket=this;} send(){} close(){}
+  };
+  VisitorSocket.prototype.connect=realConnect;
+  VisitorSocket.prototype.close=realClose;
+  VisitorApi.prototype.bootstrap=async()=>({token:'test',visitorId:'v1',expiresIn:3600,inbox:{},agentsOnline:1});
+  VisitorApi.prototype.listConversations=async()=>({items:[{id:'c1',visitorUnread:0,lastSequence:2,status:'OPEN'}]});
+  VisitorApi.prototype.pageMessages=async()=>({
+    items:[
+      {id:'m1',conversationId:'c1',sequence:1,senderType:'VISITOR',messageType:'TEXT',content:'1',createdAt:new Date().toISOString()},
+      {id:'m2',conversationId:'c1',sequence:2,senderType:'VISITOR',messageType:'TEXT',content:'2',createdAt:new Date().toISOString()},
+    ],
+    hasOlder:false,
+    agentLastReadSequence:0,
+    agentLastDeliveredSequence:0,
+  });
+  VisitorApi.prototype.markDelivered=async()=>({});
+  VisitorApi.prototype.markRead=async()=>({});
+  const store=new ChatStore(resolveOptions({endpoint:'http://localhost',inboxKey:'agent-receipt',storage:''}));
+  try {
+    await store.init(); await store.selectConversation('c1'); store.open();
+    assert.equal(store.snapshot.agentLastReadSequence,0);
+    assert.equal(store.snapshot.agentLastDeliveredSequence,0);
+    socket.onmessage({data:JSON.stringify({type:'conversation.delivered',conversationId:'c1',data:{readerType:'AGENT',sequence:1}})});
+    assert.equal(store.snapshot.agentLastDeliveredSequence,1);
+    assert.equal(store.snapshot.agentLastReadSequence,0);
+    socket.onmessage({data:JSON.stringify({type:'conversation.read',conversationId:'c1',data:{readerType:'AGENT',sequence:2}})});
+    assert.equal(store.snapshot.agentLastDeliveredSequence,2);
+    assert.equal(store.snapshot.agentLastReadSequence,2);
+    // 访客自己的回声不得改写坐席水位。
+    socket.onmessage({data:JSON.stringify({type:'conversation.read',conversationId:'c1',data:{readerType:'VISITOR',sequence:99}})});
+    assert.equal(store.snapshot.agentLastReadSequence,2);
+  } finally {store.destroy();globalThis.document=previousDocument;globalThis.WebSocket=previousWebSocket;}
+});
+
 test('面板收起时只送达不已读，打开聚焦后才已读', async () => {
   const previousDocument = globalThis.document;
   const previousWebSocket = globalThis.WebSocket;

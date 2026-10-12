@@ -168,7 +168,8 @@ func (a *API) groupRoomAction(w http.ResponseWriter, r *http.Request, p auth.Pri
 	defer tx.Rollback(r.Context())
 	var closed bool
 	var owner uuid.UUID
-	if e = tx.QueryRow(r.Context(), `select archived or dissolved_at is not null,owner_id from chat_group where id=$1 for update`, gid).Scan(&closed, &owner); e != nil || closed {
+	var ownerKind string
+	if e = tx.QueryRow(r.Context(), `select archived or dissolved_at is not null,owner_id,owner_kind from chat_group where id=$1 for update`, gid).Scan(&closed, &owner, &ownerKind); e != nil || closed {
 		fail(w, 409, "群已归档或解散")
 		return
 	}
@@ -259,7 +260,7 @@ func (a *API) groupRoomAction(w http.ResponseWriter, r *http.Request, p auth.Pri
 		}
 		_, e = tx.Exec(r.Context(), `delete from chat_group_room_member where room_id=$1 and actor_kind=$2 and actor_id=$3 and session_id=$4`, in.RoomID, p.Kind, groupActor(p), in.SessionID)
 	case "end":
-		if !(ck == p.Kind && creator == groupActor(p)) && !(p.Kind == "agent" && owner == groupActor(p)) {
+		if !(ck == p.Kind && creator == groupActor(p)) && !(p.Kind == ownerKind && owner == groupActor(p)) {
 			fail(w, 403, "仅发起人或群主可结束所有人的通话")
 			return
 		}

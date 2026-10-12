@@ -51,11 +51,11 @@ async function refresh(older = false) {
   if (!token) return;
   const generation = ++refreshGeneration, q = el('search').value.trim();
   const [list, result] = await Promise.all([
-    api('GET', '/api/v1/groups'),
+    api('GET', path('')),
     api('GET', path('/messages?q=' + encodeURIComponent(q) + (older && items.length ? '&before=' + Math.min(...items.map(m => m.sequence)) : '')))
   ]);
   if (generation !== refreshGeneration) return;
-  group = list.items.find(g => g.id === groupId);
+  group = list.group;
   if (!group) { stopMedia(); throw new Error('你已退出或被移出此群'); }
   el('title').textContent = group.name;
   el('announcement').textContent = '群公告：' + group.announcement; el('announcement').hidden = !group.announcement;
@@ -79,8 +79,8 @@ async function start() {
   try {
     await refresh(); el('chat').hidden = false;
     for (const id of ['people', 'settings', 'callButton']) el(id).hidden = false;
-    connect(); pollTimer = setInterval(() => pollCalls().catch(error), 1500); await pollCalls();
-  } catch(e) { error(e); } finally { el('loading').hidden = true; }
+    connect(); pollTimer = setInterval(() => pollCalls().catch(error), 1500); await pollCalls(); return true;
+  } catch(e) { error(e); return false; } finally { el('loading').hidden = true; }
 }
 el('joinButton').onclick = async () => {
   el('joinButton').disabled = true; el('error').hidden = true;
@@ -123,10 +123,29 @@ async function members(forCall = false) {
       const button = document.createElement('button'); button.textContent = '语音通话';
       button.onclick = () => { el('members').close(); initiate(m).catch(error); }; row.append(button);
     }
+    const isOwner = actorKind === (group.ownerKind || 'agent') && group.ownerId === actorId;
+    if (!forCall && !group.archived && isOwner && !(m.id === actorId && m.kind === actorKind)) {
+      const remove = document.createElement('button'); remove.textContent = '移除'; remove.className = 'danger';
+      remove.onclick = async () => {
+        if (!confirm('将' + m.name + '移出群聊？移除后不能继续访问此群。')) return;
+        remove.disabled = true;
+        try { await api('DELETE', path('/members/' + m.kind + '/' + m.id)); el('members').close(); await refresh(); }
+        catch(e) { error(e); } finally { remove.disabled = false; }
+      }; row.append(remove);
+      if (m.kind === actorKind) {
+        const transfer = document.createElement('button'); transfer.textContent = '转让群主';
+        transfer.onclick = async () => {
+          if (!confirm('将群主转让给' + m.name + '？你将失去群主管理权限。')) return;
+          transfer.disabled = true;
+          try { await api('PUT', path('/owner'), {kind:m.kind,id:m.id}); el('members').close(); await refresh(); }
+          catch(e) { error(e); } finally { transfer.disabled = false; }
+        }; row.append(transfer);
+      }
+    }
     el('memberList').append(row);
   }
   el('members').querySelector('h3').textContent = forCall ? '选择通话成员' : '群成员';
-  el('leave').hidden = actorKind === 'agent' && group.ownerId === actorId;
+  el('leave').hidden = actorKind === (group.ownerKind || 'agent') && group.ownerId === actorId;
   el('members').showModal();
 }
 el('people').onclick = () => members().catch(error);
@@ -147,7 +166,7 @@ el('settings').onclick = async () => {
   try {
     const data = await api('GET', path('')); const me = data.members.find(m => m.kind === actorKind && m.id === actorId);
     el('nickname').value = me?.name || ''; el('dialogError').textContent = '';
-    el('saveNickname').disabled = group.dissolved; el('dissolve').hidden = actorKind !== 'agent' || group.ownerId !== actorId || group.dissolved;
+    el('saveNickname').disabled = group.dissolved; el('dissolve').hidden = actorKind !== (group.ownerKind || 'agent') || group.ownerId !== actorId || group.dissolved;
     el('preferences').showModal();
   } catch(e) { error(e); }
 };
@@ -298,7 +317,34 @@ el('muteCall').onclick = () => { if (media) { const tracks = media.getAudioTrack
 el('closeCall').onclick = () => el('callCard').close();
 el('callCard').addEventListener('cancel', e => { if (call || callBusy) e.preventDefault(); });
 
-if (query.has('console') && (window.opener || window.parent !== window)) {
+// 第三方跨域交接：只接收明确声明的宿主来源及实际父窗口，凭证不进入URL。
+if (query.get('embed') === '1' && (window.parent !== window || window.opener)) {
+  token = ''; el('join').hidden = true; el('loading').hidden = false;
+  let parentOrigin = '';
+  try { const u = new URL(query.get('parentOrigin')); if (['http:', 'https:'].includes(u.protocol) && u.origin === query.get('parentOrigin')) parentOrigin = u.origin; } catch {}
+  const host = window.parent !== window ? window.parent : window.opener;
+  if (!parentOrigin || !deepGroupId) error(new Error('请配置准确的parentOrigin和groupId'));
+  else {
+    const ready = setInterval(() => host.postMessage({type:'relaydesk.group.ready',groupId:deepGroupId}, parentOrigin), 500);
+    let authenticating = false;
+    window.addEventListener('message', async event => {
+      if (event.origin !== parentOrigin || event.source !== host || token || authenticating) return;
+      const data = event.data;
+      if (data?.type !== 'relaydesk.group.authenticate' || data.groupId !== deepGroupId || typeof data.token !== 'string') return;
+      authenticating = true;
+      token = data.token; groupId = deepGroupId;
+      try {
+        const me = await api('GET', path(''));
+        actorId = me.actorId; actorKind = me.actorKind;
+        if (!await start()) throw new Error('群聊初始化失败，请重新打开');
+        clearInterval(ready);
+        host.postMessage({type:'relaydesk.group.authenticated',groupId}, parentOrigin);
+      } catch(e) { token = ''; error(e); }
+      finally { authenticating = false; }
+    });
+    setTimeout(() => { clearInterval(ready); if (!token) { el('loading').hidden = true; error(new Error('身份交接超时，请重新打开群聊')); } }, 30000);
+  }
+} else if (query.has('console') && (window.opener || window.parent !== window)) {
   // Only the same-origin parent (embedded console) or opener may hand off login.
   const sourceWindow = window.parent !== window ? window.parent : window.opener;
   token = ''; el('join').hidden = true; el('loading').hidden = false;

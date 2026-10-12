@@ -1,6 +1,9 @@
 package server
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -92,6 +95,11 @@ func (a *API) consoleCreateCannedResponse(w http.ResponseWriter, r *http.Request
 			fail(w, 400, "inboxId 不合法")
 			return
 		}
+		var own bool
+		if err := a.db.QueryRow(r.Context(), `select exists(select 1 from inbox where id=$1 and tenant_id=$2)`, parsed, p.TenantID).Scan(&own); err != nil || !own {
+			fail(w, 400, "入口不存在或不属于当前企业")
+			return
+		}
 		inboxID = &parsed
 	}
 	id := uuid.New()
@@ -100,6 +108,7 @@ func (a *API) consoleCreateCannedResponse(w http.ResponseWriter, r *http.Request
 		fail(w, 500, "创建快捷回复失败")
 		return
 	}
+	a.assetsChanged(r, p)
 	respond(w, 201, map[string]any{"id": id, "title": in.Title, "content": in.Content})
 }
 
@@ -123,6 +132,7 @@ func (a *API) consoleUpdateCannedResponse(w http.ResponseWriter, r *http.Request
 		fail(w, 404, "快捷回复不存在")
 		return
 	}
+	a.assetsChanged(r, p)
 	respond(w, 200, map[string]any{"status": "OK"})
 }
 
@@ -137,6 +147,7 @@ func (a *API) consoleDeleteCannedResponse(w http.ResponseWriter, r *http.Request
 		fail(w, 404, "快捷回复不存在")
 		return
 	}
+	a.assetsChanged(r, p)
 	respond(w, 200, map[string]any{"status": "OK"})
 }
 
@@ -331,7 +342,7 @@ func (a *API) consoleStats(w http.ResponseWriter, r *http.Request, p auth.Princi
 
 func (a *API) consoleKnowledgeList(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 	search := strings.TrimSpace(r.URL.Query().Get("q"))
-	rows, err := a.db.Query(r.Context(), `select id, title, content, question_examples, status, hit_count, updated_at
+	rows, err := a.db.Query(r.Context(), `select id, title, content, question_examples, status, hit_count, updated_at,coalesce(category_id::text,'')
 		  from knowledge_entry
 		 where tenant_id = $1 and ($2 = '' or title ilike '%' || $2 || '%' or content ilike '%' || $2 || '%')
 		 order by updated_at desc limit 200`, p.TenantID, search)
@@ -343,15 +354,15 @@ func (a *API) consoleKnowledgeList(w http.ResponseWriter, r *http.Request, p aut
 	items := make([]map[string]any, 0, 32)
 	for rows.Next() {
 		var id uuid.UUID
-		var title, content, examples, status string
+		var title, content, examples, status, category string
 		var hits int64
 		var updatedAt time.Time
-		if err := rows.Scan(&id, &title, &content, &examples, &status, &hits, &updatedAt); err != nil {
+		if err := rows.Scan(&id, &title, &content, &examples, &status, &hits, &updatedAt, &category); err != nil {
 			fail(w, 500, "查询知识库失败")
 			return
 		}
 		items = append(items, map[string]any{"id": id, "title": title, "content": content,
-			"questionExamples": examples, "status": status, "hitCount": hits, "updatedAt": updatedAt})
+			"questionExamples": examples, "status": status, "hitCount": hits, "updatedAt": updatedAt, "categoryId": category})
 	}
 	respond(w, 200, map[string]any{"items": items})
 }
@@ -375,18 +386,21 @@ func (a *API) consoleKnowledgeCreate(w http.ResponseWriter, r *http.Request, p a
 	if status != "DISABLED" {
 		status = "ACTIVE"
 	}
-	var categoryID *uuid.UUID
-	if in.CategoryID != "" {
-		if parsed, err := uuid.Parse(in.CategoryID); err == nil {
-			categoryID = &parsed
-		}
+	categoryID, ok := a.knowledgeCategory(w, r, p, in.CategoryID)
+	if !ok {
+		return
 	}
 	id := uuid.New()
 	if _, err := a.db.Exec(r.Context(), `insert into knowledge_entry(id, tenant_id, category_id, title, content, question_examples, status)
 		values($1,$2,$3,$4,$5,$6,$7)`, id, p.TenantID, categoryID, in.Title, in.Content, in.QuestionExamples, status); err != nil {
+		if isUniqueViolation(err) {
+			fail(w, 409, "该标题已存在，请编辑原条目")
+			return
+		}
 		fail(w, 500, "创建知识条目失败")
 		return
 	}
+	a.asyncEmbedKnowledgeEntry(id, in.Title, in.Content)
 	respond(w, 201, map[string]any{"id": id})
 }
 
@@ -397,29 +411,46 @@ func (a *API) consoleKnowledgeUpdate(w http.ResponseWriter, r *http.Request, p a
 		return
 	}
 	var in struct {
-		Title            string `json:"title"`
-		Content          string `json:"content"`
-		QuestionExamples string `json:"questionExamples"`
-		Status           string `json:"status"`
+		CategoryID       *string `json:"categoryId"`
+		Title            string  `json:"title"`
+		Content          string  `json:"content"`
+		QuestionExamples *string `json:"questionExamples"`
+		Status           string  `json:"status"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
 	status := strings.ToUpper(strings.TrimSpace(in.Status))
 	if status != "ACTIVE" && status != "DISABLED" {
-		status = ""
+		if status != "" {
+			fail(w, 400, "状态不合法")
+			return
+		}
+	}
+	var category *uuid.UUID
+	if in.CategoryID != nil {
+		var ok bool
+		category, ok = a.knowledgeCategory(w, r, p, *in.CategoryID)
+		if !ok {
+			return
+		}
 	}
 	tag, err := a.db.Exec(r.Context(), `update knowledge_entry
 		set title = coalesce(nullif($3,''), title),
 		    content = coalesce(nullif($4,''), content),
-		    question_examples = coalesce(nullif($5,''), question_examples),
-		    status = coalesce(nullif($6,''), status),
+		    question_examples = coalesce($5, question_examples),
+		    status = coalesce(nullif($6,''), status),category_id=case when $7 then $8 else category_id end,
 		    updated_at = now()
-		where id=$1 and tenant_id=$2`, id, p.TenantID, in.Title, in.Content, in.QuestionExamples, status)
+		where id=$1 and tenant_id=$2`, id, p.TenantID, in.Title, in.Content, in.QuestionExamples, status, in.CategoryID != nil, category)
+	if isUniqueViolation(err) {
+		fail(w, 409, "该标题已存在，请修改后重试")
+		return
+	}
 	if err != nil || tag.RowsAffected() == 0 {
 		fail(w, 404, "知识条目不存在")
 		return
 	}
+	a.asyncEmbedKnowledgeEntry(id, in.Title, in.Content)
 	respond(w, 200, map[string]any{"status": "OK"})
 }
 
@@ -449,7 +480,17 @@ func (a *API) consoleKnowledgeSearch(w http.ResponseWriter, r *http.Request, p a
 		fail(w, 400, "请输入测试问题")
 		return
 	}
+	finish, quotaErr := a.reserveAIQuota(r.Context(), p.TenantID)
+	if quotaErr != nil {
+		if !failServiceError(w, quotaErr) {
+			fail(w, 503, "暂时无法读取AI额度")
+		}
+		return
+	}
+	success := false
+	defer func() { finish(success) }()
 	reply, err := a.ai.Answer(r.Context(), p.TenantID, in.Question)
+	success = err == nil && !reply.Handoff && strings.TrimSpace(reply.Content) != ""
 	if err != nil && reply.Reason != ai.ReasonProviderFail {
 		fail(w, 500, "AI 调用失败："+err.Error())
 		return
@@ -489,4 +530,94 @@ func (a *API) consoleKnowledgePreview(w http.ResponseWriter, r *http.Request, p 
 		"items": hits, "count": len(hits), "aiAvailable": a.ai.Available(),
 		"provider": a.ai.ProviderName(), "threshold": a.cfg.AI.ConfidenceThreshold,
 	})
+}
+
+// asyncEmbedKnowledgeEntry queues a knowledge entry for embedding on a background
+// goroutine so the create/update response is not blocked by the network call.
+func (a *API) asyncEmbedKnowledgeEntry(id uuid.UUID, title, content string) {
+	if !a.ai.HasEmbeddings() {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if _, err := a.ai.EmbedEntry(ctx, id, title, content); err != nil {
+			a.logger.Error("knowledge embedding failed", "id", id, "error", err)
+		}
+	}()
+}
+
+// initTools registers built-in tool handlers that the AI assistant can invoke.
+// Each tool is a named function the model may call; the server executes it and
+// feeds the text result back to the model so it can reason over real data.
+func (a *API) initTools() []ai.Tool {
+	return []ai.Tool{
+		{
+			Name:        "lookup_order",
+			Description: "查询订单状态和物流信息。需传入 orderId（订单号）。",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"orderId":{"type":"string","description":"订单编号"}},"required":["orderId"]}`),
+			Handler:     a.toolLookupOrder,
+		},
+		{
+			Name:        "query_product",
+			Description: "查询产品信息，包括价格、库存、规格。需传入 productName 或 productId。",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"productName":{"type":"string","description":"产品名称或关键词"},"productId":{"type":"string","description":"产品 ID"}},"required":["productName","productId"]}`),
+			Handler:     a.toolQueryProduct,
+		},
+		{
+			Name:        "get_refund_policy",
+			Description: "查询退换货政策和流程说明。",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{}}`),
+			Handler:     a.toolGetRefundPolicy,
+		},
+	}
+}
+
+func (a *API) toolLookupOrder(ctx context.Context, args map[string]any) (string, error) {
+	orderID, _ := args["orderId"].(string)
+	if orderID == "" {
+		return "", fmt.Errorf("orderId 不能为空")
+	}
+	// TODO: replace with real DB query against order table
+	tenantID := tenantIDFromContext(ctx)
+	if tenantID == uuid.Nil {
+		return "", fmt.Errorf("无法获取租户信息")
+	}
+	var status, tracking string
+	err := a.db.QueryRow(ctx, `SELECT status, tracking_number FROM orders WHERE order_id=$1 AND tenant_id=$2`, orderID, tenantID).Scan(&status, &tracking)
+	if err != nil {
+		return "", fmt.Errorf("订单 %s 不存在或无权限查询", orderID)
+	}
+	return fmt.Sprintf("订单 %s 状态：%s，物流单号：%s", orderID, status, tracking), nil
+}
+
+func (a *API) toolQueryProduct(ctx context.Context, args map[string]any) (string, error) {
+	name, _ := args["productName"].(string)
+	id, _ := args["productId"].(string)
+	if name == "" && id == "" {
+		return "", fmt.Errorf("productName 或 productId 至少提供一个")
+	}
+	// TODO: replace with real DB query against product table
+	return fmt.Sprintf("产品 %s 暂无实时库存数据，请咨询人工客服。", name), nil
+}
+
+func (a *API) toolGetRefundPolicy(ctx context.Context, args map[string]any) (string, error) {
+	return "退换货政策：7 天无理由退换，商品需保持原包装完好。运费险覆盖首程运费，退货运费由买家承担。特殊情况请联系人工客服协商。", nil
+}
+
+type tenantContextKey struct{}
+
+func withTenantID(ctx context.Context, id uuid.UUID) context.Context {
+	return context.WithValue(ctx, tenantContextKey{}, id)
+}
+
+func tenantIDFromContext(ctx context.Context) uuid.UUID {
+	if id, ok := ctx.Value(tenantContextKey{}).(uuid.UUID); ok {
+		return id
+	}
+	return uuid.Nil
+}
+
+func (a *API) currentTenantID(ctx context.Context) uuid.UUID {
+	return tenantIDFromContext(ctx)
 }

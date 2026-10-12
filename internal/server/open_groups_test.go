@@ -47,7 +47,7 @@ func TestOpenGroupMembersByExternalIDAndIdentityJoin(t *testing.T) {
 	exec(`insert into tenant_subscription(tenant_id,plan,status) values($1,'ENTERPRISE','ACTIVE')
 		on conflict (tenant_id) do update set plan='ENTERPRISE', status='ACTIVE'`, tenant)
 	exec(`insert into inbox(id,tenant_id,name,public_key,status) values($1,$2,'inbox',$3,'ACTIVE')`, inbox, tenant, inbox.String())
-	exec(`insert into agent(id,tenant_id,email,display_name,password_hash,role,status) values($1,$2,$3,'owner','x','OWNER','ACTIVE')`, owner, tenant, owner.String())
+	exec(`insert into agent(id,tenant_id,email,display_name,password_hash,role,status) values($1,$2,$3,'owner','x','SUPERVISOR','ACTIVE')`, owner, tenant, owner.String())
 	exec(`insert into agent_inbox(agent_id,inbox_id) values($1,$2)`, owner, inbox)
 	defer func() {
 		db.Exec(ctx, `delete from chat_group_invite where group_id in(select id from chat_group where tenant_id=$1)`, tenant)
@@ -216,7 +216,7 @@ func TestGroupJoinIdentityCreatesSharedVisitor(t *testing.T) {
 	exec(`insert into tenant_subscription(tenant_id,plan,status) values($1,'ENTERPRISE','ACTIVE')
 		on conflict (tenant_id) do update set plan='ENTERPRISE', status='ACTIVE'`, tenant)
 	exec(`insert into inbox(id,tenant_id,name,public_key,status) values($1,$2,'inbox',$3,'ACTIVE')`, inbox, tenant, inbox.String())
-	exec(`insert into agent(id,tenant_id,email,display_name,password_hash,role,status) values($1,$2,$3,'owner','x','OWNER','ACTIVE')`, owner, tenant, owner.String())
+	exec(`insert into agent(id,tenant_id,email,display_name,password_hash,role,status) values($1,$2,$3,'owner','x','SUPERVISOR','ACTIVE')`, owner, tenant, owner.String())
 	exec(`insert into agent_inbox(agent_id,inbox_id) values($1,$2)`, owner, inbox)
 	defer func() {
 		db.Exec(ctx, `delete from chat_group_invite where group_id in(select id from chat_group where tenant_id=$1)`, tenant)

@@ -41,11 +41,21 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	if err := database.EnsurePlatformAdmin(ctx, pool, cfg.PlatformAdminEmail, cfg.PlatformAdminPassword); err != nil {
+		logger.Error("platform administrator initialization failed", "error", err)
+		os.Exit(1)
+	}
 
 	api, err := server.New(cfg, pool, logger)
 	if err != nil {
 		logger.Error("http layer initialization failed", "error", err)
 		os.Exit(1)
+	}
+	// Backfill embeddings for existing knowledge entries (one-time operation).
+	if cfg.AI.EmbeddingProvider != "" && cfg.AI.APIKey != "" {
+		if err := api.BackfillEmbeddings(ctx, logger); err != nil {
+			logger.Warn("embedding backfill failed (non-fatal)", "error", err)
+		}
 	}
 	go api.Run(ctx)
 

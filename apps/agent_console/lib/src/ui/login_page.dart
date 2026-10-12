@@ -53,10 +53,14 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _submit() async {
+    if (widget.session.busy) return;
     if (!(_formKey.currentState?.validate() ?? false)) {
       // 服务器校验失败时展开高级区，否则用户看不到红字。
       if (_server.text.trim().isEmpty && !_advancedOpen) {
         setState(() => _advancedOpen = true);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _formKey.currentState?.validate();
+        });
       }
       return;
     }
@@ -74,8 +78,9 @@ class _LoginPageState extends State<LoginPage> {
     return LoginShell(
       icon: Icons.support_agent_rounded,
       title: '登录工作台',
-      subtitle: '处理咨询、跟进会话与客户消息',
+      subtitle: '欢迎回来，登录后继续接待你的客户。',
       badgeLabel: '客服 / 企业账号',
+      onSurfaceSwitch: widget.session.busy ? null : widget.onPlatformLogin,
       child: ListenableBuilder(
         listenable: widget.session,
         builder: (context, _) {
@@ -92,26 +97,30 @@ class _LoginPageState extends State<LoginPage> {
                     children: [
                       TextFormField(
                         controller: _tenant,
+                        textInputAction: TextInputAction.next,
                         enabled: !busy,
                         autocorrect: false,
                         decoration: const InputDecoration(
                           labelText: '企业标识',
-                          hintText: '例如 demo',
+                          hintText: '请输入企业标识',
+                          floatingLabelBehavior: FloatingLabelBehavior.always,
                           prefixIcon: Icon(Icons.business_outlined),
                         ),
-                        validator: (value) => (value ?? '').trim().isEmpty
-                            ? '请填写企业标识'
-                            : null,
+                        validator: (value) =>
+                            (value ?? '').trim().isEmpty ? '请填写企业标识' : null,
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 18),
                       TextFormField(
                         controller: _email,
+                        autofillHints: const [AutofillHints.username],
                         enabled: !busy,
                         keyboardType: TextInputType.text,
                         autocorrect: false,
                         textInputAction: TextInputAction.next,
                         decoration: const InputDecoration(
                           labelText: '用户名',
+                          hintText: '请输入用户名',
+                          floatingLabelBehavior: FloatingLabelBehavior.always,
                           prefixIcon: Icon(Icons.person_outline),
                         ),
                         validator: (value) {
@@ -122,16 +131,21 @@ class _LoginPageState extends State<LoginPage> {
                           return null;
                         },
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 18),
                       TextFormField(
                         controller: _password,
                         focusNode: _passwordFocus,
+                        autocorrect: false,
+                        enableSuggestions: false,
                         enabled: !busy,
                         obscureText: _obscure,
+                        autofillHints: const [AutofillHints.password],
                         textInputAction: TextInputAction.done,
                         onFieldSubmitted: (_) => busy ? null : _submit(),
                         decoration: InputDecoration(
                           labelText: '密码',
+                          hintText: '请输入密码',
+                          floatingLabelBehavior: FloatingLabelBehavior.always,
                           prefixIcon: const Icon(Icons.lock_outline),
                           suffixIcon: IconButton(
                             tooltip: _obscure ? '显示密码' : '隐藏密码',
@@ -140,8 +154,9 @@ class _LoginPageState extends State<LoginPage> {
                                   ? Icons.visibility_outlined
                                   : Icons.visibility_off_outlined,
                             ),
-                            onPressed: () =>
-                                setState(() => _obscure = !_obscure),
+                            onPressed: busy
+                                ? null
+                                : () => setState(() => _obscure = !_obscure),
                           ),
                         ),
                         validator: (value) =>
@@ -167,17 +182,10 @@ class _LoginPageState extends State<LoginPage> {
                 ],
                 const SizedBox(height: 18),
                 LoginSubmitButton(
-                  label: '进入工作台',
+                  label: '登录',
                   busy: busy,
                   onPressed: _submit,
                 ),
-                if (widget.onPlatformLogin != null) ...<Widget>[
-                  const SizedBox(height: 4),
-                  TextButton(
-                    onPressed: busy ? null : widget.onPlatformLogin,
-                    child: const Text('平台管理员登录'),
-                  ),
-                ],
               ],
             ),
           );

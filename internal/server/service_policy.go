@@ -30,8 +30,8 @@ func (a *API) checkMessageQuota(ctx context.Context, tx pgx.Tx, tenant uuid.UUID
 		return err
 	}
 	var active bool
-	var limit int
-	err := tx.QueryRow(ctx, `select status='ACTIVE' and (plan<>'TRIAL' or trial_ends_at is null or trial_ends_at>now()),monthly_message_limit from tenant_subscription where tenant_id=$1`, tenant).Scan(&active, &limit)
+	var limit int64
+	err := tx.QueryRow(ctx, `select status='ACTIVE' and (plan<>'TRIAL' or trial_ends_at is null or trial_ends_at>now()) and (service_starts_at is null or service_starts_at<=now()) and (service_ends_at is null or service_ends_at>now()),monthly_message_limit::bigint+coalesce((select messages from tenant_quota_bonus where tenant_id=$1 and month=date_trunc('month',now())::date),0) from tenant_subscription where tenant_id=$1`, tenant).Scan(&active, &limit)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}

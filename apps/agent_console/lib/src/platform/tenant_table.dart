@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:relaydesk_agent_console/src/api/api_exception.dart';
+import 'package:relaydesk_agent_console/src/ui/console_form_dialog.dart';
 
 import 'package:relaydesk_agent_console/src/platform/platform_models.dart';
 import 'package:relaydesk_agent_console/src/ui/error_banner.dart';
@@ -25,6 +27,8 @@ class TenantTable extends StatefulWidget {
     required this.onOpen,
     required this.selectedId,
     required this.onRefresh,
+    this.onLoadMore,
+    this.onAssignPlan,
   });
 
   final List<TenantSummary> tenants;
@@ -33,12 +37,15 @@ class TenantTable extends StatefulWidget {
   final ValueChanged<TenantSummary> onOpen;
   final String selectedId;
   final Future<void> Function() onRefresh;
+  final VoidCallback? onLoadMore;
+  final ValueChanged<TenantSummary>? onAssignPlan;
 
   @override
   State<TenantTable> createState() => _TenantTableState();
 }
 
 class _TenantTableState extends State<TenantTable> {
+  String _status = 'ALL';
   late final TextEditingController _query =
       TextEditingController(text: widget.query);
 
@@ -60,9 +67,30 @@ class _TenantTableState extends State<TenantTable> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final tenants = widget.tenants
+        .where((t) => _status == 'ALL' || t.status == _status)
+        .toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
+        Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+            child: Text('企业与账号',
+                style: theme.textTheme.titleLarge
+                    ?.copyWith(fontWeight: FontWeight.w700))),
+        Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Wrap(spacing: 8, children: [
+              for (final status in {
+                'ALL': '全部',
+                'ACTIVE': '正常使用',
+                'SUSPENDED': '已停用'
+              }.entries)
+                ChoiceChip(
+                    label: Text(status.value),
+                    selected: _status == status.key,
+                    onSelected: (_) => setState(() => _status = status.key))
+            ])),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           child: Row(
@@ -92,7 +120,7 @@ class _TenantTableState extends State<TenantTable> {
           child: Row(
             children: <Widget>[
               Text(
-                '共 ${widget.tenants.length} 家企业',
+                '当前显示 ${tenants.length} 家企业',
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -109,12 +137,10 @@ class _TenantTableState extends State<TenantTable> {
         ),
         const SizedBox(height: 4),
         Expanded(
-          child: widget.tenants.isEmpty
+          child: tenants.isEmpty
               ? Center(
                   child: Text(
-                    widget.query.isEmpty
-                        ? '还没有企业'
-                        : '没有匹配「${widget.query}」的企业',
+                    widget.query.isEmpty ? '还没有企业' : '没有匹配「${widget.query}」的企业',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
@@ -122,19 +148,24 @@ class _TenantTableState extends State<TenantTable> {
                 )
               : ListView.separated(
                   padding: const EdgeInsets.only(bottom: 24),
-                  itemCount: widget.tenants.length,
+                  itemCount: tenants.length,
                   separatorBuilder: (context, index) =>
                       const Divider(height: 1, indent: 16, endIndent: 16),
                   itemBuilder: (context, index) {
-                    final tenant = widget.tenants[index];
+                    final tenant = tenants[index];
                     return _TenantRow(
                       tenant: tenant,
                       selected: tenant.id == widget.selectedId,
                       onTap: () => widget.onOpen(tenant),
+                      onAssignPlan: widget.onAssignPlan == null
+                          ? null
+                          : () => widget.onAssignPlan!(tenant),
                     );
                   },
                 ),
         ),
+        if (widget.onLoadMore != null)
+          TextButton(onPressed: widget.onLoadMore, child: const Text('加载更多企业')),
       ],
     );
   }
@@ -145,11 +176,13 @@ class _TenantRow extends StatelessWidget {
     required this.tenant,
     required this.selected,
     required this.onTap,
+    this.onAssignPlan,
   });
 
   final TenantSummary tenant;
   final bool selected;
   final VoidCallback onTap;
+  final VoidCallback? onAssignPlan;
 
   @override
   Widget build(BuildContext context) {
@@ -204,7 +237,7 @@ class _TenantRow extends StatelessWidget {
                         )
                       else
                         _Chip(
-                           label: planLabel(tenant.plan),
+                          label: planLabel(tenant.plan),
                           color: theme.colorScheme.primary,
                         ),
                     ],
@@ -238,6 +271,10 @@ class _TenantRow extends StatelessWidget {
                 ),
               ],
             ),
+            if (onAssignPlan != null)
+              TextButton(
+                  onPressed: onAssignPlan,
+                  child: const Text('分配套餐', style: TextStyle(fontSize: 12))),
             const SizedBox(width: 10),
             Icon(
               Icons.chevron_right,
@@ -269,7 +306,8 @@ class _Chip extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w600),
+        style:
+            TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w600),
       ),
     );
   }
@@ -282,14 +320,14 @@ class _Chip extends StatelessWidget {
 /// has a sensible server-side default, and a form that asks for all of them is a
 /// form an operator gets wrong at 2am.
 class CreateTenantDialog extends StatefulWidget {
-  const CreateTenantDialog({super.key});
+  const CreateTenantDialog({super.key, required this.onSubmit});
+  final Future<CreatedTenant> Function(CreateTenantRequest) onSubmit;
 
   @override
   State<CreateTenantDialog> createState() => _CreateTenantDialogState();
 }
 
-/// What the operator typed, handed back to the caller to submit. Returning the
-/// values rather than the created record keeps the dialog free of the network.
+/// 表单请求与服务调用解耦；只有服务器确认成功后才关闭弹窗。
 class CreateTenantRequest {
   const CreateTenantRequest({
     required this.name,
@@ -316,171 +354,174 @@ class CreateTenantRequest {
 
 class _CreateTenantDialogState extends State<CreateTenantDialog> {
   final _formKey = GlobalKey<FormState>();
-  final _name = TextEditingController();
-  final _slug = TextEditingController();
-  final _ownerEmail = TextEditingController();
-  final _ownerName = TextEditingController();
-  final _ownerPassword = TextEditingController();
-  final _inboxName = TextEditingController();
-  final _publicKey = TextEditingController();
+  final _name = TextEditingController(),
+      _slug = TextEditingController(),
+      _ownerEmail = TextEditingController(),
+      _ownerName = TextEditingController(),
+      _ownerPassword = TextEditingController(),
+      _inboxName = TextEditingController(),
+      _publicKey = TextEditingController();
   String _plan = 'TRIAL';
-
+  bool _saving = false, _showPassword = false;
+  String? _error;
   @override
   void dispose() {
-    _name.dispose();
-    _slug.dispose();
-    _ownerEmail.dispose();
-    _ownerName.dispose();
-    _ownerPassword.dispose();
-    _inboxName.dispose();
-    _publicKey.dispose();
+    for (final controller in [
+      _name,
+      _slug,
+      _ownerEmail,
+      _ownerName,
+      _ownerPassword,
+      _inboxName,
+      _publicKey
+    ]) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('开通企业'),
-      content: SizedBox(
-        width: 460,
-        child: SingleChildScrollView(
-          child: Form(
-            key: _formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                TextFormField(
-                  controller: _name,
-                  autofocus: true,
-                  decoration: const InputDecoration(
-                    labelText: '企业名称',
-                    hintText: '例如 连语科技',
-                  ),
-                  validator: (value) =>
-                      (value ?? '').trim().isEmpty ? '请填写企业名称' : null,
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _slug,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: '企业标识（可选）',
-                    hintText: '留空则按名称生成，登录时使用',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _ownerName,
-                  decoration: const InputDecoration(
-                    labelText: '管理员姓名（可选）',
-                    hintText: '默认「管理员」',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _ownerEmail,
-                  keyboardType: TextInputType.emailAddress,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: '管理员邮箱',
-                    hintText: '该账号将获得 OWNER 权限',
-                  ),
-                  validator: (value) {
-                    final email = (value ?? '').trim();
-                    if (email.isEmpty) {
-                      return '请填写管理员邮箱';
-                    }
-                    return email.contains('@') ? null : '邮箱格式不正确';
-                  },
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _ownerPassword,
-                  decoration: const InputDecoration(
-                    labelText: '初始密码（可选）',
-                    hintText: '留空由服务器生成，只显示一次',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _inboxName,
-                  decoration: const InputDecoration(
-                    labelText: '客服入口名称（可选）',
-                    hintText: '留空则使用「企业名称 + 网站客服」',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _publicKey,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                     labelText: '入口公钥（可选）',
-                    hintText: '网站组件用它识别入口，留空则按标识生成',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  value: _plan,
-                  decoration: const InputDecoration(labelText: '套餐'),
-                  items: const <DropdownMenuItem<String>>[
-                    DropdownMenuItem<String>(
-                      value: 'TRIAL',
-                       child: Text('试用版 · 2 坐席 / 1000 条'),
-                    ),
-                    DropdownMenuItem<String>(
-                      value: 'STARTER',
-                       child: Text('入门版 · 3 坐席 / 5000 条'),
-                    ),
-                    DropdownMenuItem<String>(
-                      value: 'GROWTH',
-                       child: Text('成长版 · 10 坐席 / 5 万条'),
-                    ),
-                    DropdownMenuItem<String>(
-                      value: 'ENTERPRISE',
-                       child: Text('企业版 · 100 坐席 / 100 万条'),
-                    ),
-                  ],
-                  onChanged: (value) {
-                    if (value != null) {
-                      setState(() => _plan = value);
-                    }
-                  },
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
-        ),
-        FilledButton(
-          onPressed: () {
-            if (!(_formKey.currentState?.validate() ?? false)) {
-              return;
-            }
-            Navigator.of(context).pop(
-              CreateTenantRequest(
-                name: _name.text.trim(),
-                slug: _slug.text.trim(),
-                ownerEmail: _ownerEmail.text.trim(),
-                ownerName: _ownerName.text.trim(),
-                ownerPassword: _ownerPassword.text,
-                inboxName: _inboxName.text.trim(),
-                publicKey: _publicKey.text.trim(),
-                plan: _plan,
-                trialDays: _plan == 'TRIAL' ? 14 : 0,
-              ),
-            );
-          },
-          child: const Text('开通'),
-        ),
-      ],
-    );
+  Future<void> _submit() async {
+    if (_saving || !(_formKey.currentState?.validate() ?? false)) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      final created = await widget.onSubmit(CreateTenantRequest(
+          name: _name.text.trim(),
+          slug: _slug.text.trim(),
+          ownerEmail: _ownerEmail.text.trim(),
+          ownerName: _ownerName.text.trim(),
+          ownerPassword: _ownerPassword.text,
+          inboxName: _inboxName.text.trim(),
+          publicKey: _publicKey.text.trim(),
+          plan: _plan,
+          trialDays: _plan == 'TRIAL' ? 14 : 0));
+      if (mounted) Navigator.pop(context, created);
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } catch (_) {
+      if (mounted) setState(() => _error = '提交失败，请检查连接后重试。已填写的信息已保留。');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
+
+  @override
+  Widget build(BuildContext context) => ConsoleFormDialog(
+      title: '开通企业',
+      description: '为企业建立独立工作空间，并创建首位客服主管账号。',
+      icon: Icons.business_outlined,
+      submitLabel: '开通企业',
+      busy: _saving,
+      error: _error,
+      onSubmit: _submit,
+      child: Form(
+          key: _formKey,
+          autovalidateMode: AutovalidateMode.onUserInteraction,
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            ConsoleFormSection('企业资料',
+                child: ConsoleFormGrid(children: [
+                  ConsoleField('企业名称',
+                      required: true,
+                      child: TextFormField(
+                          controller: _name,
+                          autofocus: true,
+                          decoration:
+                              const InputDecoration(hintText: '例如：桥望科技'),
+                          validator: (v) =>
+                              (v ?? '').trim().isEmpty ? '请填写企业名称' : null)),
+                  ConsoleField('企业标识',
+                      child: TextFormField(
+                          controller: _slug,
+                          autocorrect: false,
+                          decoration:
+                              const InputDecoration(hintText: '选填，留空自动生成'))),
+                ])),
+            const SizedBox(height: 28),
+            ConsoleFormSection('客服主管账户',
+                child: ConsoleFormGrid(children: [
+                  ConsoleField('客服主管姓名',
+                      child: TextFormField(
+                          controller: _ownerName,
+                          decoration:
+                              const InputDecoration(hintText: '选填，默认客服主管'))),
+                  ConsoleField('客服主管用户名',
+                      required: true,
+                      child: TextFormField(
+                          controller: _ownerEmail,
+                          autocorrect: false,
+                          keyboardType: TextInputType.text,
+                          decoration: const InputDecoration(
+                              hintText: '例如：admin 或 kefu01'),
+                          validator: (v) =>
+                              (v ?? '').trim().isNotEmpty ? null : '请输入有效用户名')),
+                ])),
+            const SizedBox(height: 20),
+            ConsoleField('初始密码',
+                child: TextFormField(
+                    controller: _ownerPassword,
+                    obscureText: !_showPassword,
+                    decoration: InputDecoration(
+                        hintText: '选填，留空自动生成',
+                        helperText: '自动生成的密码仅在创建成功后显示一次。',
+                        suffixIcon: IconButton(
+                            tooltip: _showPassword ? '隐藏密码' : '显示密码',
+                            onPressed: () =>
+                                setState(() => _showPassword = !_showPassword),
+                            icon: Icon(
+                                _showPassword
+                                    ? Icons.visibility_off_outlined
+                                    : Icons.visibility_outlined,
+                                size: 18))),
+                    validator: (v) => (v ?? '').isNotEmpty && v!.length < 8
+                        ? '密码至少 8 位'
+                        : null)),
+            const SizedBox(height: 28),
+            ConsoleFormSection('服务配置',
+                child: ConsoleField('套餐',
+                    child: DropdownButtonFormField<String>(
+                        isExpanded: true,
+                        value: _plan,
+                        items: const [
+                          DropdownMenuItem(
+                              value: 'TRIAL',
+                              child: Text('体验版 · 2 坐席 / 1000 条')),
+                          DropdownMenuItem(
+                              value: 'STARTER',
+                              child: Text('专业版 · 3 坐席 / 5000 条')),
+                          DropdownMenuItem(
+                              value: 'GROWTH',
+                              child: Text('旗舰版 · 10 坐席 / 5 万条')),
+                          DropdownMenuItem(
+                              value: 'ENTERPRISE',
+                              child: Text('企业版 · 100 坐席 / 100 万条'))
+                        ],
+                        onChanged: (v) => setState(() => _plan = v ?? _plan)))),
+            const SizedBox(height: 16),
+            ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                title: const Text('更多接入设置'),
+                subtitle: const Text('客服入口名称与公钥，可在开通后调整'),
+                children: [
+                  Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      child: ConsoleFormGrid(children: [
+                        ConsoleField('客服入口名称',
+                            child: TextFormField(
+                                controller: _inboxName,
+                                decoration: const InputDecoration(
+                                    hintText: '选填，自动生成'))),
+                        ConsoleField('入口公钥',
+                            child: TextFormField(
+                                controller: _publicKey,
+                                autocorrect: false,
+                                decoration: const InputDecoration(
+                                    hintText: '选填，自动生成'))),
+                      ])),
+                ]),
+          ])));
 }
 
 /// Shows the credential that was just created, which is the only time it is
@@ -502,20 +543,20 @@ Future<void> showCreatedTenant(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               _DetailRow(label: '企业标识', value: created.slug),
-              _DetailRow(label: '管理员', value: created.ownerEmail),
+              _DetailRow(label: '客服主管', value: created.ownerEmail),
               if (created.initialPassword.isNotEmpty)
                 _DetailRow(
                   label: '初始密码',
                   value: created.initialPassword,
                   emphasised: true,
                 ),
-               _DetailRow(label: '入口公钥', value: created.publicKey),
+              _DetailRow(label: '入口公钥', value: created.publicKey),
               _DetailRow(label: '组件地址', value: created.scriptUrl),
               const SizedBox(height: 12),
               Text(
                 created.initialPassword.isEmpty
-                    ? '密码由你设定，请转告管理员。'
-                    : '初始密码只显示这一次，请立即转告管理员。',
+                    ? '密码由你设定，请转告客服主管。'
+                    : '初始密码只显示这一次，请立即转告客服主管。',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),

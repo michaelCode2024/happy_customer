@@ -371,10 +371,22 @@ func (a *API) consolePinMessage(w http.ResponseWriter, r *http.Request, p auth.P
 		fail(w, 500, "置顶失败")
 		return
 	}
-	a.publish(r.Context(), a.conversationChannels(r.Context(), conversationID), realtime.Event{
+	a.publish(r.Context(), a.agentOnlyChannels(r.Context(), conversationID), realtime.Event{
 		Type: "message.pinned", TenantID: p.TenantID.String(), ConversationID: conversationID.String(),
 		Data: map[string]any{"messageId": messageID, "pinned": pinned, "pinnedMessages": pins},
 	})
+	// 客户只接收公开置顶列表，不能在事件载荷里夹带内部备注。
+	var visitorID uuid.UUID
+	var private bool
+	if a.db.QueryRow(r.Context(), `select c.visitor_id, m.is_private from conversation c join message m on m.conversation_id=c.id where c.id=$1 and m.id=$2`, conversationID, messageID).Scan(&visitorID, &private) == nil && !private {
+		publicPins := make([]messageView, 0, len(pins))
+		for _, pin := range pins {
+			if !pin.Private {
+				publicPins = append(publicPins, pin)
+			}
+		}
+		a.publish(r.Context(), []string{realtime.VisitorChannel(visitorID.String())}, realtime.Event{Type: "message.pinned", TenantID: p.TenantID.String(), ConversationID: conversationID.String(), Data: map[string]any{"messageId": messageID, "pinned": pinned, "pinnedMessages": publicPins}})
+	}
 	respond(w, 200, map[string]any{"status": "OK", "pinned": pinned, "items": pins})
 }
 
@@ -710,6 +722,10 @@ func (a *API) consoleForwardMessage(w http.ResponseWriter, r *http.Request, p au
 		return
 	}
 
+	if source.Private {
+		fail(w, 400, "内部备注不能转发给客户")
+		return
+	}
 	content := source.Content
 	if source.MessageType != "TEXT" {
 		content = messageTypeLabel(source.MessageType)
@@ -726,6 +742,9 @@ func (a *API) consoleForwardMessage(w http.ResponseWriter, r *http.Request, p au
 		ForwardedFromID: &messageID,
 	})
 	if err != nil {
+		if failServiceError(w, err) {
+			return
+		}
 		fail(w, 500, "转发失败")
 		return
 	}

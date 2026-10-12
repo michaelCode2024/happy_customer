@@ -60,7 +60,7 @@ void main() {
       ));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      final queue = tester.getRect(find.text('99+').first);
+      final queue = tester.getRect(find.text('待接待 999'));
       final all = tester.getRect(find.text('全部').first);
       expect(queue.bottom, lessThanOrEqualTo(all.top));
       expect(queue.right, lessThanOrEqualTo(width));

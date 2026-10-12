@@ -119,6 +119,58 @@ func (s *Service) Assist(ctx context.Context, request AssistRequest) (AssistResu
 	return result, nil
 }
 
+// AssistWithTools is like Assist but uses GenerateWithTools so the model may
+// call registered tools (order lookup, logistics, etc.) before producing its
+// final answer. Used for SUGGEST when tools are registered.
+func (s *Service) AssistWithTools(ctx context.Context, request AssistRequest) (AssistResult, error) {
+	result := AssistResult{Task: request.Task, Provider: s.ProviderName()}
+	if !s.Available() {
+		return result, nil
+	}
+	input := strings.TrimSpace(request.Question)
+	if input == "" && len(request.History) == 0 {
+		return result, nil
+	}
+	if len(s.tools) == 0 {
+		return s.Assist(ctx, request)
+	}
+
+	messages := make([]Message, 0, len(request.History)+3)
+	messages = append(messages, Message{Role: "system", Content: assistPrompt(request.Task, request.Tone, request.Language)})
+	if request.Task == TaskSuggest {
+		entries, err := s.SearchHybrid(ctx, request.TenantID, input, true)
+		if err != nil {
+			return result, err
+		}
+		if len(entries) > 0 {
+			messages = append(messages, Message{Role: "user", Content: buildPrompt(entries)})
+			result.Sources = titles(entries)
+			for _, entry := range entries {
+				if entry.score > result.Score {
+					result.Score = entry.score
+				}
+			}
+		}
+	}
+	for _, turn := range request.History {
+		messages = append(messages, Message{Role: turn.Role, Content: turn.Content})
+	}
+	if input != "" {
+		messages = append(messages, Message{Role: "user", Content: input})
+	}
+
+	answer, usage, err := s.provider.GenerateWithTools(ctx, messages, s.tools, 3)
+	result.Usage = usage
+	if err != nil {
+		return result, err
+	}
+	result.Text = strings.TrimSpace(answer)
+	if request.Task == TaskSentiment {
+		result.Label, result.Score = parseSentiment(result.Text)
+	}
+	return result, nil
+}
+
 // StreamSuggest streams a reply suggestion token by token. An agent watching the
 // draft appear can start reading at the first sentence instead of waiting for
 // the whole block, which is the difference between the feature being used and
@@ -132,7 +184,7 @@ func (s *Service) StreamSuggest(ctx context.Context, request AssistRequest) (<-c
 		return nil, nil
 	}
 	messages := []Message{{Role: "system", Content: assistPrompt(TaskSuggest, request.Tone, "")}}
-	entries, err := s.search(ctx, request.TenantID, input, true)
+	entries, err := s.SearchHybrid(ctx, request.TenantID, input, true)
 	if err != nil {
 		return nil, err
 	}

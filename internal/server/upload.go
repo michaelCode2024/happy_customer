@@ -5,8 +5,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"os"
+	"path"
 	"strings"
 	"time"
 
@@ -124,6 +126,18 @@ func (a *API) canUploadTo(r *http.Request, principal auth.Principal, conversatio
 
 func (a *API) allowedUploadType(contentType, fileName string) bool {
 	contentType = strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	if contentType == "application/octet-stream" {
+		switch strings.ToLower(path.Ext(fileName)) {
+		case ".woff":
+			contentType = "font/woff"
+		case ".woff2":
+			contentType = "font/woff2"
+		case ".ttf":
+			contentType = "font/ttf"
+		case ".otf":
+			contentType = "font/otf"
+		}
+	}
 	if strings.HasPrefix(contentType, "image/") {
 		switch contentType {
 		case "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp":
@@ -178,7 +192,7 @@ func (a *API) downloadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Length", itoa64(sizeBytes))
-	w.Header().Set("Content-Disposition", contentDisposition(fileName))
+	w.Header().Set("Content-Disposition", contentDisposition(fileName, contentType))
 	w.Header().Set("Cache-Control", "private, max-age=3600")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(200)
@@ -244,14 +258,14 @@ func principalActorID(p auth.Principal) any {
 	return nullableUUID(p.VisitorID)
 }
 
-func contentDisposition(fileName string) string {
-	safe := strings.Map(func(r rune) rune {
-		if r == '"' || r == '\\' || r == '\n' || r == '\r' {
-			return '_'
-		}
-		return r
-	}, fileName)
-	return `inline; filename="` + safe + `"`
+// 聊天图片和音视频可直接预览，文档使用下载响应并保留中文文件名。
+func contentDisposition(fileName, contentType string) string {
+	disposition := "attachment"
+	if (strings.HasPrefix(contentType, "image/") && contentType != "image/svg+xml") || strings.HasPrefix(contentType, "audio/") || strings.HasPrefix(contentType, "video/") {
+		disposition = "inline"
+	}
+	safe := strings.ReplaceAll(strings.ReplaceAll(fileName, "\r", "_"), "\n", "_")
+	return mime.FormatMediaType(disposition, map[string]string{"filename": safe})
 }
 
 func itoa64(value int64) string {

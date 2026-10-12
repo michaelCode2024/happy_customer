@@ -91,13 +91,25 @@ func (a *API) consoleAssist(w http.ResponseWriter, r *http.Request, p auth.Princ
 		request.History = a.recentTranscript(r.Context(), conversationID, 0, limit)
 	}
 
-	result, err := a.ai.Assist(r.Context(), request)
+	// Pass tenant ID into context so tool handlers can query with proper scoping.
+	ctx := withTenantID(r.Context(), p.TenantID)
+	finish, quotaErr := a.reserveAIQuota(ctx, p.TenantID)
+	if quotaErr != nil {
+		if !failServiceError(w, quotaErr) {
+			fail(w, 503, "暂时无法读取AI额度")
+		}
+		return
+	}
+	success := false
+	defer func() { finish(success) }()
+	result, err := a.ai.AssistWithTools(ctx, request)
+	success = err == nil && strings.TrimSpace(result.Text) != ""
 	if err != nil {
 		a.logger.Error("assist failed", "error", err, "task", task, "tenant", p.TenantID)
 		fail(w, 502, "AI 调用失败，请稍后重试")
 		return
 	}
-	a.recordAssistUsage(r.Context(), p, conversationID, string(task), result)
+	a.recordAssistUsage(ctx, p, conversationID, string(task), result)
 	respond(w, 200, map[string]any{
 		"task": result.Task, "text": result.Text, "label": result.Label, "score": result.Score,
 		"sources": result.Sources, "provider": result.Provider, "usage": result.Usage,
@@ -134,7 +146,17 @@ func (a *API) consoleAssistStream(w http.ResponseWriter, r *http.Request, p auth
 			request.History = a.recentTranscript(r.Context(), parsed, 0, 20)
 		}
 	}
-	stream, err := a.ai.StreamSuggest(r.Context(), request)
+	ctx := withTenantID(r.Context(), p.TenantID)
+	finish, quotaErr := a.reserveAIQuota(ctx, p.TenantID)
+	if quotaErr != nil {
+		if !failServiceError(w, quotaErr) {
+			fail(w, 503, "暂时无法读取AI额度")
+		}
+		return
+	}
+	success := false
+	defer func() { finish(success) }()
+	stream, err := a.ai.StreamSuggest(ctx, request)
 	if err != nil {
 		a.logger.Error("assist stream failed", "error", err, "tenant", p.TenantID)
 		fail(w, 502, "AI 调用失败，请稍后重试")
@@ -161,6 +183,7 @@ func (a *API) consoleAssistStream(w http.ResponseWriter, r *http.Request, p auth
 	var builder strings.Builder
 	for fragment := range stream {
 		builder.WriteString(fragment)
+		success = true
 		send(map[string]any{"delta": fragment})
 	}
 	send(map[string]any{"done": true, "text": builder.String()})

@@ -106,11 +106,11 @@ class ConsoleSocket {
     _send(<String, String>{'type': 'typing', 'conversationId': conversationId});
   }
 
-  void sendRead(String conversationId) {
-    _send(<String, String>{'type': 'read', 'conversationId': conversationId});
+  void sendRead(String conversationId, int sequence) {
+    _send(<String, Object>{'type': 'read', 'conversationId': conversationId, 'sequence': sequence});
   }
 
-  void _send(Map<String, String> frame) {
+  void _send(Map<String, Object> frame) {
     _channel?.sink.add(jsonEncode(frame));
   }
 

@@ -78,13 +78,19 @@ class MessagePage {
 }
 
 class ConversationPage {
-  const ConversationPage({required this.items, required this.queued});
+  const ConversationPage({
+    required this.items,
+    required this.queued,
+    this.unread = 0,
+  });
 
   final List<Conversation> items;
 
-  /// Conversations waiting for any agent, which the queue badge shows even when
-  /// the list is filtered to "mine".
+  /// 待接待（未分配）会话数；与未读消息数无关。
   final int queued;
+
+  /// 当前坐席可见入口下，所有未解决会话的 agent_unread 合计。
+  final int unread;
 }
 
 /// The HTTP client for the agent console.
@@ -157,7 +163,7 @@ class RelayDeskApi {
         '$base/ws/console?token=${Uri.encodeQueryComponent(token)}');
   }
 
-  /// Tenant developer console. These endpoints require OWNER or ADMIN.
+  /// Tenant developer console. These endpoints require SUPERVISOR.
   Future<Map<String, dynamic>> entitlements() =>
       _send('GET', '/api/v1/console/entitlements');
 
@@ -317,6 +323,7 @@ class RelayDeskApi {
     return ConversationPage(
       items: asMapList(body['items']).map(Conversation.fromJson).toList(),
       queued: asInt(body['queued']),
+      unread: asInt(body['unread']),
     );
   }
 
@@ -791,6 +798,7 @@ class RelayDeskApi {
   Future<void> updateKnowledge({
     required String id,
     String? categoryId,
+    String? status,
     String title = '',
     String content = '',
     List<String>? questionExamples,
@@ -801,6 +809,7 @@ class RelayDeskApi {
       body: <String, dynamic>{
         'title': title,
         if (categoryId != null) 'categoryId': categoryId,
+        if (status != null) 'status': status,
         'content': content,
         if (questionExamples != null)
           'questionExamples': joinExamples(questionExamples),
@@ -832,6 +841,32 @@ class RelayDeskApi {
       body: <String, dynamic>{'question': question},
     );
     return asMapList(body['items']).map(KnowledgeHit.fromJson).toList();
+  }
+
+  /// 调用坐席 AI 助手。task 取 SUGGEST / SUMMARIZE / SENTIMENT / TRANSLATE /
+  /// POLISH / NEXT_ACTION；conversationId 用于让服务端拉取上下文，question 为
+  /// 建议/翻译/润色的素材文本。返回结果均为草稿，需坐席手动采纳后才发送。
+  Future<AssistResult> assist({
+    required String task,
+    required String conversationId,
+    String question = '',
+    String language = '',
+    String tone = '',
+    int historyTurns = 20,
+  }) async {
+    final body = await _send(
+      'POST',
+      '/api/v1/console/assist',
+      body: <String, dynamic>{
+        'task': task,
+        'conversationId': conversationId,
+        'question': question,
+        'language': language,
+        'tone': tone,
+        'historyTurns': historyTurns,
+      },
+    );
+    return AssistResult.fromJson(body);
   }
 
   /// ---------------------------------------------------------------- transport

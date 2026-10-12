@@ -12,6 +12,13 @@ import (
 
 // 宿主用自己的用户 ID（externalId）往服务群加人，不在聊桥镜像整库用户。
 func (a *API) registerOpenGroups(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/v1/open/groups", a.requireAPIKey("write", a.openGroupCreate))
+	mux.HandleFunc("GET /api/v1/open/groups", a.requireAPIKey("read", a.openGroupList))
+	mux.HandleFunc("GET /api/v1/open/groups/{id}", a.requireAPIKey("read", a.openGroupDetail))
+	mux.HandleFunc("PATCH /api/v1/open/groups/{id}", a.requireAPIKey("write", a.openGroupEdit))
+	mux.HandleFunc("PUT /api/v1/open/groups/{id}/owner", a.requireAPIKey("write", a.openGroupTransfer))
+	mux.HandleFunc("DELETE /api/v1/open/groups/{id}/members/{externalId}", a.requireAPIKey("write", a.openGroupRemove))
+	mux.HandleFunc("POST /api/v1/open/groups/{id}/dissolve", a.requireAPIKey("write", a.openGroupDissolve))
 	mux.HandleFunc("POST /api/v1/open/groups/{id}/members", a.requireAPIKey("write", a.openGroupAddMembers))
 	mux.HandleFunc("POST /api/v1/open/groups/{id}/member-token", a.requireAPIKey("write", a.openGroupMemberToken))
 }
@@ -32,7 +39,8 @@ func (a *API) openGroupAddMembers(w http.ResponseWriter, r *http.Request, p apiK
 		return
 	}
 	var in struct {
-		Members []openGroupMemberIn `json:"members"`
+		Members         []openGroupMemberIn `json:"members"`
+		ActorExternalID string              `json:"actorExternalId"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -65,8 +73,26 @@ func (a *API) openGroupAddMembers(w http.ResponseWriter, r *http.Request, p apiK
 		fail(w, 400, "只能向客户服务群按用户 ID 加人")
 		return
 	}
+	var inboxActive bool
+	if inbox != nil {
+		err = tx.QueryRow(r.Context(), `select status='ACTIVE' from inbox where id=$1 and tenant_id=$2`, *inbox, tenant).Scan(&inboxActive)
+	}
+	if err != nil || !inboxActive {
+		fail(w, 404, "入口不存在或已停用")
+		return
+	}
 	if closed {
 		fail(w, 409, "群已归档或解散，不能加人")
+		return
+	}
+	// 外部用户持有的群，只有宿主认证的群主可以加人。旧客服群保持原接入兼容。
+	var externalOwner bool
+	if err = tx.QueryRow(r.Context(), `select owner_kind='widget' from chat_group where id=$1`, gid).Scan(&externalOwner); err != nil {
+		fail(w, 500, "读取群主失败")
+		return
+	}
+	if externalOwner && !externalGroupActor(r, tx, gid, in.ActorExternalID, true) {
+		fail(w, 403, "仅群主可添加成员")
 		return
 	}
 
@@ -115,7 +141,10 @@ func (a *API) openGroupAddMembers(w http.ResponseWriter, r *http.Request, p apiK
 		row := map[string]any{"externalId": externalID, "visitorId": visitorID, "displayName": name}
 		if isMember {
 			// 已是成员时刷新群昵称，便于宿主改展示名后同步。
-			_, _ = tx.Exec(r.Context(), `update chat_group_member set name=$3 where group_id=$1 and actor_kind='widget' and actor_id=$2`, gid, visitorID, name)
+			if _, err := tx.Exec(r.Context(), `update chat_group_member set name=$3 where group_id=$1 and actor_kind='widget' and actor_id=$2`, gid, visitorID, name); err != nil {
+				fail(w, 500, "更新昵称失败")
+				return
+			}
 			already = append(already, row)
 			continue
 		}
@@ -135,7 +164,7 @@ func (a *API) openGroupAddMembers(w http.ResponseWriter, r *http.Request, p apiK
 		fail(w, 500, "加人失败")
 		return
 	}
-	if len(added) > 0 {
+	if len(added) > 0 || len(already) > 0 {
 		a.groupPublish(r.Context(), gid)
 	}
 	respond(w, 200, map[string]any{
@@ -175,6 +204,7 @@ func (a *API) openGroupMemberToken(w http.ResponseWriter, r *http.Request, p api
 	err = a.db.QueryRow(r.Context(), `
 		select g.tenant_id, g.inbox_id, g.kind, (g.archived or g.dissolved_at is not null), v.id
 		  from chat_group g
+		  join inbox i on i.id=g.inbox_id and i.status='ACTIVE'
 		  join visitor v on v.tenant_id=g.tenant_id and v.inbox_id=g.inbox_id and v.external_id=$2
 		  join chat_group_member m on m.group_id=g.id and m.actor_kind='widget' and m.actor_id=v.id
 		 where g.id=$1`, gid, externalID).Scan(&tenant, &inbox, &kind, &closed, &visitor)

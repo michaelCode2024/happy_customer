@@ -10,26 +10,27 @@ import (
 )
 
 type Config struct {
-	ListenAddress      string
-	PublicBaseURL      string
-	StaticDir          string
-	DatabaseURL        string
-	DatabaseMaxConns   int32
-	WidgetTokenKey     string
-	WidgetTokenTTL     time.Duration
-	AgentSessionTTL    time.Duration
-	PlatformAdminToken string
-	AllowedOrigins     []string
+	ListenAddress         string
+	PublicBaseURL         string
+	StaticDir             string
+	DatabaseURL           string
+	DatabaseMaxConns      int32
+	WidgetTokenKey        string
+	WidgetTokenTTL        time.Duration
+	AgentSessionTTL       time.Duration
+	PlatformAdminEmail    string
+	PlatformAdminPassword string
+	AllowedOrigins        []string
 	// FrameAncestors drives Content-Security-Policy frame-ancestors on /h5.
 	// Empty / "*" means any parent may iframe the embed page (delivery default).
-	FrameAncestors     []string
-	MaxWSConnections   int
-	DemoEnabled        bool
-	Storage            Storage
-	Webhook            Webhook
-	AI                 AI
-	RateLimit          RateLimit
-	Upload             Upload
+	FrameAncestors   []string
+	MaxWSConnections int
+	DemoEnabled      bool
+	Storage          Storage
+	Webhook          Webhook
+	AI               AI
+	RateLimit        RateLimit
+	Upload           Upload
 }
 
 type Storage struct {
@@ -67,6 +68,13 @@ type AI struct {
 	// to hand off to a person; lowering it makes it more willing to guess.
 	ConfidenceThreshold float64
 	AutoReplyEnabled    bool
+	// EmbeddingProvider enables vector search. When set, every knowledge entry
+	// is embedded on create/update so hybrid lexical+semantic retrieval kicks
+	// in. Supported values: same as AI_PROVIDER (openai, qwen, deepseek...).
+	// The default model is text-embedding-ada-002 unless AI_EMBEDDING_MODEL is
+	// set to something else the gateway accepts.
+	EmbeddingProvider string
+	EmbeddingModel    string
 }
 
 type RateLimit struct {
@@ -190,21 +198,22 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		ListenAddress:      env("LISTEN_ADDRESS", ":8080"),
-		PublicBaseURL:      strings.TrimSuffix(env("PUBLIC_BASE_URL", "http://localhost:8080"), "/"),
-		StaticDir:          env("STATIC_DIR", ""),
-		DatabaseURL:        env("DATABASE_URL", "postgres://relaydesk:relaydesk@localhost:5432/relaydesk?sslmode=disable"),
-		DatabaseMaxConns:   int32(dbMaxConns),
-		WidgetTokenKey:     env("WIDGET_TOKEN_SECRET", "local-only-change-this-secret-before-production"),
-		WidgetTokenTTL:     widgetTTL,
-		AgentSessionTTL:    sessionTTL,
-		PlatformAdminToken: env("PLATFORM_ADMIN_TOKEN", ""),
-		AllowedOrigins:     splitAndTrim(env("ALLOWED_ORIGINS", env("ALLOWED_ORIGIN", "*"))),
-		FrameAncestors:     splitAndTrim(env("FRAME_ANCESTORS", "*")),
-		MaxWSConnections:   maxWS,
-		DemoEnabled:        demo,
-		Storage:            storage,
-		Webhook:            Webhook{MaxAttempts: maxAttempts, Timeout: 10 * time.Second},
+		ListenAddress:         env("LISTEN_ADDRESS", ":8080"),
+		PublicBaseURL:         strings.TrimSuffix(env("PUBLIC_BASE_URL", "http://localhost:8080"), "/"),
+		StaticDir:             env("STATIC_DIR", ""),
+		DatabaseURL:           env("DATABASE_URL", "postgres://relaydesk:relaydesk@localhost:5432/relaydesk?sslmode=disable"),
+		DatabaseMaxConns:      int32(dbMaxConns),
+		WidgetTokenKey:        env("WIDGET_TOKEN_SECRET", "local-only-change-this-secret-before-production"),
+		WidgetTokenTTL:        widgetTTL,
+		AgentSessionTTL:       sessionTTL,
+		PlatformAdminEmail:    env("PLATFORM_ADMIN_EMAIL", ""),
+		PlatformAdminPassword: env("PLATFORM_ADMIN_PASSWORD", ""),
+		AllowedOrigins:        splitAndTrim(env("ALLOWED_ORIGINS", env("ALLOWED_ORIGIN", "*"))),
+		FrameAncestors:        splitAndTrim(env("FRAME_ANCESTORS", "*")),
+		MaxWSConnections:      maxWS,
+		DemoEnabled:           demo,
+		Storage:               storage,
+		Webhook:               Webhook{MaxAttempts: maxAttempts, Timeout: 10 * time.Second},
 		AI: AI{
 			Provider:            env("AI_PROVIDER", ""),
 			BaseURL:             env("AI_BASE_URL", ""),
@@ -215,6 +224,8 @@ func Load() (Config, error) {
 			TimeoutSeconds:      aiTimeout,
 			ConfidenceThreshold: threshold,
 			AutoReplyEnabled:    autoReply,
+			EmbeddingProvider:   env("AI_EMBEDDING_PROVIDER", env("AI_PROVIDER", "")),
+			EmbeddingModel:      env("AI_EMBEDDING_MODEL", "text-embedding-ada-002"),
 		},
 		RateLimit: RateLimit{
 			WidgetPerMinute: widgetRate,
@@ -231,18 +242,16 @@ func Load() (Config, error) {
 		Upload: Upload{
 			MaxBytes: int64(maxUploadMB) << 20,
 			AllowedTypes: splitAndTrim(env("UPLOAD_ALLOWED_TYPES",
-				"image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,application/zip,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")),
+				"image/png,image/jpeg,image/gif,image/webp,audio/webm,audio/mp4,audio/ogg,audio/mpeg,audio/wav,video/mp4,video/webm,application/pdf,text/plain,application/zip,font/woff,font/woff2,font/ttf,font/otf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")),
 			PublicBasePath: "/api/v1/files",
 		},
 	}
 	if len(cfg.WidgetTokenKey) < 32 {
 		return Config{}, errors.New("WIDGET_TOKEN_SECRET must contain at least 32 characters")
 	}
-	if cfg.PlatformAdminToken == "" {
-		if !cfg.DemoEnabled {
-			return Config{}, errors.New("PLATFORM_ADMIN_TOKEN is required when DEMO_ENABLED is false")
-		}
-		cfg.PlatformAdminToken = "demo-platform-admin-token"
+	if cfg.DemoEnabled && cfg.PlatformAdminEmail == "" && cfg.PlatformAdminPassword == "" {
+		cfg.PlatformAdminEmail = "admin@relaydesk.local"
+		cfg.PlatformAdminPassword = "RelayDesk@2026"
 	}
 	return cfg, nil
 }

@@ -1,4 +1,6 @@
-# RelayDesk（连语客服）
+# 聊桥（RelayDesk）
+
+**先看 [中文使用指南](docs/使用指南.md)：登录账号、创建企业与客服、接待消息、自动回复、H5/App 和 Token 接入。当前本机服务运行后也可打开 http://127.0.0.1:8080/console/help.html 。**
 
 面向网站、H5、App 与 PC 的多租户客服平台，核心会话与实时通信全部自研。
 
@@ -13,6 +15,8 @@
 - **Docker**：一致的本地与云端交付
 
 版本依据和客户端拆分原因见 [`docs/architecture.md`](docs/architecture.md)。
+
+企业开通、成员账号、APIKey 和客户身份接入见 [SaaS 开通指南](docs/saas-onboarding.md)，后台「渠道与接入 → 接入指南」也提供可复制示例。
 
 ## 目录
 

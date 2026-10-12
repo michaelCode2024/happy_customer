@@ -93,7 +93,7 @@ async function pollRooms() {
     if(!room)return;
     const me=data.room?.members.find(roomIsMe);
     if(!data.room||data.room.id!==room.id||!me||me.sessionId!==roomSession){roomTerminal('通话已结束，或你已离开群聊');return;}
-    room=data.room;el('roomEnd').hidden=!(room.creatorKind===actorKind&&room.creatorId===actorId)&&!(actorKind==='agent'&&group?.ownerId===actorId);
+    room=data.room;el('roomEnd').hidden=!(room.creatorKind===actorKind&&room.creatorId===actorId)&&!(actorKind===(group?.ownerKind||'agent')&&group?.ownerId===actorId);
     let localTile=el('roomGrid').querySelector('[data-session="'+roomSession+'"]');if(!localTile)localTile=roomTile(me,roomStream,true);updateRoomTile(localTile,me,'本地');
     const live=new Set(room.members.map(m=>m.sessionId));
     for(const [sid,entry] of roomPeers)if(!live.has(sid)){clearTimeout(entry.timer);entry.pc.close();entry.tile.querySelector('video').srcObject=null;entry.tile.remove();roomPeers.delete(sid);}

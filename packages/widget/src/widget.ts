@@ -43,6 +43,7 @@ export class RelayDeskWidgetElement extends HTMLElement {
       onRate: (score) => void this.#store?.rate(score),
       onTyping: () => this.#store?.notifyTyping(),
       onQuote: (messageId) => this.#quote(messageId),
+      onHandoff: (messageId) => void this.#store?.requestHandoff(messageId),
       onClearQuote: () => this.#store?.clearQuote(),
       onSearch: (query) => void this.#store?.search(query),
       onClearSearch: () => this.#store?.clearSearch(),
@@ -50,6 +51,9 @@ export class RelayDeskWidgetElement extends HTMLElement {
       onLoadOlder: () => void this.#store?.loadOlder(),
     });
     this.#unsubscribe = this.#store.subscribe((snapshot) => this.#view?.render(snapshot));
+    // Server-side white-label branding (logo, avatar, font, CSS) arrives from
+    // bootstrap after init; re-brand the view when it does.
+    this.#store.onWhiteLabel = (whitelabel) => this.#view?.applyWhiteLabel(whitelabel);
     this.#bridge();
     if (resolved.autoOpen) {
       this.open();
@@ -272,6 +276,10 @@ export function optionsFromElement(element: HTMLElement): RelayDeskWidgetOptions
     ['offline-message', 'offlineMessage'],
     ['placeholder', 'placeholder'],
     ['primary-color', 'primaryColor'],
+    ['logo-url', 'logoUrl'],
+    ['avatar-url', 'avatarUrl'],
+    ['custom-css', 'customCss'],
+    ['font-family', 'fontFamily'],
     ['subject', 'subject'],
     ['storage', 'storage'],
   ];
@@ -279,6 +287,13 @@ export function optionsFromElement(element: HTMLElement): RelayDeskWidgetOptions
     const value = element.getAttribute(attribute);
     if (value !== null) {
       (options as unknown as Record<string, unknown>)[key] = value;
+    }
+  }
+  const bubbleRadius = element.getAttribute('bubble-radius');
+  if (bubbleRadius !== null) {
+    const r = Number(bubbleRadius);
+    if (Number.isFinite(r) && r >= 0) {
+      options.bubbleRadius = r;
     }
   }
   const position = element.getAttribute('position');

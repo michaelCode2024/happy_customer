@@ -97,7 +97,8 @@ class SessionController extends ChangeNotifier {
     try {
       final profile = await api.me();
       final inboxes = await api.inboxes();
-      _session = stored.copyWith(agent: profile, inboxes: inboxes);
+      _session = stored.copyWith(
+          agent: profile, inboxes: inboxes, tenant: api.currentTenant);
       // Re-stamped with the same window used at login. A literal 0 here would
       // mark the session as already expired and sign the agent out on the very
       // next launch.

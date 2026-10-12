@@ -104,6 +104,24 @@ function optionsFromScript(script: HTMLScriptElement): RelayDeskWidgetOptions | 
   if (script.dataset.primaryColor) {
     options.primaryColor = script.dataset.primaryColor;
   }
+  if (script.dataset.logoUrl) {
+    options.logoUrl = script.dataset.logoUrl;
+  }
+  if (script.dataset.avatarUrl) {
+    options.avatarUrl = script.dataset.avatarUrl;
+  }
+  if (script.dataset.customCss) {
+    options.customCss = script.dataset.customCss;
+  }
+  if (script.dataset.fontFamily) {
+    options.fontFamily = script.dataset.fontFamily;
+  }
+  if (script.dataset.bubbleRadius) {
+    const r = Number(script.dataset.bubbleRadius);
+    if (Number.isFinite(r) && r >= 0) {
+      options.bubbleRadius = r;
+    }
+  }
   if (script.dataset.position === 'left' || script.dataset.position === 'right') {
     options.position = script.dataset.position;
   }

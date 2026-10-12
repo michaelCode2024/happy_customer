@@ -9,10 +9,17 @@
 .*.txt
 .*.js
 apps/**/.dart_tool
-apps/**/build
 apps/**/.pub
 apps/**/.idea
 packages/**/node_modules
 packages/**/dist
 coverage
 tmp
+
+# Build outputs (allowed for final copy)
+# dockerignore 取消忽略时要同时放开目录与其下文件
+!apps/agent_console/build/
+!apps/agent_console/build/web/
+!apps/agent_console/build/web/**
+!packages/widget/dist/
+!packages/widget/dist/**

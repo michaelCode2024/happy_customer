@@ -1,27 +1,30 @@
 import 'package:flutter/material.dart';
 
-/// 通语控制台主题：对齐腾讯 IM / 云信 / 企点一类国内 B 端工作台。
+/// 语聊控制台主题：紧凑的中文企业工作台。
 ///
-/// 特征：腾讯蓝主色、会话列表白底选中浅蓝、聊天气泡区浅灰底、
-/// 坐席气泡实心蓝+白字、访客白气泡、圆角方形头像、信息密度偏高。
+/// 特征：蓝色主色、会话选中浅蓝、白色聊天画布、
+/// 浅蓝坐席气泡、浅灰访客气泡、紧凑的信息密度。
 class RelayTheme {
   const RelayTheme._();
 
   /// 接近腾讯 IM / 企点常用主色，避免发紫。
-  static const Color seed = Color(0xFF147AFF);
+  static const Color seed = Color(0xFF4263EB);
 
   /// 会话列表选中行。
-  static const Color listSelectedLight = Color(0xFFE8F3FF);
+  static const Color listSelectedLight = Color(0xFFEDF1FF);
   static const Color listSelectedDark = Color(0xFF1A2A40);
 
   /// 消息区画布（微信/腾讯 IM 常见浅灰）。
-  static const Color chatCanvasLight = Color(0xFFEDEFF2);
+  static const Color chatCanvasLight = Color(0xFFFFFFFF);
   static const Color chatCanvasDark = Color(0xFF111418);
 
-  /// 坐席气泡：实心蓝；访客：白底。
-  static const Color agentBubbleLight = Color(0xFF147AFF);
+  /// 浅色模式坐席气泡为浅蓝，访客气泡为浅灰。
+  static const Color agentBubbleLight = Color(0xFFEDF1FF);
   static const Color agentBubbleDark = Color(0xFF3B82F6);
-  static const Color visitorBubbleLight = Color(0xFFFFFFFF);
+  static const Color visitorBubbleLight = Color(0xFFF4F5F8);
+  static const Color success = Color(0xFF31977C);
+  static const Color warning = Color(0xFFFF7D00);
+  static const Color tertiary = Color(0xFF8992A3);
   static const Color visitorBubbleDark = Color(0xFF2A2F38);
 
   static List<BoxShadow> softShadow(Brightness brightness) => [
@@ -41,15 +44,16 @@ class RelayTheme {
     );
     return _base(scheme.copyWith(
       primary: seed,
-      primaryContainer: const Color(0xFFE8F3FF),
+      primaryContainer: const Color(0xFFEDF1FF),
       onPrimary: Colors.white,
       onPrimaryContainer: const Color(0xFF0B4DB8),
       secondary: const Color(0xFF5B6B7C),
       surface: Colors.white,
-      surfaceContainerHighest: const Color(0xFFF5F7FA),
-      outlineVariant: const Color(0xFFE3E6EB),
-      onSurface: const Color(0xFF1F2329),
-      onSurfaceVariant: const Color(0xFF8F959E),
+      surfaceContainerHighest: const Color(0xFFF6F8FB),
+      outlineVariant: const Color(0xFFE9EDF3),
+      outline: tertiary,
+      onSurface: const Color(0xFF202B3D),
+      onSurfaceVariant: const Color(0xFF8992A3),
       error: const Color(0xFFF53F3F),
     ));
   }
@@ -86,14 +90,14 @@ class RelayTheme {
       colorScheme: scheme,
     ).textTheme.apply(fontFamilyFallback: _cjkFallback);
 
-    final radius = BorderRadius.circular(8);
+    final radius = BorderRadius.circular(12);
 
     return ThemeData(
       useMaterial3: true,
       colorScheme: scheme,
       textTheme: textTheme.copyWith(
-        bodyMedium: textTheme.bodyMedium?.copyWith(fontSize: 14, height: 1.5),
-        bodySmall: textTheme.bodySmall?.copyWith(fontSize: 12, height: 1.4),
+        bodyMedium: textTheme.bodyMedium?.copyWith(fontSize: 13, height: 1.6),
+        bodySmall: textTheme.bodySmall?.copyWith(fontSize: 12, height: 1.5),
         titleMedium: textTheme.titleMedium
             ?.copyWith(fontSize: 15, fontWeight: FontWeight.w600),
         titleSmall: textTheme.titleSmall
@@ -135,9 +139,9 @@ class RelayTheme {
       fontFamilyFallback: _cjkFallback,
       // 国内 IM 控制台：整页浅灰底，三栏贴边，少「浮卡片」。
       scaffoldBackgroundColor:
-          isDark ? const Color(0xFF0F1218) : const Color(0xFFF0F2F5),
+          isDark ? const Color(0xFF0F1218) : const Color(0xFFF6F8FB),
       appBarTheme: AppBarTheme(
-        toolbarHeight: 52,
+        toolbarHeight: 56,
         scrolledUnderElevation: 0,
         backgroundColor: isDark ? const Color(0xFF171B22) : Colors.white,
         surfaceTintColor: Colors.transparent,
@@ -177,6 +181,7 @@ class RelayTheme {
         color: scheme.surface,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
+        shadowColor: const Color(0x0A1F2329),
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
           borderRadius: radius,
@@ -205,8 +210,8 @@ class RelayTheme {
       dataTableTheme: DataTableThemeData(
         headingRowColor: WidgetStatePropertyAll(scheme.surfaceContainerHighest),
         headingRowHeight: 44,
-        dataRowMinHeight: 48,
-        dataRowMaxHeight: 56,
+        dataRowMinHeight: 40,
+        dataRowMaxHeight: 48,
         horizontalMargin: 16,
         columnSpacing: 24,
       ),
@@ -215,7 +220,8 @@ class RelayTheme {
           shape: WidgetStatePropertyAll(
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
           ),
-          side: WidgetStatePropertyAll(BorderSide(color: scheme.outlineVariant)),
+          side:
+              WidgetStatePropertyAll(BorderSide(color: scheme.outlineVariant)),
         ),
       ),
       visualDensity: VisualDensity.standard,
@@ -239,14 +245,14 @@ class RelayTheme {
         ),
         errorMaxLines: 2,
         filled: true,
-        fillColor: isDark ? const Color(0xFF1F2430) : const Color(0xFFF5F6F8),
+        fillColor: isDark ? const Color(0xFF1F2430) : Colors.white,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(6),
-          borderSide: BorderSide.none,
+          borderSide: BorderSide(color: scheme.outlineVariant),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(6),
-          borderSide: BorderSide.none,
+          borderSide: BorderSide(color: scheme.outlineVariant),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(6),
