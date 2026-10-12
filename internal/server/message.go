@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -122,6 +123,19 @@ func (a *API) appendMessage(ctx context.Context, tenantID, conversationID uuid.U
 		return messageView{}, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	if !in.Private && messageType != "EVENT" && messageType != "SYSTEM" && messageType != "RATING" {
+		if _, err = tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1,0))`, tenantID.String()); err != nil {
+			return messageView{}, err
+		}
+		if in.ClientMessageID != "" {
+			if existing, e := a.findByClientMessageID(ctx, conversationID, in.ClientMessageID); e == nil {
+				return existing, nil
+			}
+		}
+		if err = a.checkMessageQuota(ctx, tx, tenantID); err != nil {
+			return messageView{}, err
+		}
+	}
 
 	if in.AutomationOnly {
 		// 回复真正落库前锁定会话并复核人工接管，避免异步匹配与客服领取之间抢答。
@@ -415,6 +429,48 @@ func (a *API) autoAssign(ctx context.Context, tx pgx.Tx, tenantID, conversationI
 		return nil, err
 	}
 	return &candidate, nil
+}
+
+// completeHandoff 暂停机器人并按路由规则分配客服。
+// 可重复调用：已暂停时仍会尝试补分配；返回给访客看的下一句状态（已接入 / 已排队）。
+func (a *API) completeHandoff(ctx context.Context, tenantID, conversationID uuid.UUID) (*uuid.UUID, string, error) {
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var current *uuid.UUID
+	var paused bool
+	if err := tx.QueryRow(ctx, `
+		select assignee_id, bot_paused
+		  from conversation
+		 where id = $1 and tenant_id = $2
+		 for update`, conversationID, tenantID).Scan(&current, &paused); err != nil {
+		return nil, "", err
+	}
+	if !paused {
+		if _, err := tx.Exec(ctx, `update conversation set bot_paused = true, updated_at = now() where id = $1`, conversationID); err != nil {
+			return nil, "", err
+		}
+	}
+	assignee, err := a.autoAssign(ctx, tx, tenantID, conversationID, current, "VISITOR")
+	if err != nil {
+		return nil, "", err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, "", err
+	}
+	if assignee == nil {
+		// 无人可接时保留待接队列，但必须告诉访客，避免停在「请稍候」无下文。
+		return nil, "暂无客服立即接待，已为您排队，上线后会尽快回复。", nil
+	}
+	name := "人工客服"
+	_ = a.db.QueryRow(ctx, `select display_name from agent where id = $1`, *assignee).Scan(&name)
+	if strings.TrimSpace(name) == "" {
+		name = "人工客服"
+	}
+	return assignee, fmt.Sprintf("客服「%s」已接入，请继续描述您的问题。", name), nil
 }
 
 // roundRobinCandidate returns the agent whose turn it is. `nth` is the total
@@ -928,18 +984,30 @@ func (a *API) maybeAIReply(ctx context.Context, tenantID, conversationID uuid.UU
 			interactionID, tenantID, conversationID, question.ID, a.ai.ProviderName(), reply.Score,
 			string(reply.Reason), latency, reply.Sources)
 		a.bumpDailyStat(ctx, tenantID, "ai_handoff")
-		// The handoff line used to exist only as a realtime hint, so a visitor
-		// who reloaded the page before an agent picked up saw nothing at all.
-		// Persisting it makes the promise part of the transcript.
+		// AI 低置信度转人工以前只落一句提示、不暂停机器人也不分配，访客会一直停在「请稍候」。
+		assigneeID, statusLine, handoffErr := a.completeHandoff(ctx, tenantID, conversationID)
+		if handoffErr != nil {
+			a.logger.Warn("ai handoff assign failed", "error", handoffErr, "conversation", conversationID)
+		}
+		content := strings.TrimSpace(handoffMessage)
+		if content == "" {
+			content = "正在为你转接人工客服，请稍候。"
+		}
+		if statusLine != "" {
+			content = content + "\n" + statusLine
+		}
+		meta := map[string]any{"ai": true, "handoff": true, "reason": string(reply.Reason), "queued": assigneeID == nil}
+		if assigneeID != nil {
+			meta["assigneeId"] = assigneeID.String()
+		}
 		if _, err := a.appendMessage(ctx, tenantID, conversationID, messageInput{
-			SenderType: "SYSTEM", MessageType: "SYSTEM", Content: handoffMessage,
-			Metadata: map[string]any{"ai": true, "handoff": true, "reason": string(reply.Reason)},
+			SenderType: "SYSTEM", MessageType: "SYSTEM", Content: content, Metadata: meta,
 		}); err != nil {
 			a.logger.Debug("store handoff message failed", "error", err)
 		}
 		a.publish(ctx, a.conversationChannels(ctx, conversationID), realtime.Event{
 			Type: "conversation.handoff", TenantID: tenantID.String(), ConversationID: conversationID.String(),
-			Data: map[string]any{"message": handoffMessage, "reason": string(reply.Reason)},
+			Data: map[string]any{"message": content, "reason": string(reply.Reason)},
 		})
 		return
 	}

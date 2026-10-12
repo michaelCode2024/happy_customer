@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/relaydesk/relaydesk/internal/auth"
+	"github.com/relaydesk/relaydesk/internal/realtime"
 )
 
 type automationRule struct {
@@ -248,7 +249,8 @@ func (a *API) maybeAutomationReply(ctx context.Context, tenantID, conversationID
 	if answer == "" && !handoff {
 		return paused
 	}
-	if handoff && paused {
+	// 已暂停且已有坐席：重复点「转人工」不再刷系统消息。
+	if handoff && paused && assigned {
 		return true
 	}
 	// 原子领取发送资格，重试同一条消息不重复回复；人工接管不受普通回复冷却限制。
@@ -260,31 +262,36 @@ func (a *API) maybeAutomationReply(ctx context.Context, tenantID, conversationID
 	if err != nil || result.RowsAffected() == 0 {
 		return true
 	}
+	meta := map[string]any{"automation": true, "rule": rule, "handoff": handoff, "senderName": "语聊助手"}
 	if handoff {
-		tx, beginErr := a.db.Begin(ctx)
-		if beginErr != nil {
-			return true
-		}
-		var current *uuid.UUID
-		err = tx.QueryRow(ctx, `update conversation set bot_paused=true,updated_at=now() where id=$1 and tenant_id=$2 and not bot_paused returning assignee_id`, conversationID, tenantID).Scan(&current)
-		if err == nil {
-			_, err = a.autoAssign(ctx, tx, tenantID, conversationID, current, "VISITOR")
-		}
-		if err != nil {
-			_ = tx.Rollback(ctx)
-			return true
-		}
-		if tx.Commit(ctx) != nil {
+		assigneeID, statusLine, handoffErr := a.completeHandoff(ctx, tenantID, conversationID)
+		if handoffErr != nil {
+			_, _ = a.db.Exec(ctx, `delete from automation_delivery where conversation_id=$1 and question_id=$2`, conversationID, q.ID)
 			return true
 		}
 		if answer == "" {
 			answer = "正在为你联系人工客服，请稍候。"
 		}
+		// 把分配结果写进同一条系统消息，避免访客停在「请稍候」看不到下文。
+		if statusLine != "" {
+			answer = strings.TrimSpace(answer) + "\n" + statusLine
+		}
+		meta["queued"] = assigneeID == nil
+		if assigneeID != nil {
+			meta["assigneeId"] = assigneeID.String()
+		}
 	}
 
-	_, err = a.appendMessage(ctx, tenantID, conversationID, messageInput{AutomationOnly: !handoff && !strings.HasPrefix(rule, "menu:"), AutomationRespectAgent: c.RespectAgent, SenderType: "SYSTEM", MessageType: "TEXT", Content: answer, ClientMessageID: "auto:" + q.ID.String(), Metadata: map[string]any{"automation": true, "rule": rule, "handoff": handoff, "senderName": "通语助手"}})
+	_, err = a.appendMessage(ctx, tenantID, conversationID, messageInput{AutomationOnly: !handoff && !strings.HasPrefix(rule, "menu:"), AutomationRespectAgent: c.RespectAgent, SenderType: "SYSTEM", MessageType: "TEXT", Content: answer, ClientMessageID: "auto:" + q.ID.String(), Metadata: meta})
 	if err != nil {
 		_, _ = a.db.Exec(ctx, `delete from automation_delivery where conversation_id=$1 and question_id=$2`, conversationID, q.ID)
+		return true
+	}
+	if handoff {
+		a.publish(ctx, a.conversationChannels(ctx, conversationID), realtime.Event{
+			Type: "conversation.handoff", TenantID: tenantID.String(), ConversationID: conversationID.String(),
+			Data: map[string]any{"message": answer, "reason": "AUTOMATION"},
+		})
 	}
 	return true
 }
