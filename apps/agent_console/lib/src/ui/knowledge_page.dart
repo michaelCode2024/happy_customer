@@ -309,29 +309,30 @@ class _KnowledgePageState extends State<KnowledgePage> {
                             label: const Text('新增知识'))
                     ])
                   ])),
-          Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(children: [
-                    for (final item in <(int, String)>[
-                      (0, '知识与回答测试'),
-                      if (canEdit) (1, '分类与批量导入'),
-                      if (canEdit) (2, '未解决问题')
-                    ])
-                      Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: ChoiceChip(
-                              label: Text(item.$2),
-                              selected: _tab == item.$1,
-                              onSelected: (_) {
-                                setState(() => _tab = item.$1);
-                                if (item.$1 == 0) _load();
-                              }))
-                  ]))),
+          if (canEdit)
+            Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(children: [
+                      for (final item in <(int, String)>[
+                        (0, '知识与回答测试'),
+                        if (canEdit) (1, '分类与批量导入'),
+                        if (canEdit) (2, '未解决问题')
+                      ])
+                        Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                                label: Text(item.$2),
+                                selected: _tab == item.$1,
+                                onSelected: (_) {
+                                  setState(() => _tab = item.$1);
+                                  if (item.$1 == 0) _load();
+                                }))
+                    ]))),
           if (_tab == 0)
             Padding(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
                 child: Wrap(spacing: 10, runSpacing: 8, children: [
                   _summary(theme, '本次加载', '${_entries.length} 条'),
                   _summary(theme, '已启用',
@@ -383,7 +384,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
                           child: Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Expanded(flex: 6, child: list),
+                                Expanded(flex: 7, child: list),
                                 const SizedBox(width: 20),
                                 Expanded(
                                     flex: 4,
@@ -394,7 +395,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
   }
 
   Widget _summary(ThemeData theme, String title, String value) => Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
           color: theme.colorScheme.surface,
           borderRadius: BorderRadius.circular(10),
@@ -424,7 +425,9 @@ class _KnowledgePageState extends State<KnowledgePage> {
                     controller: _search,
                     decoration: const InputDecoration(
                       hintText: '搜索标题或内容',
-                      prefixIcon: Icon(Icons.search, size: 20),
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      isDense: true,
                     ),
                     onSubmitted: (_) => _load(),
                   ),
@@ -433,42 +436,66 @@ class _KnowledgePageState extends State<KnowledgePage> {
                 IconButton(
                   tooltip: '搜索',
                   onPressed: _load,
-                  icon: const Icon(Icons.search),
+                  icon: const Icon(Icons.search, size: 20),
                 ),
               ],
             ),
           ),
           Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(children: [
-                    for (final c in <Map<String, dynamic>>[
-                      {'id': '', 'name': '全部分类'},
-                      {'id': 'uncategorized', 'name': '未分类'},
-                      ..._categories
-                    ])
-                      ChoiceChip(
-                          label: Text(asString(c['name'])),
-                          selected: _categoryFilter == c['id'],
-                          onSelected: (_) => setState(
-                              () => _categoryFilter = asString(c['id']))),
-                    for (final status in [
-                      ('', '全部状态'),
-                      ('ACTIVE', '已启用'),
-                      ('DISABLED', '已停用')
-                    ])
-                      FilterChip(
-                          label: Text(status.$2),
-                          selected: _statusFilter == status.$1,
-                          onSelected: (_) =>
-                              setState(() => _statusFilter = status.$1)),
-                  ]))),
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: LayoutBuilder(builder: (context, constraints) {
+              final category = DropdownButtonFormField<String>(
+                value: [
+                  '',
+                  'uncategorized',
+                  ..._categories.map((c) => asString(c['id']))
+                ].contains(_categoryFilter)
+                    ? _categoryFilter
+                    : '',
+                isExpanded: true,
+                decoration: const InputDecoration(
+                    labelText: '知识分类',
+                    isDense: true,
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
+                items: [
+                  const DropdownMenuItem(value: '', child: Text('全部分类')),
+                  const DropdownMenuItem(
+                      value: 'uncategorized', child: Text('未分类')),
+                  for (final c in _categories)
+                    DropdownMenuItem(
+                        value: asString(c['id']),
+                        child: Text(asString(c['name'])))
+                ],
+                onChanged: (v) => setState(() => _categoryFilter = v ?? ''),
+              );
+              final status = DropdownButtonFormField<String>(
+                value: _statusFilter,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                    labelText: '启用状态',
+                    isDense: true,
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
+                items: const [
+                  DropdownMenuItem(value: '', child: Text('全部状态')),
+                  DropdownMenuItem(value: 'ACTIVE', child: Text('已启用')),
+                  DropdownMenuItem(value: 'DISABLED', child: Text('已停用'))
+                ],
+                onChanged: (v) => setState(() => _statusFilter = v ?? ''),
+              );
+              return Row(children: [
+                Expanded(child: category),
+                const SizedBox(width: 12),
+                Expanded(child: status)
+              ]);
+            }),
+          ),
           if (!canEdit)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Text(
-                '客服主管负责维护；坐席可以查看完整知识并测试回答。',
+                '只读权限 · 点击标题查看全文，点击测试检查回答。',
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -584,7 +611,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
                                           SelectableText(entry.content)
                                         else
                                           Text(entry.content,
-                                              maxLines: 2,
+                                              maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
                                               style: theme.textTheme.bodySmall
                                                   ?.copyWith(
@@ -663,7 +690,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
 
   Widget _buildBench(ThemeData theme) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(8),
@@ -683,7 +710,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
           ),
           const SizedBox(height: 6),
           Text(
-            '先做检索，确认命中的条目对不对；确认没问题再让 AI 生成回答。',
+            '模拟客户提问，验证知识命中与 AI 回答。',
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
@@ -700,6 +727,8 @@ class _KnowledgePageState extends State<KnowledgePage> {
             minLines: 2,
             maxLines: 4,
             decoration: const InputDecoration(
+              alignLabelWithHint: true,
+              filled: true,
               labelText: '模拟客户提问',
               hintText: '例如：订单什么时候发货？',
             ),
@@ -714,7 +743,6 @@ class _KnowledgePageState extends State<KnowledgePage> {
                 icon: const Icon(Icons.search, size: 18),
                 label: const Text('仅检索'),
               ),
-              const SizedBox(width: 8),
               FilledButton.icon(
                 onPressed: _testing || !widget.canAI ? null : _runAnswer,
                 icon: _testing
@@ -742,9 +770,23 @@ class _KnowledgePageState extends State<KnowledgePage> {
                     onPressed: _testing ? null : () => _fillQuestion(q))
             ]),
           if (_hits == null && !_testing && _answer == null)
-            const Padding(
-                padding: EdgeInsets.symmetric(vertical: 28),
-                child: Text('输入真实客户问题，检查回答内容和引用来源。')),
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(top: 20),
+              padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 16),
+              decoration: BoxDecoration(
+                  color:
+                      theme.colorScheme.surfaceContainerHighest.withAlpha(65),
+                  borderRadius: BorderRadius.circular(8)),
+              child: Column(children: [
+                Icon(Icons.chat_bubble_outline,
+                    size: 28, color: theme.colorScheme.outline),
+                const SizedBox(height: 12),
+                Text('测试结果将显示在这里', style: theme.textTheme.titleSmall),
+                const SizedBox(height: 6),
+                const Text('查看回答内容、引用来源和转人工判断。', textAlign: TextAlign.center)
+              ]),
+            ),
           if (_testError != null) ...<Widget>[
             const SizedBox(height: 12),
             Text(
