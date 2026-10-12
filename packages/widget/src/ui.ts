@@ -16,10 +16,15 @@ const ICONS = {
   camera: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7h4l2-3h6l2 3h4v13H3z"/><circle cx="12" cy="13" r="4"/></svg>',
   chat: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>',
   close: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>',
+  minimize: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 12h14"/></svg>',
+  headset: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13v-2a8 8 0 0 1 16 0v2M4 12H3v7h4v-7H4Zm16 0h1v7h-4v-7h3ZM20 19c0 3-4 3-8 3"/></svg>',
   send: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>',
   clip: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>',
   back: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>',
   retry: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>',
+  // 单勾=未读、双勾=已送达/已读，与坐席控制台三态一致。
+  done: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>',
+  doneAll: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 13 10 16 18 7"></polyline><polyline points="2 13 5 16"></polyline><polyline points="13 7 15.5 9.5"></polyline></svg>',
   star: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>',
   search: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>',
   quote: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"></path><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"></path></svg>',
@@ -165,6 +170,13 @@ export class WidgetView {
   #requestingMicrophone = false;
   #toolsNode?: HTMLDivElement;
   #emojiNode?: HTMLDivElement;
+  #lightbox?: HTMLDivElement;
+  #lightboxImage?: HTMLImageElement;
+  #lightboxDownload?: HTMLAnchorElement;
+  #msgMenu?: HTMLDivElement;
+  #msgMenuTargetId?: string;
+  #onLightboxKey?: (event: KeyboardEvent) => void;
+  #longPressTimer?: ReturnType<typeof setTimeout>;
 
   constructor(root: ShadowRoot, options: ResolvedOptions, store: ChatStore, handlers: UiHandlers) {
     this.#root = root;
@@ -218,6 +230,7 @@ export class WidgetView {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'rd-launcher';
+    button.setAttribute('aria-label', this.#options.title);
     button.innerHTML = `<span class="rd-launcher-icon">${ICONS.chat}</span><span class="rd-launcher-label">${escapeHtml(this.#options.title)}</span><span class="rd-launcher-badge" hidden>0</span>`;
     button.addEventListener('click', () => this.#handlers.onToggle());
     slot.appendChild(button);
@@ -230,7 +243,7 @@ export class WidgetView {
       return;
     }
     const panel = document.createElement('section');
-    panel.className = 'rd-panel';
+    panel.className = `rd-panel${this.#options.embedded ? ' is-embedded' : ''}`;
     panel.setAttribute('role', this.#options.embedded ? 'region' : 'dialog');
     panel.setAttribute('aria-label', this.#options.title);
     panel.hidden = true;
@@ -239,14 +252,15 @@ export class WidgetView {
         <div class="rd-header-main">
           <span class="rd-avatar">${ICONS.chat}</span>
           <div class="rd-heading">
-            <strong>${escapeHtml(this.#options.title)}</strong>
+            <strong>${escapeHtml(this.#options.embedded && this.#options.title === '语聊客服' ? '在线客服' : this.#options.title)}</strong>
+            <span class="rd-service-subtitle">${escapeHtml(this.#options.subtitle)}</span>
             <span class="rd-subtitle"></span>
           </div>
         </div>
         <div class="rd-header-actions">
           <button type="button" class="rd-icon rd-search-toggle" title="搜索聊天记录">${ICONS.search}</button>
           <button type="button" class="rd-icon rd-back" title="返回会话列表" hidden>${ICONS.back}</button>
-          ${this.#options.embedded ? '' : `<button type="button" class="rd-icon rd-close" title="收起">${ICONS.close}</button>`}
+          ${this.#options.embedded ? `<button type="button" class="rd-icon rd-page-back" title="返回" aria-label="返回">${ICONS.back}</button>` : `<button type="button" class="rd-icon rd-minimize" title="最小化" aria-label="最小化">${ICONS.minimize}</button><button type="button" class="rd-icon rd-close" title="收起" aria-label="关闭">${ICONS.close}</button>`}
         </div>
       </header>
       <div class="rd-searchbar" hidden>
@@ -280,7 +294,7 @@ export class WidgetView {
           <textarea class="rd-input" rows="1" placeholder="${escapeAttr(this.#options.placeholder)}" maxlength="4000"></textarea>
           <button type="button" class="rd-icon rd-emoji-toggle" title="表情" aria-label="表情" aria-expanded="false">${ICONS.smile}</button>
           <button type="button" class="rd-icon rd-more-toggle" title="更多功能" aria-label="更多功能" aria-expanded="false">${ICONS.plus}</button>
-          <button type="submit" class="rd-send" title="发送" aria-label="发送消息" hidden>发送</button>
+          <button type="submit" class="rd-send" title="发送" aria-label="发送消息" ${this.#options.theme === 'dark' ? 'hidden' : ''} disabled>发送</button>
         </div>
         <div class="rd-tools" hidden>
           <button type="button" class="rd-tool" data-picker="image"><span>${ICONS.image}</span>图片</button>
@@ -295,9 +309,57 @@ export class WidgetView {
         <input type="file" class="rd-upload-input" data-kind="image" accept="image/*" multiple hidden>
         <input type="file" class="rd-upload-input" data-kind="camera" accept="image/*" capture="environment" hidden>
       </form>
-      <div class="rd-footer"></div>`;
+      <div class="rd-footer"></div>
+      <div class="rd-msg-menu" hidden role="menu" aria-label="消息操作">
+        <button type="button" role="menuitem" data-msg-action="copy">复制</button>
+        <button type="button" role="menuitem" data-msg-action="quote">引用</button>
+      </div>
+      <div class="rd-lightbox" hidden role="dialog" aria-modal="true" aria-label="查看图片">
+        <div class="rd-lightbox-toolbar">
+          <a class="rd-lightbox-download" href="#" download target="_blank" rel="noopener noreferrer">下载</a>
+          <button type="button" class="rd-lightbox-close" title="关闭" aria-label="关闭">${ICONS.close}</button>
+        </div>
+        <img class="rd-lightbox-img" alt="">
+      </div>`;
 
     this.#composer = panel.querySelector('.rd-composer') as HTMLFormElement;
+    this.#lightbox = panel.querySelector('.rd-lightbox') as HTMLDivElement;
+    this.#lightboxImage = panel.querySelector('.rd-lightbox-img') as HTMLImageElement;
+    this.#lightboxDownload = panel.querySelector('.rd-lightbox-download') as HTMLAnchorElement;
+    this.#msgMenu = panel.querySelector('.rd-msg-menu') as HTMLDivElement;
+    this.#lightbox.querySelector('.rd-lightbox-close')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      this.#closeLightbox();
+    });
+    // 点遮罩关闭；点图片本身不关闭，方便看细节。
+    this.#lightbox.addEventListener('click', (event) => {
+      if (event.target === this.#lightbox) {
+        this.#closeLightbox();
+      }
+    });
+    this.#msgMenu.querySelectorAll<HTMLButtonElement>('[data-msg-action]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const action = button.dataset.msgAction;
+        const id = this.#msgMenuTargetId;
+        this.#hideMsgMenu();
+        if (!id || !action) {
+          return;
+        }
+        if (action === 'quote') {
+          this.#handlers.onQuote(id);
+          return;
+        }
+        if (action === 'copy') {
+          void this.#copyMessage(id);
+        }
+      });
+    });
+    panel.addEventListener('pointerdown', (event) => {
+      const target = event.target as Node | null;
+      if (this.#msgMenu && !this.#msgMenu.hidden && target && !this.#msgMenu.contains(target)) {
+        this.#hideMsgMenu();
+      }
+    });
     this.#input = panel.querySelector('.rd-input') as HTMLTextAreaElement;
     this.#messagesNode = panel.querySelector('.rd-messages') as HTMLDivElement;
     this.#typingNode = panel.querySelector('.rd-typing') as HTMLDivElement;
@@ -396,11 +458,21 @@ export class WidgetView {
       this.#handlers.onTyping();
     });
     this.#input.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+      // 手机软键盘 Enter 多半是换行；桌面才用 Enter 发送（Shift+Enter 换行）。
+      const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !coarse) {
         event.preventDefault();
         this.#composer?.requestSubmit();
       }
       if (event.key === 'Escape') {
+        if (!this.#lightbox?.hidden) {
+          this.#closeLightbox();
+          return;
+        }
+        if (!this.#msgMenu?.hidden) {
+          this.#hideMsgMenu();
+          return;
+        }
         if (!this.#toolsNode?.hidden || !this.#emojiNode?.hidden) {
           closePanels();
           return;
@@ -409,6 +481,21 @@ export class WidgetView {
           this.#handlers.onClearQuote();
         }
       }
+    });
+    // 剪贴板里的截图直接发出去，少走一遍「更多 → 图片」。
+    this.#input.addEventListener('paste', (event) => {
+      const files = event.clipboardData?.files;
+      if (!files?.length) {
+        return;
+      }
+      const images = Array.from(files).filter((file) => file.type.startsWith('image/'));
+      if (!images.length) {
+        return;
+      }
+      event.preventDefault();
+      const transfer = new DataTransfer();
+      images.forEach((file) => transfer.items.add(file));
+      this.#handlers.onFiles(transfer.files);
     });
     (panel.querySelector('.rd-reply-close') as HTMLButtonElement).addEventListener('click', () =>
       this.#handlers.onClearQuote(),
@@ -462,6 +549,16 @@ export class WidgetView {
     });
 
     panel.querySelector('.rd-close')?.addEventListener('click', () => this.#handlers.onClose());
+    panel.querySelector('.rd-minimize')?.addEventListener('click', () => this.#handlers.onClose());
+    panel.querySelector('.rd-page-back')?.addEventListener('click', () => {
+      if (this.#lastSnapshot && this.#lastSnapshot.conversations.length > 1 && this.#lastSnapshot.activeId) {
+        this.#handlers.onBack();
+      } else if (window.parent === window && window.history.length > 1) {
+        window.history.back();
+      } else {
+        this.#handlers.onClose();
+      }
+    });
     (panel.querySelector('.rd-back') as HTMLButtonElement).addEventListener('click', () => this.#handlers.onBack());
     this.#messagesNode.addEventListener('scroll', () => {
       const node = this.#messagesNode;
@@ -492,8 +589,11 @@ export class WidgetView {
     const hasText = Boolean(this.#input?.value.trim());
     const send = this.#composer?.querySelector<HTMLButtonElement>('.rd-send');
     const more = this.#composer?.querySelector<HTMLButtonElement>('.rd-more-toggle');
-    if (send) send.hidden = !hasText;
-    if (more) more.hidden = hasText;
+    if (send) {
+      send.hidden = this.#options.theme === 'dark' && !hasText;
+      send.disabled = !hasText;
+    }
+    if (more) more.hidden = this.#options.theme === 'dark' && hasText;
   }
 
   #syncLauncher(snapshot: Snapshot): void {
@@ -618,15 +718,47 @@ export class WidgetView {
       ${(c.cards??[]).map(i=>`<div class="rd-channel-card">${i.imageUrl && /^https?:\/\//i.test(i.imageUrl)?`<img src="${escapeAttr(i.imageUrl)}" alt="" loading="lazy">`:''}<div><strong>${escapeHtml(i.title)}</strong><p>${escapeHtml(i.description||'')}</p>${this.#channelItemHtml(i)}</div></div>`).join('')}</div>`;
   }
 
+  #welcomeHtml(snapshot: Snapshot): string {
+    // 欢迎标题跟渠道名走，避免 H5 已改渠道标题却仍写死「语聊客服」。
+    const brand =
+      snapshot.automation?.channelTitle ||
+      (this.#options.embedded && this.#options.title === '语聊客服' ? '在线客服' : this.#options.title);
+    return `<div class="rd-empty">
+      <span class="rd-avatar lg">${ICONS.headset}</span>
+      <div class="rd-welcome-body"><strong>您好，欢迎来到${escapeHtml(brand)}！</strong><p>${escapeHtml(snapshot.automation?.openReply || snapshot.welcomeMessage || '我们很高兴为您服务，请问有什么可以帮您？')}</p>${this.#welcomeSuggestions(snapshot)}</div>
+    </div>`;
+  }
+
+  /** 有历史时不要再插欢迎语；加载中用占位，避免刷新闪默认客服话术。 */
+  #shouldShowWelcome(snapshot: Snapshot): boolean {
+    if (snapshot.messages.length > 0 || snapshot.loadingThread) {
+      return false;
+    }
+    const active = snapshot.conversations.find((item) => item.id === snapshot.activeId);
+    // 会话列表已知道有消息序号，历史还在路上：继续等，不画欢迎语。
+    if (active && (active.lastSequence ?? 0) > 0) {
+      return false;
+    }
+    return true;
+  }
+
+  #threadLoadingHtml(): string {
+    return `<div class="rd-thread-loading" aria-live="polite">正在加载消息…</div>`;
+  }
+
   #renderChannel(snapshot: Snapshot): void {
     let panel=this.#root.querySelector<HTMLDivElement>('.rd-channel');
     if(!panel){panel=document.createElement('div');panel.className='rd-channel';this.#messagesNode?.after(panel);}
     const c=snapshot.automation;if(!c){panel.hidden=true;return;}
     const title=this.#root.querySelector<HTMLElement>('.rd-heading strong');
-    if(title)title.textContent=c.channelTitle || this.#options.title;
+    if(title)title.textContent=c.channelTitle || (this.#options.embedded && this.#options.title === '语聊客服' ? '在线客服' : this.#options.title);
     const items=[...(c.menuItems??[]),...(c.quickLinks??[]),...(c.diversionLinks??[])];
     panel.innerHTML=`<div class="rd-channel-row">${items.map(i=>this.#channelItemHtml(i)).join('')}</div>`;
-    panel.hidden=items.length===0 || (snapshot.conversations.length>1 && !snapshot.activeId);
+    // 欢迎页已有引导问题/卡片时，底部再铺一层相同 chips 会重复；有消息后再显示渠道入口。
+    panel.hidden =
+      items.length === 0 ||
+      (snapshot.conversations.length > 1 && !snapshot.activeId) ||
+      this.#shouldShowWelcome(snapshot);
     this.#bindChannelActions(panel,snapshot);
   }
 
@@ -642,23 +774,30 @@ export class WidgetView {
     const shouldStick = this.#atBottom || conversationChanged || snapshot.messages.length > previousCount;
 
     if (snapshot.messages.length === 0) {
-      node.innerHTML = `<div class="rd-empty">
-        <span class="rd-avatar sm">${ICONS.chat}</span>
-        <div><p>${escapeHtml(snapshot.automation?.openReply || snapshot.welcomeMessage || '你好！有问题随时问我，我们会尽快回复。')}</p><small>可以发送文字、图片或文件，方便我们了解你的问题</small></div>
-      </div>${this.#welcomeSuggestions(snapshot)}`;
+      // 刷新后短暂无消息：有历史则显示加载，全新会话才显示欢迎语。
+      node.innerHTML = this.#shouldShowWelcome(snapshot)
+        ? this.#welcomeHtml(snapshot)
+        : this.#threadLoadingHtml();
       this.#bindChannelActions(node,snapshot);
     } else {
+      // 已有聊天记录时不再置顶欢迎语，避免老会话每次刷新都像新客服开场。
       const parts: string[] = [];
       if (snapshot.hasMore) {
         parts.push(`<button type="button" class="rd-more" data-more="1">加载更早的消息</button>`);
       }
       let lastDay = '';
+      let lastTime = 0;
       for (const message of snapshot.messages) {
         const day = dayLabel(message.createdAt);
         if (day && day !== lastDay) {
           parts.push(`<div class="rd-day">${escapeHtml(day)}</div>`);
           lastDay = day;
         }
+        const createdTime = new Date(message.createdAt).getTime();
+        if (Number.isFinite(createdTime) && (!lastTime || createdTime - lastTime >= 300_000)) {
+          parts.push(`<div class="rd-time-separator">${escapeHtml(timeLabel(message.createdAt))}</div>`);
+        }
+        lastTime = createdTime;
         // The divider sits on the boundary the server reported at load time:
         // everything above it was seen, everything below arrived after.
         if (snapshot.readBoundary > 0 && message.sequence === snapshot.readBoundary && message !== snapshot.messages.at(-1)) {
@@ -667,6 +806,7 @@ export class WidgetView {
         parts.push(this.#messageHtml(snapshot, message));
       }
       node.innerHTML = parts.join('');
+      this.#bindChannelActions(node, snapshot);
       node.querySelectorAll<HTMLElement>('[data-retry]').forEach((button) => {
         button.addEventListener('click', () => {
           const id = button.dataset.retry;
@@ -686,13 +826,8 @@ export class WidgetView {
       node.querySelectorAll<HTMLElement>('[data-more]').forEach((button) => {
         button.addEventListener('click', () => this.#handlers.onLoadOlder());
       });
-      node.querySelectorAll<HTMLImageElement>('img[data-src]').forEach((image) => {
-        const src = image.dataset.src;
-        if (src) {
-          image.src = src;
-          image.removeAttribute('data-src');
-        }
-      });
+      this.#bindMessageImages(node);
+      this.#bindMessageGestures(node);
     }
     this.#typingNode!.hidden = !snapshot.agentTyping;
     if (shouldStick) {
@@ -716,13 +851,25 @@ export class WidgetView {
         ? '<span class="rd-state">发送中…</span>'
         : message.delivery === 'FAILED'
           ? `<button type="button" class="rd-state is-failed" data-retry="${escapeAttr(message.localId)}">${ICONS.retry}发送失败，重试</button>`
-          : '';
+          : mine
+            ? this.#receiptHtml(snapshot, message)
+            : '';
     const edited = message.editedAt ? '<span class="rd-edited">已编辑</span>' : '';
     const pinned = message.pinnedAt ? `<span class="rd-pinned-mark" title="已置顶">${ICONS.pin}</span>` : '';
     const forward = message.forwardedFromId ? '<span class="rd-forwarded">转发的消息</span>' : '';
     const quote = message.replyTo ? this.#quoteHtml(message.replyTo) : '';
     const reactions = this.#reactionsHtml(message);
-    return `<div class="rd-row rd-msg ${mine ? 'is-mine' : 'is-theirs'}" data-message="${escapeAttr(message.id)}">
+    // data-copy 供长按菜单复制；无正文时用类型占位，避免剪贴板空串。
+    const copyText =
+      message.content?.trim() ||
+      (message.messageType === 'IMAGE'
+        ? '[图片]'
+        : message.messageType === 'AUDIO'
+          ? '[语音]'
+          : message.attachments?.length
+            ? '[文件]'
+            : '');
+    return `<div class="rd-row rd-msg ${mine ? 'is-mine' : 'is-theirs'}" data-message="${escapeAttr(message.id)}" data-copy="${escapeAttr(copyText)}">
       ${mine ? '' : `<span class="rd-avatar sm">${ICONS.chat}</span>`}
       <div class="rd-bubble-group">
         ${mine || !message.senderName ? '' : `<span class="rd-sender">${escapeHtml(message.senderName)}</span>`}
@@ -736,10 +883,36 @@ export class WidgetView {
     </div>`;
   }
 
+  /**
+   * 访客自己发出的消息回执：未读（单勾灰）→ 已送达（双勾灰）→ 已读（双勾主色）。
+   * 坐席消息不展示回执；发送中 / 失败由调用方先处理。
+   */
+  #receiptHtml(snapshot: Snapshot, message: ChatMessage): string {
+    const sequence = message.sequence;
+    if (sequence <= 0) {
+      return `<span class="rd-receipt">${ICONS.done}未读</span>`;
+    }
+    if (sequence <= snapshot.agentLastReadSequence) {
+      return `<span class="rd-receipt is-read">${ICONS.doneAll}已读</span>`;
+    }
+    if (sequence <= snapshot.agentLastDeliveredSequence) {
+      return `<span class="rd-receipt is-delivered">${ICONS.doneAll}已送达</span>`;
+    }
+    return `<span class="rd-receipt">${ICONS.done}未读</span>`;
+  }
+
   /** The quoted excerpt shown above a reply inside its bubble. */
   #quoteHtml(quote: NonNullable<ChatMessage['replyTo']>): string {
     const label = quote.senderType === 'VISITOR' ? '我' : quote.senderName || '客服';
-    const body = quote.deletedAt ? '该消息已被撤回' : quote.messageType === 'TEXT' ? quote.content : '[图片/文件]';
+    const body = quote.deletedAt
+      ? '该消息已被撤回'
+      : quote.messageType === 'TEXT'
+        ? quote.content
+        : quote.messageType === 'IMAGE'
+          ? '[图片]'
+          : quote.messageType === 'AUDIO'
+            ? '[语音]'
+            : '[文件]';
     return `<span class="rd-quote">
       <strong>${escapeHtml(label)}</strong>
       <em>${escapeHtml(body.slice(0, 120))}</em>
@@ -765,7 +938,17 @@ export class WidgetView {
       if (message.messageType === 'AUDIO') {
         return this.#voiceHtml(message, attachments);
       }
-      return attachments.map((attachment) => this.#attachmentHtml(attachment)).join('');
+      const media = attachments.map((attachment) => this.#attachmentHtml(attachment)).join('');
+      const raw = message.content?.trim() ?? '';
+      // 服务端常把图片 content 填成文件名；再当 caption 画一遍会显得像重复标签。
+      const filenameOnly =
+        Boolean(raw) &&
+        attachments.some((attachment) => attachment.fileName === raw) &&
+        (message.messageType === 'IMAGE' ||
+          attachments.every((attachment) => attachment.contentType.startsWith('image/')));
+      // 附件消息若带真正的说明文字，必须一起展示；只渲染附件会丢掉访客写的 caption。
+      const caption = raw && !filenameOnly ? `<div class="rd-caption">${formatText(raw)}</div>` : '';
+      return `${media}${caption}`;
     }
     return formatText(message.content);
   }
@@ -776,6 +959,200 @@ export class WidgetView {
    * it has not buffered yet and a player that shows 0:00 until pressed reads as
    * broken.
    */
+  /** 聊天图片组件内预览：遮罩 + 大图，Esc / 点遮罩 / 关闭按钮退出。 */
+  #openLightbox(src: string, alt: string): void {
+    if (!this.#lightbox || !this.#lightboxImage) {
+      return;
+    }
+    this.#hideMsgMenu();
+    this.#lightboxImage.src = src;
+    this.#lightboxImage.alt = alt;
+    if (this.#lightboxDownload) {
+      // blob: 不能加 download 查询；远端文件带 download=1 方便直存。
+      const href = src.startsWith('blob:') ? src : `${src}${src.includes('?') ? '&' : '?'}download=1`;
+      this.#lightboxDownload.href = href;
+      this.#lightboxDownload.download = alt && alt !== '图片' ? alt : 'image';
+    }
+    this.#lightbox.hidden = false;
+    this.#root.host.classList.add('rd-lightbox-open');
+    (this.#lightbox.querySelector('.rd-lightbox-close') as HTMLButtonElement | null)?.focus();
+    this.#onLightboxKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        this.#closeLightbox();
+      }
+    };
+    document.addEventListener('keydown', this.#onLightboxKey);
+  }
+
+  #closeLightbox(): void {
+    if (!this.#lightbox || !this.#lightboxImage) {
+      return;
+    }
+    this.#lightbox.hidden = true;
+    this.#lightboxImage.removeAttribute('src');
+    this.#root.host.classList.remove('rd-lightbox-open');
+    if (this.#lightboxDownload) {
+      this.#lightboxDownload.removeAttribute('href');
+    }
+    if (this.#onLightboxKey) {
+      document.removeEventListener('keydown', this.#onLightboxKey);
+      this.#onLightboxKey = undefined;
+    }
+  }
+
+  /** 懒加载图片，失败时给出可点重试，避免灰块/裂图无反馈。 */
+  #bindMessageImages(node: HTMLElement): void {
+    node.querySelectorAll<HTMLImageElement>('img[data-src]').forEach((image) => {
+      const src = image.dataset.src;
+      if (src) {
+        image.src = src;
+        image.removeAttribute('data-src');
+      }
+      image.addEventListener('error', () => {
+        const wrap = image.closest<HTMLElement>('.rd-image');
+        if (!wrap) {
+          return;
+        }
+        wrap.classList.add('is-broken');
+        image.hidden = true;
+        if (!wrap.querySelector('.rd-image-fallback')) {
+          const fallback = document.createElement('span');
+          fallback.className = 'rd-image-fallback';
+          fallback.textContent = '加载失败，点击重试';
+          wrap.appendChild(fallback);
+        }
+      });
+      image.addEventListener('load', () => {
+        const wrap = image.closest<HTMLElement>('.rd-image');
+        wrap?.classList.remove('is-broken');
+        image.hidden = false;
+        wrap?.querySelector('.rd-image-fallback')?.remove();
+      });
+    });
+    // 气泡内图片点开组件内灯箱，不依赖浏览器新标签（H5 / iframe 里经常被拦）。
+    node.querySelectorAll<HTMLElement>('[data-lightbox]').forEach((thumb) => {
+      thumb.addEventListener('click', (event) => {
+        event.preventDefault();
+        const src = thumb.dataset.lightbox;
+        if (!src) {
+          return;
+        }
+        // 裂图先重试加载，成功后再允许进灯箱。
+        if (thumb.classList.contains('is-broken')) {
+          const image = thumb.querySelector('img');
+          if (image) {
+            const bust = `${src}${src.includes('?') ? '&' : '?'}r=${Date.now()}`;
+            image.hidden = false;
+            image.src = bust;
+            thumb.dataset.lightbox = src;
+            thumb.querySelector('.rd-image-fallback')?.remove();
+            thumb.classList.remove('is-broken');
+          }
+          return;
+        }
+        this.#openLightbox(src, thumb.getAttribute('aria-label') || '图片');
+      });
+    });
+  }
+
+  /**
+   * 触屏没有 hover，引用按钮常年看不见；长按气泡弹出「复制 / 引用」。
+   * 桌面仍可用悬停出现的引用按钮。
+   */
+  #bindMessageGestures(node: HTMLElement): void {
+    node.querySelectorAll<HTMLElement>('.rd-msg[data-message]').forEach((row) => {
+      const clearTimer = () => {
+        if (this.#longPressTimer) {
+          clearTimeout(this.#longPressTimer);
+          this.#longPressTimer = undefined;
+        }
+      };
+      row.addEventListener('pointerdown', (event) => {
+        if (event.pointerType === 'mouse' && event.button !== 0) {
+          return;
+        }
+        // 点引用按钮 / 链接触发时不要抢长按菜单。
+        const target = event.target as HTMLElement | null;
+        if (target?.closest('a, button, audio, video, .rd-image')) {
+          return;
+        }
+        clearTimer();
+        const id = row.dataset.message;
+        if (!id) {
+          return;
+        }
+        this.#longPressTimer = setTimeout(() => {
+          this.#showMsgMenu(row, id);
+        }, 480);
+      });
+      row.addEventListener('pointerup', clearTimer);
+      row.addEventListener('pointercancel', clearTimer);
+      row.addEventListener('pointerleave', clearTimer);
+      row.addEventListener('contextmenu', (event) => {
+        // 桌面右键也走同一菜单，避免只剩原生「复制图片」。
+        const id = row.dataset.message;
+        if (!id) {
+          return;
+        }
+        event.preventDefault();
+        this.#showMsgMenu(row, id, event.clientX, event.clientY);
+      });
+    });
+  }
+
+  #showMsgMenu(row: HTMLElement, messageId: string, clientX?: number, clientY?: number): void {
+    const menu = this.#msgMenu;
+    const panel = this.#root.querySelector('.rd-panel') as HTMLElement | null;
+    if (!menu || !panel) {
+      return;
+    }
+    this.#msgMenuTargetId = messageId;
+    menu.hidden = false;
+    const panelRect = panel.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    const x = (clientX ?? rowRect.left + rowRect.width / 2) - panelRect.left;
+    const y = (clientY ?? rowRect.top) - panelRect.top - 8;
+    menu.style.left = `${Math.max(8, Math.min(x - 40, panelRect.width - 120))}px`;
+    menu.style.top = `${Math.max(8, y - 40)}px`;
+    row.classList.add('is-actions-open');
+    panel.querySelectorAll('.rd-msg.is-actions-open').forEach((item) => {
+      if (item !== row) {
+        item.classList.remove('is-actions-open');
+      }
+    });
+  }
+
+  #hideMsgMenu(): void {
+    if (this.#msgMenu) {
+      this.#msgMenu.hidden = true;
+    }
+    this.#msgMenuTargetId = undefined;
+    this.#root.querySelectorAll('.rd-msg.is-actions-open').forEach((item) => {
+      item.classList.remove('is-actions-open');
+    });
+  }
+
+  async #copyMessage(messageId: string): Promise<void> {
+    const row = this.#messagesNode?.querySelector<HTMLElement>(`.rd-msg[data-message="${CSS.escape(messageId)}"]`);
+    const text = row?.dataset.copy?.trim();
+    if (!text) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // 部分 WebView 禁 clipboard，降级选中文本由用户手动复制。
+      const range = document.createRange();
+      const bubble = row?.querySelector('.rd-bubble');
+      if (bubble) {
+        range.selectNodeContents(bubble);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+      }
+    }
+  }
+
   #voiceHtml(message: ChatMessage, attachments: ChatMessage['attachments']): string {
     const attachment = attachments[0];
     if (!attachment) {
@@ -796,9 +1173,9 @@ export class WidgetView {
   #attachmentHtml(attachment: ChatMessage['attachments'][number]): string {
     const url = attachment.url.startsWith('blob:') ? attachment.url : this.#store.fileUrl(attachment.url);
     if (attachment.contentType.startsWith('image/')) {
-      return `<a class="rd-image" href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer">
+      return `<button type="button" class="rd-image" data-lightbox="${escapeAttr(url)}" aria-label="${escapeAttr(attachment.fileName || '查看图片')}" title="点击查看大图">
         <img data-src="${escapeAttr(url)}" alt="${escapeAttr(attachment.fileName)}" loading="lazy">
-      </a>`;
+      </button>`;
     }
     if (attachment.contentType.startsWith('video/')) {
       return `<video class="rd-video" controls preload="metadata" src="${escapeAttr(url)}"></video>`;
@@ -824,7 +1201,15 @@ export class WidgetView {
       return;
     }
     const label = quote.senderType === 'VISITOR' ? '我' : quote.senderName || '客服';
-    const body = quote.deletedAt ? '该消息已被撤回' : quote.messageType === 'TEXT' ? quote.content : '[图片/文件]';
+    const body = quote.deletedAt
+      ? '该消息已被撤回'
+      : quote.messageType === 'TEXT'
+        ? quote.content
+        : quote.messageType === 'IMAGE'
+          ? '[图片]'
+          : quote.messageType === 'AUDIO'
+            ? '[语音]'
+            : '[文件]';
     (bar.querySelector('strong') as HTMLElement).textContent = `引用 ${label}`;
     (bar.querySelector('small') as HTMLElement).textContent = body.slice(0, 120);
     this.#input?.focus();
@@ -1093,6 +1478,7 @@ ${this.#options.embedded ? `
 }
 .rd-header-main { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .rd-heading { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.rd-service-subtitle { display: none; }
 .rd-heading strong { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
 .rd-subtitle { font-size: 13px; color: ${light ? '#6b7280' : '#9ca3af'}; display: flex; align-items: center; gap: 6px; }
 .rd-subtitle.is-online::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #10b981; }
@@ -1132,6 +1518,7 @@ ${this.#options.embedded ? `
 .rd-more { align-self: center; border: 1px solid ${light ? '#e5e6eb' : '#2a3431'}; background: ${light ? '#ffffff' : '#1f2329'}; color: ${accent}; font: 500 13px system-ui; cursor: pointer; padding: 5px 12px; border-radius: 6px; }
 .rd-more:hover { background: ${accent}0a; }
 .rd-day { align-self: center; font-size: 12px; font-weight: 500; color: ${light ? '#6b7280' : '#9ca3af'}; margin: 8px 0; }
+.rd-thread-loading { align-self: center; margin: 28px 0; font-size: 12px; color: ${light ? '#8c93a3' : '#8b91a0'}; }
 .rd-unread { display: flex; align-items: center; gap: 12px; font-size: 12px; font-weight: 500; color: #ef4444; margin: 8px 0; }
 .rd-unread::before, .rd-unread::after { content: ''; flex: 1; height: 1px; background: #ef444433; }
 .rd-row { display: flex; gap: 10px; align-items: flex-end; }
@@ -1145,27 +1532,78 @@ ${this.#options.embedded ? `
   padding: 8px 12px; border-radius: 8px; background: ${light ? '#ffffff' : '#1f2937'};
   color: ${light ? '#111827' : '#f9fafb'}; word-break: break-word; white-space: normal;
   min-width: 0; border: 1px solid ${light ? '#e5e6eb' : '#374151'};
+  user-select: text; -webkit-user-select: text;
 }
 .rd-row.is-mine .rd-bubble { background: ${light ? accent + "14" : accent + "38"}; color: ${light ? "#1f2329" : "#eef2f6"}; border-color: ${light ? accent + "20" : accent + "44"}; }
 .rd-bubble a { color: inherit; text-decoration: underline; }
 .rd-bubble img, .rd-bubble video { display: block; max-width: 100%; border-radius: 10px; }
 .rd-bubble audio { width: 100%; }
 .rd-bubble.is-recalled { font-size: 12px; opacity: .7; font-style: normal; }
+.rd-caption { margin-top: 8px; line-height: 1.55; }
 .rd-quote-btn {
   opacity: 0; border: 1px solid ${light ? '#e5e6eb' : '#2a3431'}; background: ${light ? '#ffffff' : '#1f2937'}; color: ${light ? '#6b7280' : '#9ca3af'}; cursor: pointer;
   width: 28px; height: 28px; border-radius: 6px; flex: none;
   display: flex; align-items: center; justify-content: center;
 }
 .rd-quote-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; }
-.rd-row:hover .rd-quote-btn { opacity: 1; transform: scale(1); }
+.rd-row:hover .rd-quote-btn, .rd-row.is-actions-open .rd-quote-btn { opacity: 1; transform: scale(1); }
 .rd-row .rd-quote-btn { transform: scale(0.8); }
 .rd-quote-btn:hover { color: ${accent}; }
+/* 触屏无 hover：引用按钮常显半透明，避免「功能像没做」。 */
+@media (hover: none) {
+  .rd-quote-btn { opacity: .55; transform: scale(1); }
+}
 .rd-quote { display: flex; flex-direction: column; gap: 4px; padding: 6px 10px; margin-bottom: 6px; border-left: 3px solid ${light ? '#d1d5db' : '#4b5563'}; border-radius: 6px; background: ${light ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.05)'}; font-size: 12px; }
 .rd-quote strong { font-weight: 600; opacity: .85; }
 .rd-quote em { font-style: normal; opacity: .75; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .rd-forwarded { display: block; font-size: 11px; opacity: .7; margin-bottom: 4px; }
-.rd-image { display: block; margin: -4px; }
-.rd-image img { max-width: 100%; max-height: 260px; object-fit: cover; cursor: zoom-in; }
+.rd-image {
+  display: block; margin: -4px; padding: 0; border: 0; background: transparent; cursor: zoom-in;
+  max-width: 100%;
+}
+.rd-image img { max-width: min(100%, 240px); max-height: 260px; min-width: 96px; min-height: 72px; object-fit: cover; border-radius: 10px; display: block; background: ${light ? '#eef0f3' : '#2a3140'}; }
+.rd-image.is-broken {
+  margin: 0; min-width: 148px; min-height: 88px; border-radius: 10px;
+  background: ${light ? '#f3f4f6' : '#2a3140'}; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.rd-image-fallback { font-size: 12px; color: ${light ? '#6b7280' : '#9ca3af'}; padding: 12px; }
+.rd-caption + .rd-image, .rd-image + .rd-caption { margin-top: 0; }
+.rd-bubble:has(> .rd-image:first-child) { padding-top: 8px; }
+.rd-msg-menu {
+  position: absolute; z-index: 35; display: flex; gap: 0; border-radius: 10px; overflow: hidden;
+  background: ${light ? '#ffffff' : '#1f2937'}; border: 1px solid ${light ? '#e5e6eb' : '#374151'};
+  box-shadow: 0 8px 24px rgba(15,18,25,.16);
+}
+.rd-msg-menu[hidden] { display: none !important; }
+.rd-msg-menu button {
+  border: 0; background: transparent; color: inherit; font: 500 13px system-ui, sans-serif;
+  padding: 10px 14px; cursor: pointer;
+}
+.rd-msg-menu button + button { border-left: 1px solid ${light ? '#eef0f3' : '#374151'}; }
+.rd-msg-menu button:hover { background: ${light ? '#f3f4f6' : '#374151'}; color: ${accent}; }
+.rd-lightbox {
+  position: absolute; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center;
+  background: rgba(15, 18, 25, 0.88); padding: 56px 16px 24px;
+}
+.rd-lightbox[hidden] { display: none !important; }
+.rd-lightbox-toolbar {
+  position: absolute; top: 12px; right: 12px; display: flex; align-items: center; gap: 8px;
+}
+.rd-lightbox-download {
+  height: 36px; padding: 0 12px; border-radius: 18px; text-decoration: none;
+  background: rgba(255,255,255,.14); color: #fff; display: inline-flex; align-items: center;
+  font: 500 13px system-ui, sans-serif;
+}
+.rd-lightbox-download:hover { background: rgba(255,255,255,.24); }
+.rd-lightbox-img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 12px 40px rgba(0,0,0,.35); }
+.rd-lightbox-close {
+  width: 36px; height: 36px; border: 0; border-radius: 18px;
+  background: rgba(255,255,255,.14); color: #fff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.rd-lightbox-close svg { width: 18px; height: 18px; }
+.rd-lightbox-close:hover { background: rgba(255,255,255,.24); }
+:host(.rd-lightbox-open) .rd-messages { overflow: hidden; }
 .rd-file, .rd-bubble .rd-file {
   display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px;
   background: ${light ? '#f3f4f6' : '#374151'}; color: inherit; text-decoration: none; border: 1px solid ${light ? '#e5e7eb' : '#4b5563'};
@@ -1187,6 +1625,9 @@ ${this.#options.embedded ? `
 .rd-state { font-size: 11px; }
 .rd-state.is-failed { display: inline-flex; align-items: center; gap: 3px; border: 0; background: transparent; color: #ff4d4f; cursor: pointer; padding: 0; font: inherit; font-size: 11px; }
 .rd-state.is-failed svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; }
+.rd-receipt { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: ${light ? '#939aab' : '#8b91a0'}; }
+.rd-receipt svg { width: 13px; height: 13px; display: block; }
+.rd-receipt.is-read { color: ${accent}; }
 .rd-sys { align-self: center; font-size: 12px; color: ${light ? '#8c93a3' : '#8b91a0'}; background: ${light ? '#f5f6f8' : '#23262d'}; padding: 3px 8px; border-radius: 4px; }
 .rd-row.is-flash .rd-bubble { outline: 2px solid ${accent}88; }
 .rd-pinned { display: flex; align-items: center; gap: 8px; margin: 8px 12px 0; padding: 6px 10px; border-radius: 10px; background: ${light ? '#f5f7fb' : '#23262d'}; font-size: 12px; color: ${light ? '#5b6172' : '#a8aebb'}; }
@@ -1292,6 +1733,76 @@ ${this.#options.embedded ? `
 @media (max-width: 480px) {
   .rd-panel { ${side}: 0; bottom: 0; width: 100vw; height: 100vh; height: 100dvh; max-width: none; border-radius: 0; border: 0; }
   .rd-launcher-slot { ${side}: 16px; bottom: 16px; }
-}`;
+}
+${light ? `
+.rd-panel { color: #1F2329; border-color: #E5E8EF; }
+.rd-launcher { position: relative; ${this.#options.launcher === 'bubble' ? `width: 64px; height: 64px; padding: 0; border-radius: 50%; justify-content: center;` : ''} box-shadow: 0 4px 16px ${accent}33; }
+${this.#options.launcher === 'bubble' ? '.rd-launcher-label { display: none; }' : ''}
+.rd-launcher-icon svg { width: 30px; height: 30px; }
+.rd-launcher-badge { background: #F53F3F; top: -2px; right: -2px; border: 2px solid #fff; height: 24px; min-width: 24px; line-height: 20px; }
+.rd-panel:not(.is-embedded) { bottom: 96px; height: min(560px, calc(100dvh - 116px)); }
+.rd-header { min-height: 64px; padding: 10px 18px; border-color: #E5E8EF; }
+.rd-header-main > .rd-avatar { display: none; }
+.rd-heading strong { font-size: 17px; }
+.rd-subtitle { color: #646A73; font-size: 12px; }
+.rd-subtitle.is-online::before { background: #00B42A; width: 7px; height: 7px; }
+.rd-service-subtitle { display: none; color: #646A73; font-size: 12px; }
+.rd-header-actions { gap: 2px; }
+.rd-body, .rd-messages { background: #F5F7FA; }
+.rd-messages { gap: 16px; padding: 16px 14px 12px; }
+.rd-empty { padding: 12px; border: 1px solid #E5E8EF; border-radius: 12px; background: #fff; box-shadow: 0 2px 6px rgba(31,35,41,.04); gap: 12px; }
+.rd-empty .rd-avatar.lg { width: 44px; height: 44px; border-radius: 12px; background: ${accent}; color: #fff; }
+.rd-welcome-body { flex: 1; min-width: 0; }
+.rd-welcome-body > strong { font-size: 14px; font-weight: 600; }
+.rd-empty p { padding: 0; border: 0; background: transparent; border-radius: 0; max-width: none; color: #646A73; font-size: 13px; line-height: 1.6; margin-top: 3px; }
+.rd-welcome-suggestions { margin: 8px 0 0; }
+.rd-thread-loading { align-self: center; margin: 28px 0; font-size: 12px; color: #8F959E; }
+.rd-guide-title { color: #8F959E; margin-bottom: 6px; }
+.rd-channel { border-color: #E5E8EF; padding: 8px 14px; }
+.rd-channel-row { gap: 6px; }
+.rd-channel-chip { color: ${accent}; background: #fff; border: 1px solid ${accent}40; border-radius: 999px; padding: 4px 10px; font-size: 12px; }
+.rd-channel-chip:hover { background: ${accent}0d; }
+.rd-channel-card { border-color: #E5E8EF; border-radius: 10px; }
+.rd-row { align-items: flex-start; gap: 8px; }
+.rd-avatar.sm { width: 32px; height: 32px; border-radius: 50%; align-self: flex-start; background: ${accent}15; color: ${accent}; }
+.rd-avatar.sm svg { width: 20px; height: 20px; }
+.rd-bubble-group { max-width: calc(100% - 44px); gap: 4px; }
+.rd-row.is-mine .rd-bubble-group { max-width: 85%; }
+.rd-sender { font-size: 12px; color: #646A73; }
+.rd-bubble { padding: 9px 12px; border-color: #E5E8EF; border-radius: 4px 12px 12px; color: #1F2329; box-shadow: 0 1px 3px rgba(31,35,41,.02); }
+.rd-row.is-mine .rd-bubble { background: ${accent}; color: #fff; border-color: ${accent}; border-radius: 12px 4px 12px 12px; }
+.rd-bubble:has(.rd-image) { padding: 6px; border-radius: 12px; }
+.rd-image { margin: 0; }
+.rd-image img { border-radius: 8px; min-width: 120px; min-height: 90px; }
+.rd-time { color: #8F959E; font-size: 11px; }
+.rd-day, .rd-time-separator { align-self: center; color: #8F959E; font-size: 12px; margin: 2px 0; }
+.rd-composer { border-color: #E5E8EF; }
+.rd-composer-row { padding: 10px 12px; gap: 6px; background: #fff; }
+.rd-composer-row .rd-more-toggle { order: -2; }
+.rd-composer-row .rd-emoji-toggle { order: -1; }
+.rd-composer-row .rd-icon { width: 30px; height: 36px; color: #646A73; }
+.rd-composer-row .rd-icon svg { width: 24px; height: 24px; }
+.rd-composer-row .rd-input { border: 1px solid #E5E8EF; border-radius: 20px; padding: 8px 12px; font-size: 14px; line-height: 20px; background: #fff; }
+.rd-input::placeholder { color: #8F959E; }
+.rd-composer-row .rd-input:focus { border-color: ${accent}; }
+.rd-composer-row .rd-send { width: 60px; height: 36px; border-radius: 18px; font: 500 14px "Microsoft YaHei", sans-serif; }
+.is-embedded .rd-header { position: relative; min-height: 56px; padding: 6px 12px; }
+.is-embedded .rd-header-main { margin: 0 auto; max-width: calc(100% - 88px); text-align: center; }
+.is-embedded .rd-heading { align-items: center; }
+.is-embedded .rd-heading strong { font-size: 18px; }
+.is-embedded .rd-service-subtitle { display: block; }
+.is-embedded .rd-subtitle { font-size: 11px; }
+.is-embedded .rd-header-actions { position: absolute; right: 8px; top: 10px; }
+.is-embedded .rd-page-back { position: fixed; left: 8px; top: 10px; }
+.is-embedded .rd-back { display: none; }
+.is-embedded .rd-body, .is-embedded .rd-messages { background: #F2F3F5; }
+@media (max-width: 480px) {
+  .rd-panel:not(.is-embedded) { bottom: 0; height: 100dvh; }
+  .rd-panel:not(.is-embedded) .rd-header { min-height: 56px; }
+  .rd-messages { padding: 12px; gap: 14px; }
+  .rd-composer-row { padding: 8px 10px; }
+  .is-embedded .rd-composer-row .rd-emoji-toggle { order: 0; }
+}
+` : ''}`;
   }
 }

@@ -705,6 +705,7 @@ class _ThreadHeader extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   [
+                    'ID: ${shortId(conversation.id)}',
                     conversationSourceLabel(conversation.source),
                     if (conversation.visitorUnread > 0)
                       '访客未读 ${conversation.visitorUnread}',
@@ -945,6 +946,7 @@ class _MessageList extends StatelessWidget {
     // conversation that spans weeks still reads as a timeline.
     final rows = <Widget>[];
     DateTime? lastDay;
+    DateTime? lastTime;
     // The divider belongs at the first message this agent had not read, which is
     // the position it occupied when the thread was opened. It is inserted once
     // and only when both sides of it are actually loaded, so it never appears at
@@ -960,6 +962,11 @@ class _MessageList extends StatelessWidget {
         rows.add(_DaySeparator(label: dayLabel(message.createdAt)));
         lastDay = day;
       }
+      if (lastTime == null || message.createdAt.difference(lastTime).inMinutes >= 5) {
+        final local = message.createdAt.toLocal();
+        rows.add(_DaySeparator(label: '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}'));
+      }
+      lastTime = message.createdAt;
       if (!dividerPlaced && message.sequence > workbench.readBoundary) {
         rows.add(const _UnreadDivider());
         dividerPlaced = true;
@@ -1308,7 +1315,7 @@ class _DaySeparator extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Row(
         children: <Widget>[
-          const Expanded(child: Divider()),
+          const Spacer(),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10),
             child: Text(
@@ -1318,7 +1325,7 @@ class _DaySeparator extends StatelessWidget {
               ),
             ),
           ),
-          const Expanded(child: Divider()),
+          const Spacer(),
         ],
       ),
     );
@@ -1409,7 +1416,8 @@ class _MessageBubble extends StatelessWidget {
     final isAgent = message.isFromAgent;
     // 坐席实心蓝气泡用白字；访客白气泡用正文色（腾讯 IM / 云信习惯）。
     final textColor =
-        isAgent ? Colors.white : theme.colorScheme.onSurface;
+        isAgent && theme.brightness == Brightness.dark
+            ? Colors.white : theme.colorScheme.onSurface;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -1615,7 +1623,8 @@ class _BubbleShell extends StatelessWidget {
           ),
           child: DefaultTextStyle.merge(
             style: TextStyle(
-              color: isAgent ? Colors.white : scheme.onSurface,
+              color: isAgent && scheme.brightness == Brightness.dark
+                  ? Colors.white : scheme.onSurface,
             ),
             child: child,
           ),
@@ -1637,7 +1646,7 @@ class _QuoteBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     // onSurface=true 表示嵌在坐席蓝气泡内，引用条用半透明白。
-    final color = onSurface
+    final color = onSurface && theme.brightness == Brightness.dark
         ? Colors.white.withOpacity(0.92)
         : theme.colorScheme.onSurfaceVariant;
     return Container(
@@ -2002,6 +2011,55 @@ class _NoteBubble extends StatelessWidget {
   }
 }
 
+
+/// 坐席端图片全屏预览：双指缩放 + 点遮罩/关闭退出。
+void _openImagePreview(BuildContext context, String url) {
+  showDialog<void>(
+    context: context,
+    barrierColor: Colors.black.withOpacity(0.88),
+    builder: (dialogContext) {
+      return Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(16),
+        child: Stack(
+          children: <Widget>[
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => Navigator.of(dialogContext).pop(),
+                child: const SizedBox.expand(),
+              ),
+            ),
+            Center(
+              child: InteractiveViewer(
+                minScale: 0.8,
+                maxScale: 4,
+                child: Image.network(
+                  url,
+                  fit: BoxFit.contain,
+                  errorBuilder: (context, error, stack) => const Text(
+                    '图片加载失败',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 0,
+              right: 0,
+              child: IconButton(
+                tooltip: '关闭',
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                icon: const Icon(Icons.close, color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
 /// Image and file bubbles. Images are loaded straight from the authenticated
 /// file endpoint with the session token in the query, which is why the console
 /// does not need a separate image cache layer.
@@ -2033,31 +2091,44 @@ class _Attachments extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
             child: attachment.isImage
-                ? ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: ConstrainedBox(
-                      constraints:
-                          const BoxConstraints(maxWidth: 260, maxHeight: 260),
-                      child: Image.network(
-                        fileUrl(attachment.url),
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stack) => _FileChip(
-                          attachment: attachment,
-                          url: fileUrl(attachment.url),
+                ? Builder(
+                    builder: (context) {
+                      final url = fileUrl(attachment.url);
+                      // 主工作台缩略图可点开全屏预览，与访客端灯箱对齐全链路体验。
+                      return MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: GestureDetector(
+                          onTap: () => _openImagePreview(context, url),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(
+                                  maxWidth: 260, maxHeight: 260),
+                              child: Image.network(
+                                url,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stack) =>
+                                    _FileChip(
+                                  attachment: attachment,
+                                  url: url,
+                                ),
+                                loadingBuilder: (context, child, progress) =>
+                                    progress == null
+                                        ? child
+                                        : const SizedBox(
+                                            width: 180,
+                                            height: 120,
+                                            child: Center(
+                                              child: CircularProgressIndicator(
+                                                  strokeWidth: 2),
+                                            ),
+                                          ),
+                              ),
+                            ),
+                          ),
                         ),
-                        loadingBuilder: (context, child, progress) =>
-                            progress == null
-                                ? child
-                                : const SizedBox(
-                                    width: 180,
-                                    height: 120,
-                                    child: Center(
-                                      child: CircularProgressIndicator(
-                                          strokeWidth: 2),
-                                    ),
-                                  ),
-                      ),
-                    ),
+                      );
+                    },
                   )
                 : attachment.isAudio
                     ? _VoiceNote(
@@ -2362,8 +2433,10 @@ class _Composer extends StatelessWidget {
     return Container(
         decoration: BoxDecoration(
           color: scheme.surface,
-          border: Border(top: BorderSide(color: scheme.outlineVariant)),
+          border: Border.all(color: scheme.outlineVariant),
+          borderRadius: BorderRadius.circular(12),
         ),
+        margin: const EdgeInsets.all(12),
         padding: const EdgeInsets.fromLTRB(10, 6, 12, 10),
         child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2407,7 +2480,55 @@ class _Composer extends StatelessWidget {
                             '${attachment.fileName} · ${fileSize(attachment.sizeBytes)}'),
                         onDeleted: () => onRemovePending(attachment.id))
                 ]),
-              // 工具栏在上、输入在下：对齐腾讯 IM / 企点输入区。
+              Shortcuts(
+                  shortcuts: const <ShortcutActivator, Intent>{
+                    SingleActivator(LogicalKeyboardKey.enter): _SendIntent(),
+                    SingleActivator(LogicalKeyboardKey.numpadEnter):
+                        _SendIntent()
+                  },
+                  child: Actions(
+                      actions: <Type, Action<Intent>>{
+                        _SendIntent: CallbackAction<_SendIntent>(onInvoke: (_) {
+                          onSend();
+                          return null;
+                        })
+                      },
+                      child: TextField(
+                          controller: controller,
+                          focusNode: focusNode,
+                          minLines: compact ? 1 : 2,
+                          maxLines: compact ? 4 : 5,
+                          onChanged: onChanged,
+                          textInputAction: TextInputAction.newline,
+                          keyboardType: TextInputType.multiline,
+                          decoration: InputDecoration(
+                              hintText: noteMode
+                                  ? '写一条内部备注，访客看不到'
+                                  : visitorTyping
+                                      ? '对方正在输入…'
+                                      : '输入消息，Enter 发送',
+                              filled: true,
+                              fillColor: noteMode
+                                  ? scheme.tertiaryContainer.withAlpha(35)
+                                  : scheme.surface,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(6),
+                                borderSide: BorderSide.none,
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(6),
+                                borderSide: BorderSide.none,
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(6),
+                                borderSide: BorderSide(
+                                    color: scheme.primary, width: 1),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                  vertical: 10, horizontal: 12),
+                              hintStyle: theme.textTheme.bodyMedium
+                                  ?.copyWith(color: scheme.outline))))),
+              // 输入区在上、工具栏在下，保持原有发送与附件回调。
               Row(
                   children: [
                     PopupMenuButton<String>(
@@ -2467,54 +2588,6 @@ class _Composer extends StatelessWidget {
                           height: 16,
                           child: CircularProgressIndicator(strokeWidth: 2)),
                   ]),
-              Shortcuts(
-                  shortcuts: const <ShortcutActivator, Intent>{
-                    SingleActivator(LogicalKeyboardKey.enter): _SendIntent(),
-                    SingleActivator(LogicalKeyboardKey.numpadEnter):
-                        _SendIntent()
-                  },
-                  child: Actions(
-                      actions: <Type, Action<Intent>>{
-                        _SendIntent: CallbackAction<_SendIntent>(onInvoke: (_) {
-                          onSend();
-                          return null;
-                        })
-                      },
-                      child: TextField(
-                          controller: controller,
-                          focusNode: focusNode,
-                          minLines: compact ? 1 : 2,
-                          maxLines: compact ? 4 : 5,
-                          onChanged: onChanged,
-                          textInputAction: TextInputAction.newline,
-                          keyboardType: TextInputType.multiline,
-                          decoration: InputDecoration(
-                              hintText: noteMode
-                                  ? '写一条内部备注，访客看不到'
-                                  : visitorTyping
-                                      ? '对方正在输入…'
-                                      : '输入消息，Enter 发送',
-                              filled: true,
-                              fillColor: noteMode
-                                  ? scheme.tertiaryContainer.withAlpha(35)
-                                  : const Color(0xFFF5F6F8),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(6),
-                                borderSide: BorderSide.none,
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(6),
-                                borderSide: BorderSide.none,
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(6),
-                                borderSide: BorderSide(
-                                    color: scheme.primary, width: 1),
-                              ),
-                              contentPadding: const EdgeInsets.symmetric(
-                                  vertical: 10, horizontal: 12),
-                              hintStyle: theme.textTheme.bodyMedium
-                                  ?.copyWith(color: scheme.outline))))),
               const SizedBox(height: 6),
               Row(children: [
                 Expanded(
