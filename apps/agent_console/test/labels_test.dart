@@ -10,8 +10,8 @@ void main() {
     expect(planLabel('ENTERPRISE'), '企业版');
     expect(billingStatusLabel('PAST_DUE'), '已逾期');
     expect(tenantStatusLabel('SUSPENDED'), '已停用');
-    expect(agentRoleLabel('OWNER'), '客服主管');
-    expect(agentRoleLabel('ADMIN'), '客服主管');
+    expect(agentRoleLabel('SUPERVISOR'), '客服主管');
+    expect(agentRoleLabel('AGENT'), '客服坐席');
     expect(agentRoleLabel('SUPERVISOR'), '客服主管');
     expect(agentRoleLabel('AGENT'), '客服坐席');
     expect(conversationSourceLabel('WEB'), '网站');

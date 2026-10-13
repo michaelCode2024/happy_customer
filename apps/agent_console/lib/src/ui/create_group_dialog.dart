@@ -39,6 +39,7 @@ class _CreateGroupDialogState extends State<CreateGroupDialog> {
       fillColor:
           Theme.of(context).colorScheme.surfaceContainerHighest.withAlpha(70),
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      isDense: true,
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
       enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
@@ -131,6 +132,11 @@ class _CreateGroupDialogState extends State<CreateGroupDialog> {
     return PopScope(
         canPop: !_busy,
         child: AlertDialog(
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
+            contentPadding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+            actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
             insetPadding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
             title: const Text('创建群聊'),
@@ -145,22 +151,42 @@ class _CreateGroupDialogState extends State<CreateGroupDialog> {
                             children: [
                               Text('先选择沟通对象，再填写群名称。你将成为这个群的群主。',
                                   style: theme.textTheme.bodySmall),
-                              const SizedBox(height: 20),
+                              const SizedBox(height: 16),
                               _label('1. 选择群类型'),
-                              _kindCard(
-                                  'INTERNAL',
-                                  '内部协作群',
-                                  '只让企业同事加入，用于团队讨论；不接入客户。',
-                                  Icons.groups_outlined),
-                              const SizedBox(height: 10),
-                              _kindCard('SERVICE', '客户服务群',
-                                  '客服与客户在同一群沟通，需要关联客服入口。', Icons.support_agent),
-                              const SizedBox(height: 20),
+                              LayoutBuilder(builder: (context, constraints) {
+                                final internal = _kindCard(
+                                    'INTERNAL',
+                                    '内部协作群',
+                                    '只让企业同事加入，用于团队讨论；不接入客户。',
+                                    Icons.groups_outlined);
+                                final service = _kindCard(
+                                    'SERVICE',
+                                    '客户服务群',
+                                    '客服与客户在同一群沟通，需要关联客服入口。',
+                                    Icons.support_agent);
+                                if (constraints.maxWidth < 480)
+                                  return Column(children: [
+                                    internal,
+                                    const SizedBox(height: 10),
+                                    service
+                                  ]);
+                                return IntrinsicHeight(
+                                    child: Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        children: [
+                                      Expanded(child: internal),
+                                      const SizedBox(width: 12),
+                                      Expanded(child: service)
+                                    ]));
+                              }),
+                              const SizedBox(height: 16),
                               _label('2. 填写群名称'),
                               TextFormField(
                                   controller: _name,
                                   enabled: !_busy,
                                   maxLength: 120,
+                                  textInputAction: TextInputAction.done,
                                   decoration: _decoration(_kind == 'INTERNAL'
                                       ? '例如：售后协作群'
                                       : '例如：客户项目服务群'),
@@ -225,10 +251,10 @@ class _CreateGroupDialogState extends State<CreateGroupDialog> {
                                             style: theme.textTheme.titleSmall),
                                         const SizedBox(height: 8),
                                         const Text(
-                                            '• 你自动成为群主和第一位成员。\n• 点击群内“群成员”，添加企业同事。'),
+                                            '1. 创建完成后，你就是群主。\n2. 进入“群成员”，添加企业同事。'),
                                         if (_kind == 'SERVICE')
                                           const Text(
-                                              '• 点击“邀请客户”，复制链接给客户。\n• 客户无需注册客服账号，通过邀请链接加入。'),
+                                              '3. 点击“邀请客户”，复制入群链接给客户。\n客户无需注册客服账号。'),
                                         if (_kind == 'INTERNAL')
                                           const Text('• 内部协作群不能邀请客户。')
                                       ])),

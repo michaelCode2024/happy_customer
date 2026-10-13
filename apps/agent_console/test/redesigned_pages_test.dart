@@ -30,7 +30,7 @@ class _Session extends SessionController {
 }
 
 void main() {
-  for (final width in [390.0, 1400.0]) {
+  for (final width in [320.0, 390.0, 1400.0]) {
     testWidgets('知识筛选、完整内容与真实回答测试 $width', (tester) async {
       tester.view.physicalSize = Size(width, 1000);
       tester.view.devicePixelRatio = 1;
@@ -127,6 +127,7 @@ void main() {
       await tester.enterText(find.widgetWithText(TextField, '模拟客户提问'), '另一个问题');
       await tester.pumpAndSettle();
       expect(find.text('这是根据资料生成的回答'), findsNothing);
+      await tester.ensureVisible(find.text('未解决问题').first);
       await tester.tap(find.text('未解决问题').first);
       await tester.pumpAndSettle();
       await tester.tap(find.text('补充知识'));

@@ -226,9 +226,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
   /// 菜单按「接待 → 开通 → 账号」分组，文案用白话，避免一排看不懂的功能名。
   List<_SectionSpec> _sections(AgentProfile? agent) {
     final canReport = agent?.canViewReports ?? false;
-    final admin = agent?.role == 'OWNER' ||
-        agent?.role == 'ADMIN' ||
-        agent?.role == 'SUPERVISOR';
+    final admin = agent?.role == 'SUPERVISOR';
     return <_SectionSpec>[
       const _SectionSpec(
         section: WorkbenchSection.conversations,
@@ -459,9 +457,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
       case WorkbenchSection.groups:
         return GroupsPage(session: widget.session);
       case WorkbenchSection.overview:
-        final admin = widget.session.agent?.role == 'OWNER' ||
-            widget.session.agent?.role == 'ADMIN' ||
-            widget.session.agent?.role == 'SUPERVISOR';
+        final admin = widget.session.agent?.role == 'SUPERVISOR';
         return OverviewPage(
           workbench: _workbench,
           name: widget.session.agent?.displayName ?? '',
@@ -763,8 +759,6 @@ class _RailLeading extends StatelessWidget {
   }
 
   static String _roleLabel(String role) => switch (role) {
-        'OWNER' => '客服主管',
-        'ADMIN' => '客服主管',
         'SUPERVISOR' => '客服主管',
         'AGENT' => '客服坐席',
         _ => role,

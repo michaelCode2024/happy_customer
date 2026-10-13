@@ -78,17 +78,15 @@ class AgentProfile {
   final String email;
   final String displayName;
 
-  /// SUPERVISOR or AGENT; legacy OWNER/ADMIN remain readable.
+  /// Enterprise roles: SUPERVISOR or AGENT.
   final String role;
 
   /// ONLINE, AWAY, OFFLINE, or null before the first presence frame.
   final String? presence;
 
-  bool get canManageKnowledge =>
-      role == 'OWNER' || role == 'ADMIN' || role == 'SUPERVISOR';
+  bool get canManageKnowledge => role == 'SUPERVISOR';
 
-  bool get canViewReports =>
-      role == 'OWNER' || role == 'ADMIN' || role == 'SUPERVISOR';
+  bool get canViewReports => role == 'SUPERVISOR';
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'id': id,

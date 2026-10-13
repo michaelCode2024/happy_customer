@@ -25,8 +25,6 @@ const (
 
 // Roles are evaluated by the permission helpers in this package.
 const (
-	RoleOwner      = "OWNER"
-	RoleAdmin      = "ADMIN"
 	RoleAgent      = "AGENT"
 	RoleSupervisor = "SUPERVISOR"
 )
@@ -143,20 +141,12 @@ func PrincipalFrom(ctx context.Context) (Principal, bool) {
 // CanManageTenant reports whether the role may change tenant settings, agents,
 // inboxes, knowledge and API keys.
 func CanManageTenant(role string) bool {
-	return NormalizeRole(role) == RoleSupervisor
+	return role == RoleSupervisor
 }
 
 // CanViewReports separates supervisors and above from ordinary agents.
 func CanViewReports(role string) bool {
-	return NormalizeRole(role) == RoleSupervisor
-}
-
-// NormalizeRole 兼容旧企业角色；企业权限统一为主管与坐席。
-func NormalizeRole(role string) string {
-	if role == RoleOwner || role == RoleAdmin {
-		return RoleSupervisor
-	}
-	return role
+	return role == RoleSupervisor
 }
 
 // ValidRole guards the agent admin API: roles arrive from HTTP requests, so the
@@ -164,7 +154,7 @@ func NormalizeRole(role string) string {
 // role constants so a new role cannot be added in one place and forgotten here.
 func ValidRole(role string) bool {
 	switch role {
-	case RoleOwner, RoleAdmin, RoleSupervisor, RoleAgent:
+	case RoleSupervisor, RoleAgent:
 		return true
 	default:
 		return false

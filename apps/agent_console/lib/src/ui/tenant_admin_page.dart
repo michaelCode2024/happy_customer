@@ -436,12 +436,8 @@ Map<String, dynamic> _fields(Map<String, dynamic> data, List<String> keys) => {
       for (final key in keys)
         if (data.containsKey(key)) key: data[key]
     };
-String _role(dynamic value) => switch (value) {
-      'OWNER' => '客服主管',
-      'ADMIN' => '客服主管',
-      'SUPERVISOR' => '客服主管',
-      _ => '客服坐席'
-    };
+String _role(dynamic value) =>
+    switch (value) { 'SUPERVISOR' => '客服主管', _ => '客服坐席' };
 
 class _MemberDialog extends StatefulWidget {
   const _MemberDialog(
@@ -465,9 +461,7 @@ class _MemberDialogState extends State<_MemberDialog> {
       TextEditingController(text: '${widget.member?['maxConcurrent'] ?? 5}');
   late String _roleValue = asString(widget.member?['role']).isEmpty
       ? 'AGENT'
-      : (['OWNER', 'ADMIN'].contains(asString(widget.member?['role']))
-          ? 'SUPERVISOR'
-          : asString(widget.member?['role']));
+      : asString(widget.member?['role']);
   late bool _active = widget.member?['status'] != 'DISABLED';
   late final Set<String> _selected =
       asList(widget.member?['inboxIds']).map((e) => e.toString()).toSet();

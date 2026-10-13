@@ -1,26 +1,16 @@
 package database
 
-
-
 import (
-
 	"context"
 
 	"fmt"
-
-
 
 	"github.com/google/uuid"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-
-
 	"github.com/relaydesk/relaydesk/internal/auth"
-
 )
-
-
 
 // demoNamespace makes every seeded identifier deterministic. Re-running the
 
@@ -32,25 +22,17 @@ import (
 
 var demoNamespace = uuid.MustParse("6f1b7c2e-8d3a-4f5b-9c0d-1a2b3c4d5e6f")
 
-
-
 const (
+	DemoTenantSlug = "demo"
 
-	DemoTenantSlug    = "demo"
+	DemoOwnerEmail = "owner@relaydesk.local"
 
-	DemoOwnerEmail    = "owner@relaydesk.local"
-
-	DemoAgentEmail    = "agent@relaydesk.local"
+	DemoAgentEmail = "agent@relaydesk.local"
 
 	DemoAgentPassword = "RelayDesk@2026"
-
 )
 
-
-
 func demoID(name string) uuid.UUID { return uuid.NewSHA1(demoNamespace, []byte(name)) }
-
-
 
 // EnsureDemoData creates a complete, self-contained demo tenant: an inbox with a
 
@@ -80,18 +62,17 @@ func EnsureDemoData(ctx context.Context, pool *pgxpool.Pool) error {
 
 		tenantID, map[string]any{
 
-			"brandColor":  "#2f6bff",
+			"brandColor": "#2f6bff",
 
-			"locale":      "zh-CN",
+			"locale": "zh-CN",
 
-			"timezone":    "Asia/Shanghai",
+			"timezone": "Asia/Shanghai",
 
-			"industry":    "SaaS",
+			"industry": "SaaS",
 
-			"demo":        true,
+			"demo": true,
 
 			"supportMail": "support@relaydesk.local",
-
 		}); err != nil {
 
 		return fmt.Errorf("seed tenant: %w", err)
@@ -104,28 +85,24 @@ func EnsureDemoData(ctx context.Context, pool *pgxpool.Pool) error {
 
 	}
 
-
-
 	// Two inboxes so routing, per-inbox AI settings and agent assignment are all
 
 	// exercisable in the demo.
 
 	inboxes := []struct {
+		key string
 
-		key      string
+		name string
 
-		name     string
+		welcome string
 
-		welcome  string
+		offline string
 
-		offline  string
+		domains []string
 
-		domains  []string
-
-		aiOn     bool
+		aiOn bool
 
 		greeting string
-
 	}{
 
 		{
@@ -139,7 +116,6 @@ func EnsureDemoData(ctx context.Context, pool *pgxpool.Pool) error {
 			domains: []string{}, aiOn: true,
 
 			greeting: "我是语聊的智能助手，可以先为你解答常见问题。",
-
 		},
 
 		{
@@ -151,9 +127,7 @@ func EnsureDemoData(ctx context.Context, pool *pgxpool.Pool) error {
 			offline: "客服已下班，留言后我们会在工作时间联系你。",
 
 			domains: []string{"app.example.com"}, aiOn: false,
-
 		},
-
 	}
 
 	inboxIDs := make(map[string]uuid.UUID, len(inboxes))
@@ -236,20 +210,19 @@ func EnsureDemoData(ctx context.Context, pool *pgxpool.Pool) error {
 
 			tenantID, id, map[string]any{
 
-				"monday":    []string{"09:00-18:00"},
+				"monday": []string{"09:00-18:00"},
 
-				"tuesday":   []string{"09:00-18:00"},
+				"tuesday": []string{"09:00-18:00"},
 
 				"wednesday": []string{"09:00-18:00"},
 
-				"thursday":  []string{"09:00-18:00"},
+				"thursday": []string{"09:00-18:00"},
 
-				"friday":    []string{"09:00-18:00"},
+				"friday": []string{"09:00-18:00"},
 
-				"saturday":  []string{"10:00-16:00"},
+				"saturday": []string{"10:00-16:00"},
 
-				"sunday":    []string{},
-
+				"sunday": []string{},
 			}); err != nil {
 
 			return fmt.Errorf("seed routing %s: %w", item.key, err)
@@ -257,8 +230,6 @@ func EnsureDemoData(ctx context.Context, pool *pgxpool.Pool) error {
 		}
 
 	}
-
-
 
 	// Three seats, one per role, all sharing the demo password. The password is
 
@@ -273,19 +244,16 @@ func EnsureDemoData(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 
 	seats := []struct {
-
 		email, name, role string
 
-		inboxKeys         []string
-
+		inboxKeys []string
 	}{
 
-		{DemoOwnerEmail, "演示企业主", auth.RoleOwner, []string{"demo-web", "demo-app"}},
+		{DemoOwnerEmail, "演示企业主", auth.RoleSupervisor, []string{"demo-web", "demo-app"}},
 
 		{"supervisor@relaydesk.local", "客服主管", auth.RoleSupervisor, []string{"demo-web", "demo-app"}},
 
 		{DemoAgentEmail, "客服小林", auth.RoleAgent, []string{"demo-web"}},
-
 	}
 
 	for _, seat := range seats {
@@ -338,8 +306,6 @@ func EnsureDemoData(ctx context.Context, pool *pgxpool.Pool) error {
 
 	}
 
-
-
 	canned := []struct{ title, content string }{
 
 		{"问候语", "你好，我是语聊客服，很高兴为你服务。"},
@@ -349,7 +315,6 @@ func EnsureDemoData(ctx context.Context, pool *pgxpool.Pool) error {
 		{"需要更多信息", "为了更快定位问题，麻烦你提供一下账号、订单号和出现问题的截图，谢谢。"},
 
 		{"结束语", "如果还有其他问题，随时找我。感谢你的耐心，祝你愉快！"},
-
 	}
 
 	for _, item := range canned {
@@ -380,14 +345,11 @@ func EnsureDemoData(ctx context.Context, pool *pgxpool.Pool) error {
 
 	}
 
-
-
 	tags := []struct{ name, color string }{
 
 		{"售前咨询", "#356ae6"}, {"售后问题", "#e6642f"},
 
 		{"已解决", "#2fa76a"}, {"需要跟进", "#c9a227"}, {"投诉", "#d43f4c"},
-
 	}
 
 	for _, item := range tags {
@@ -412,8 +374,6 @@ func EnsureDemoData(ctx context.Context, pool *pgxpool.Pool) error {
 
 	}
 
-
-
 	_, err = pool.Exec(ctx, `
 
 		insert into tenant_subscription(tenant_id, plan, status, seat_limit, monthly_message_limit, trial_ends_at)
@@ -434,8 +394,6 @@ func EnsureDemoData(ctx context.Context, pool *pgxpool.Pool) error {
 
 }
 
-
-
 // seedDemoKnowledge fills the knowledge base the AI answers from. The entries
 
 // are written the way a real tenant would write them — short titles, concrete
@@ -445,15 +403,12 @@ func EnsureDemoData(ctx context.Context, pool *pgxpool.Pool) error {
 func seedDemoKnowledge(ctx context.Context, pool *pgxpool.Pool, tenantID uuid.UUID) error {
 
 	categories := []struct {
-
-		name  string
+		name string
 
 		order int
-
 	}{
 
 		{"产品与功能", 1}, {"价格与套餐", 2}, {"接入与部署", 3}, {"常见故障", 4},
-
 	}
 
 	categoryIDs := make(map[string]uuid.UUID, len(categories))
@@ -486,12 +441,8 @@ func seedDemoKnowledge(ctx context.Context, pool *pgxpool.Pool, tenantID uuid.UU
 
 	}
 
-
-
 	entries := []struct {
-
 		category, title, content, examples string
-
 	}{
 
 		{"接入与部署", "如何在网站接入在线客服",
@@ -565,7 +516,6 @@ func seedDemoKnowledge(ctx context.Context, pool *pgxpool.Pool, tenantID uuid.UU
 				"到期后自动清理；需要长期归档可以开启 Webhook 把消息实时同步到企业自己的系统。",
 
 			"数据安全吗；消息会保存多久；能不能导出记录"},
-
 	}
 
 	for _, item := range entries {
@@ -596,8 +546,6 @@ func seedDemoKnowledge(ctx context.Context, pool *pgxpool.Pool, tenantID uuid.UU
 
 }
 
-
-
 // nullableText keeps empty demo values out of the database so the AI setting
 
 // falls back to its column default instead of storing an empty string.
@@ -613,4 +561,3 @@ func nullableText(value string) any {
 	return value
 
 }
-

@@ -20,7 +20,7 @@ Content-Type: application/json
 - `POST /api/v1/platform/me/password`：`currentPassword`、`newPassword`（至少 8 位）；成功后撤销该账号全部会话并重新登录。
 - 旧 `/platform/token` 返回 410；静态平台令牌不再接受。
 - 登录错误返回 401；受保护接口会检查账号状态、会话有效期和撤销状态。
-- `/me` 返回实时 `role`：`SUPER_ADMIN` 可管理企业及分配额度，`SUPERVISOR` 只读。每次写入均重新检查数据库中的角色；降权后旧令牌不能继续分配。迁移保留已有平台运营账号的超级管理员权限，新建数据库账号默认 `SUPERVISOR`，首次启动初始化账号为 `SUPER_ADMIN`。
+- `/me` 返回实时 `role`：`SUPER_ADMIN` 可管理企业及分配额度，`ADMIN` 只读。每次写入均重新检查数据库中的角色；降权后旧令牌不能继续分配。迁移保留已有平台运营账号的超级管理员权限，新建数据库账号默认 `ADMIN`，首次启动初始化账号为 `SUPER_ADMIN`。
 
 ## 接口
 
@@ -121,4 +121,4 @@ Content-Type: application/json
 
 目标账号必须是该企业已存在的成员，否则返回404且不改变数据。成功后目标账号设为启用的客服主管，其旧登录被注销；其他主管的权限保持不变。新密码仅在响应中显示一次。
 
-企业成员角色为 SUPERVISOR/AGENT。旧 OWNER/ADMIN 请求兼容映射为 SUPERVISOR。开通企业的初始账号为客服主管，旧 owner 重置接口路径保留兼容。
+企业成员角色为 SUPERVISOR/AGENT。旧 OWNER/ADMIN 账号在数据库中迁移为 SUPERVISOR 并注销旧会话；接口不再接受旧角色，传入时返回 400。开通企业的初始账号为客服主管，旧 owner 重置接口路径保留兼容。

@@ -22,8 +22,6 @@ String tenantStatusLabel(String value) => switch (value) {
     };
 
 String agentRoleLabel(String value) => switch (value) {
-      'OWNER' => '客服主管',
-      'ADMIN' => '客服主管',
       'SUPERVISOR' => '客服主管',
       'AGENT' => '客服坐席',
       _ => value,

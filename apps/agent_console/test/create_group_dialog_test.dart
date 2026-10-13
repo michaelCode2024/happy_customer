@@ -11,7 +11,7 @@ const inbox = InboxInfo(
     autoAssign: true,
     aiEnabled: true);
 void main() {
-  for (final width in [390.0, 900.0]) {
+  for (final width in [320.0, 390.0, 900.0]) {
     testWidgets('创建群规则、字段验证与失败重试 $width', (tester) async {
       tester.view.physicalSize = Size(width, 900);
       tester.view.devicePixelRatio = 1;

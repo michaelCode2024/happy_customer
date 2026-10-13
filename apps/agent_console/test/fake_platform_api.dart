@@ -66,7 +66,7 @@ class FakePlatformApi {
           'id': 'aaaaaaaa-1111-1111-1111-111111111111',
           'email': 'owner@demo.test',
           'displayName': '管理员',
-          'role': 'OWNER',
+          'role': 'SUPERVISOR',
           'status': 'ACTIVE',
           'presence': 'ONLINE',
         },

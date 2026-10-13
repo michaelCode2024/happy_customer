@@ -49,6 +49,17 @@ class _SettingsPageState extends State<SettingsPage> {
   String? _passwordError;
   bool _obscure = true;
 
+  InputDecoration _field(String label, {Widget? suffixIcon}) => InputDecoration(
+        labelText: label,
+        floatingLabelBehavior: FloatingLabelBehavior.always,
+        filled: true,
+        fillColor:
+            Theme.of(context).colorScheme.surfaceContainerHighest.withAlpha(45),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        suffixIcon: suffixIcon,
+      );
+
   @override
   void initState() {
     super.initState();
@@ -155,7 +166,7 @@ class _SettingsPageState extends State<SettingsPage> {
               Text('管理你的工作状态、个人资料与外观',
                   style: TextStyle(fontSize: 12, color: Color(0xFF71817E)))
             ]),
-        toolbarHeight: 76,
+        toolbarHeight: 64,
         backgroundColor: Colors.transparent,
       ),
       body: ListenableBuilder(
@@ -227,9 +238,8 @@ class _SettingsPageState extends State<SettingsPage> {
               children: <Widget>[
                 TextField(
                   controller: _displayName,
-                  decoration: const InputDecoration(
-                    labelText: '客户与同事看到的名字',
-                  ),
+                  enabled: !_savingName,
+                  decoration: _field('客户与同事看到的名字'),
                 ),
                 if (_nameError != null) _ErrorText(_nameError!),
                 const SizedBox(height: 10),
@@ -253,21 +263,24 @@ class _SettingsPageState extends State<SettingsPage> {
               children: <Widget>[
                 TextField(
                   controller: _currentPassword,
+                  enabled: !_savingPassword,
                   obscureText: _obscure,
-                  decoration: const InputDecoration(labelText: '当前密码'),
+                  decoration: _field('当前密码'),
                 ),
                 const SizedBox(height: 10),
                 TextField(
                   controller: _newPassword,
+                  enabled: !_savingPassword,
                   obscureText: _obscure,
-                  decoration: const InputDecoration(labelText: '新密码（至少 8 位）'),
+                  decoration: _field('新密码（至少 8 位）'),
                 ),
                 const SizedBox(height: 10),
                 TextField(
                   controller: _confirmPassword,
+                  enabled: !_savingPassword,
                   obscureText: _obscure,
-                  decoration: InputDecoration(
-                    labelText: '确认新密码',
+                  decoration: _field(
+                    '确认新密码',
                     suffixIcon: IconButton(
                       tooltip: _obscure ? '显示密码' : '隐藏密码',
                       icon: Icon(
@@ -404,7 +417,8 @@ class _SettingsPageState extends State<SettingsPage> {
                                     (agent?.displayName.isNotEmpty == true
                                             ? agent!.displayName
                                             : '我')
-                                        .substring(0, 1))),
+                                        .characters
+                                        .first)),
                             const SizedBox(height: 12),
                             Text(agent?.displayName ?? '个人设置',
                                 style: theme.textTheme.titleMedium),
@@ -427,30 +441,32 @@ class _SettingsPageState extends State<SettingsPage> {
                             title: Text(labels[i]),
                             onTap: () => setState(() => _settingsTab = i)))
                 ]);
-            final content =
-                ListView(padding: const EdgeInsets.all(20), children: [
-              Text(labels[_settingsTab], style: theme.textTheme.titleLarge),
-              const SizedBox(height: 6),
-              Text(
-                  [
-                    '设置客户看到的名字，查看所属企业与客服入口',
-                    '选择是否接收新的会话分配',
-                    '更新登录密码，管理本次登录',
-                    '按你的工作习惯设置界面与提醒'
-                  ][_settingsTab],
-                  style: theme.textTheme.bodySmall),
-              const SizedBox(height: 20),
-              for (final i in groups[_settingsTab])
-                Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: sections[i]!)
-            ]);
+            final content = ListView(
+                key: ValueKey(_settingsTab),
+                padding: EdgeInsets.all(compact ? 16 : 20),
+                children: [
+                  Text(labels[_settingsTab],
+                      style: theme.textTheme.titleMedium),
+                  const SizedBox(height: 6),
+                  Text(
+                      [
+                        '设置客户看到的名字，查看所属企业与客服入口',
+                        '选择是否接收新的会话分配',
+                        '更新登录密码，管理本次登录',
+                        '按你的工作习惯设置界面与提醒'
+                      ][_settingsTab],
+                      style: theme.textTheme.bodySmall),
+                  const SizedBox(height: 16),
+                  for (final i in groups[_settingsTab])
+                    Padding(
+                        padding: const EdgeInsets.only(bottom: 16),
+                        child: sections[i]!)
+                ]);
             if (compact)
               return Column(children: [
-                SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
+                Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Row(children: [
+                    child: Wrap(spacing: 8, runSpacing: 6, children: [
                       for (var i = 0; i < labels.length; i++)
                         Padding(
                             padding: const EdgeInsets.only(right: 8),
@@ -516,8 +532,6 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   static String _roleLabel(String role) => switch (role) {
-        'OWNER' => '客服主管',
-        'ADMIN' => '客服主管',
         'SUPERVISOR' => '客服主管',
         'AGENT' => '客服坐席',
         _ => role.isEmpty ? '—' : role,
@@ -537,7 +551,7 @@ class _Section extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(12),
         border:
             Border.all(color: theme.colorScheme.outlineVariant.withAlpha(120)),
       ),

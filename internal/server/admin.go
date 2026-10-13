@@ -719,7 +719,7 @@ func (a *API) createPlatformAgent(w http.ResponseWriter, r *http.Request, p auth
 		fail(w, 400, "坐席名称不能为空")
 		return
 	}
-	role := auth.NormalizeRole(strings.ToUpper(strings.TrimSpace(in.Role)))
+	role := strings.ToUpper(strings.TrimSpace(in.Role))
 	if role == "" {
 		role = auth.RoleAgent
 	}
@@ -822,7 +822,7 @@ func (a *API) adminUpdateAgent(w http.ResponseWriter, r *http.Request, p auth.Pr
 		fail(w, 400, "status 只能是 ACTIVE 或 DISABLED")
 		return
 	}
-	role := auth.NormalizeRole(strings.ToUpper(strings.TrimSpace(in.Role)))
+	role := strings.ToUpper(strings.TrimSpace(in.Role))
 	if role != "" && !auth.ValidRole(role) {
 		fail(w, 400, "role 不合法")
 		return
@@ -851,7 +851,7 @@ func (a *API) adminUpdateAgent(w http.ResponseWriter, r *http.Request, p auth.Pr
 		fail(w, 404, "坐席不存在")
 		return
 	}
-	if auth.NormalizeRole(previousRole) == auth.RoleSupervisor && previousStatus == "ACTIVE" && (status == "DISABLED" || role != "" && role != auth.RoleSupervisor) {
+	if previousRole == auth.RoleSupervisor && previousStatus == "ACTIVE" && (status == "DISABLED" || role != "" && role != auth.RoleSupervisor) {
 		var supervisors int
 		if err := tx.QueryRow(r.Context(), `select count(*) from agent where tenant_id=$1 and role='SUPERVISOR' and status='ACTIVE'`, p.TenantID).Scan(&supervisors); err != nil {
 			fail(w, 500, "读取主管人数失败")
@@ -953,7 +953,7 @@ func (a *API) adminDeleteAgent(w http.ResponseWriter, r *http.Request, p auth.Pr
 		fail(w, 404, "坐席不存在")
 		return
 	}
-	if auth.NormalizeRole(role) == auth.RoleSupervisor {
+	if role == auth.RoleSupervisor {
 		fail(w, 400, "客服主管请通过成员编辑停用，至少保留一名启用的主管")
 		return
 	}

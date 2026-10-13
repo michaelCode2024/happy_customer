@@ -753,5 +753,5 @@ func (a *API) consoleForwardMessage(w http.ResponseWriter, r *http.Request, p au
 }
 
 func canManageTenant(role string) bool {
-	return role == auth.RoleOwner || role == auth.RoleAdmin || role == auth.RoleSupervisor
+	return role == auth.RoleSupervisor
 }

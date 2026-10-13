@@ -211,7 +211,7 @@ func (a *API) requireAgent(next func(http.ResponseWriter, *http.Request, auth.Pr
 func (a *API) requireRole(role []string, next func(http.ResponseWriter, *http.Request, auth.Principal)) http.HandlerFunc {
 	return a.requireAgent(func(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		for _, candidate := range role {
-			if candidate == auth.NormalizeRole(p.Role) {
+			if candidate == p.Role {
 				next(w, r, p)
 				return
 			}
