@@ -10,8 +10,8 @@ import 'package:relaydesk_agent_console/src/api/models.dart';
 import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
 import 'package:relaydesk_agent_console/src/theme.dart';
 import 'package:relaydesk_agent_console/src/util/attachment_picker.dart';
-import '../util/voice_recording.dart';
-import 'voice_recorder_button.dart';
+import 'package:relaydesk_agent_console/src/util/voice_recording.dart';
+import 'package:relaydesk_agent_console/src/ui/voice_recorder_button.dart';
 import 'package:relaydesk_agent_console/src/util/format.dart';
 import 'package:relaydesk_agent_console/src/util/labels.dart';
 import 'package:relaydesk_agent_console/src/util/voice_player.dart';
@@ -68,8 +68,9 @@ class _ChatPanelState extends State<ChatPanel> {
         fileName: voice.fileName,
         bytes: voice.bytes,
         contentType: voice.contentType);
-    if (!mounted || widget.workbench.selectedId != conversationId)
+    if (!mounted || widget.workbench.selectedId != conversationId) {
       throw StateError('会话已切换，请重新录制');
+    }
     setState(() {
       _pending.add(Attachment(
           id: uploaded.id,
@@ -113,8 +114,9 @@ class _ChatPanelState extends State<ChatPanel> {
     super.initState();
     _readTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       final id = widget.workbench.selectedId;
-      if (mounted && _stickToBottom && _scroll.hasClients && id != null)
+      if (mounted && _stickToBottom && _scroll.hasClients && id != null) {
         unawaited(widget.workbench.markRead(id));
+      }
     });
     _scroll.addListener(_onScroll);
     widget.workbench.addListener(_onWorkbenchChanged);
@@ -301,6 +303,29 @@ class _ChatPanelState extends State<ChatPanel> {
     }
   }
 
+  /// 输入区常驻说明：拦截原因优先；已解决则提示发送会重新打开。
+  String? _composerHint(Conversation conversation, String selfId) {
+    if (_noteMode) {
+      return null;
+    }
+    if (conversation.isUnassigned) {
+      return '当前会话尚未接待，请先点击右上角「开始接待」再回复；内部备注仍可发送。';
+    }
+    if (conversation.isHeldByOther(selfId)) {
+      final name = conversation.assigneeName.trim().isEmpty
+          ? '其他客服'
+          : conversation.assigneeName.trim();
+      return '该会话由「$name」接待中，请先转派给自己后再回复；内部备注仍可发送。';
+    }
+    if (conversation.needsAcceptance) {
+      return '请先点击右上角「确认接单」再回复客户；内部备注仍可发送。';
+    }
+    if (conversation.isResolved) {
+      return '会话已解决。发送回复将自动重新打开会话。';
+    }
+    return null;
+  }
+
   Future<void> _send() async {
     final text = _composer.text.trim();
     if (text.isEmpty && _pending.isEmpty) {
@@ -310,6 +335,18 @@ class _ChatPanelState extends State<ChatPanel> {
       return;
     }
     final workbench = widget.workbench;
+    final conversation = workbench.selected;
+    // 未接待 / 他人会话时先提示、不清空输入，避免只看到「发送失败」。
+    if (!_noteMode && conversation != null) {
+      final block =
+          conversation.publicReplyBlockReason(workbench.selfId);
+      if (block != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(block)),
+        );
+        return;
+      }
+    }
     final attachments = List<Attachment>.of(_pending);
     // The quote is captured before the composer is cleared, so the bubble keeps
     // showing which message it answers.
@@ -338,10 +375,16 @@ class _ChatPanelState extends State<ChatPanel> {
     if (ok) {
       _scrollToBottom(force: true);
     } else {
-      // The message stays in the thread marked as failed, so the agent can see
-      // exactly what did not go out and retry it with one tap.
+      // 优先展示服务端/拦截的具体原因；没有时再退回气泡重试引导。
+      final reason = workbench.threadError?.trim();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('消息发送失败，可在气泡上重试')),
+        SnackBar(
+          content: Text(
+            reason != null && reason.isNotEmpty
+                ? reason
+                : '消息发送失败，可在气泡上重试',
+          ),
+        ),
       );
     }
   }
@@ -610,6 +653,19 @@ class _ChatPanelState extends State<ChatPanel> {
                     )),
               ),
             ),
+            if (workbench.threadError != null)
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                  MediaQuery.sizeOf(context).width < 760 ? 12 : 24,
+                  8,
+                  MediaQuery.sizeOf(context).width < 760 ? 12 : 24,
+                  0,
+                ),
+                child: ErrorBanner(
+                  message: workbench.threadError!,
+                  onDismiss: workbench.clearThreadError,
+                ),
+              ),
             if (widget.showInlineAssist && workbench.messages.isNotEmpty)
               AiAssistPanel(
                 api: workbench.api,
@@ -636,13 +692,21 @@ class _ChatPanelState extends State<ChatPanel> {
               canned: workbench.cannedForSelection,
               supportsFiles: widget.picker.supportsArbitraryFiles,
               quote: workbench.replyTo,
+              // 未接待 / 他人会话 / 已解决：输入区常驻说明，避免只靠失败气泡。
+              statusHint: _composerHint(conversation, workbench.selfId),
+              lockPublicReply: !_noteMode &&
+                  conversation.publicReplyBlockReason(workbench.selfId) != null,
               onChanged: _onComposerChanged,
               onToggleNote: (value) => setState(() => _noteMode = value),
               onPickImage: () => _pickImage(),
               onPickFile: () => _pickImage(document: true),
               voiceControl: VoiceRecorderButton(
                   key: ValueKey(conversation.id),
-                  enabled: !_sending && !_uploading && !_noteMode,
+                  enabled: !_sending &&
+                      !_uploading &&
+                      !_noteMode &&
+                      conversation.publicReplyBlockReason(workbench.selfId) ==
+                          null,
                   onRecorded: _attachVoice),
               onClearQuote: () => workbench.quote(null),
               onRemovePending: (id) => setState(
@@ -803,12 +867,16 @@ class _ThreadHeader extends StatelessWidget {
                     const SizedBox(width: 8),
                     if (conversation.isResolved)
                       const _HeaderChip(label: '已解决', tone: _ChipTone.neutral)
-                    else if (conversation.isUnassigned ||
-                        conversation.needsAcceptance)
+                    else if (conversation.isUnassigned)
+                      const _HeaderChip(label: '待接待', tone: _ChipTone.warn)
+                    else if (conversation.needsAcceptance)
                       _HeaderChip(
-                          label:
-                              conversation.needsAcceptance ? '等待确认接单' : '待接待',
-                          tone: _ChipTone.warn)
+                        // 别人待确认时写清是谁，避免自己误点「确认接单」。
+                        label: conversation.isHeldByOther(workbench.selfId)
+                            ? '${conversation.assigneeName.isEmpty ? '其他客服' : conversation.assigneeName}待确认'
+                            : '等待确认接单',
+                        tone: _ChipTone.warn,
+                      )
                     else
                       _HeaderChip(
                         label: conversation.assigneeName.isEmpty
@@ -854,13 +922,14 @@ class _ThreadHeader extends StatelessWidget {
                       .setStatus(conversation.isResolved ? 'OPEN' : 'RESOLVED'),
                   child: Text(conversation.isResolved ? '重新接待' : '完成会话'),
                 )),
-          if (conversation.isUnassigned || conversation.needsAcceptance)
+          // 仅未领取或「派给自己、待确认」才显示接单；他人会话只可转派，避免点了也失败。
+          if (conversation.canClaim(workbench.selfId))
             Padding(
               padding: const EdgeInsets.only(left: 8),
               child: FilledButton.tonalIcon(
                 onPressed: workbench.claim,
                 icon: const Icon(Icons.pan_tool_alt_outlined, size: 18),
-                label: Text(conversation.needsAcceptance ? '确认接单' : '开始接待'),
+                label: Text(conversation.receptionActionLabel),
               ),
             ),
           if (MediaQuery.sizeOf(context).width >= 760)
@@ -1670,6 +1739,11 @@ class _MessageBubble extends StatelessWidget {
                     ],
                   )
                 else ...<Widget>[
+                  if (message.messageType == 'CARD' &&
+                      message.metadata['card'] is Map)
+                    _CommerceCard(
+                        card: Map<String, dynamic>.from(
+                            message.metadata['card'] as Map)),
                   if (message.attachments.isNotEmpty)
                     _Attachments(
                       attachments: message.attachments,
@@ -1677,7 +1751,9 @@ class _MessageBubble extends StatelessWidget {
                       alignEnd: isAgent,
                       voiceDuration: message.voiceDuration,
                     ),
-                  if (message.content.trim().isNotEmpty)
+                  if (message.content.trim().isNotEmpty &&
+                      !(message.messageType == 'CARD' &&
+                          message.metadata['card'] is Map))
                     Padding(
                       padding: EdgeInsets.only(
                         top: message.attachments.isEmpty ? 0 : 8,
@@ -1726,6 +1802,48 @@ class _MessageBubble extends StatelessWidget {
 
 /// The rounded box a message sits in, so the bubble and the jump highlight are
 /// defined once instead of at every call site.
+class _CommerceCard extends StatelessWidget {
+  const _CommerceCard({required this.card});
+  final Map<String, dynamic> card;
+  @override
+  Widget build(BuildContext context) {
+    final amount = card['amountMinor'];
+    final price = amount is int && amount >= 0
+        ? '${amount ~/ 100}.${(amount % 100).toString().padLeft(2, '0')}'
+        : '';
+    final image = Uri.tryParse('${card['imageUrl'] ?? ''}');
+    final link = Uri.tryParse('${card['url'] ?? ''}');
+    final order = card['kind'] == 'ORDER';
+    return ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 300),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (image != null && ['http', 'https'].contains(image.scheme))
+            Image.network(image.toString(),
+                height: 140,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) =>
+                    const Icon(Icons.image_not_supported_outlined)),
+          Text('${card['title'] ?? ''}',
+              style: const TextStyle(fontWeight: FontWeight.w600)),
+          if (order) ...[
+            SelectableText('订单号：${card['orderNumber'] ?? ''}'),
+            Text('${card['status'] ?? ''}')
+          ],
+          SelectableText('${card['currency'] ?? ''} $price'),
+          if (link != null && ['http', 'https'].contains(link.scheme))
+            TextButton(
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: link.toString()));
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context)
+                        .showSnackBar(const SnackBar(content: Text('链接已复制')));
+                  }
+                },
+                child: Text('复制${order ? '订单' : '商品'}链接')),
+        ]));
+  }
+}
+
 class _BubbleShell extends StatelessWidget {
   const _BubbleShell({
     required this.flash,
@@ -2523,6 +2641,8 @@ class _Composer extends StatelessWidget {
     required this.canned,
     required this.supportsFiles,
     required this.quote,
+    this.statusHint,
+    this.lockPublicReply = false,
     required this.onChanged,
     required this.onToggleNote,
     required this.onPickImage,
@@ -2546,6 +2666,12 @@ class _Composer extends StatelessWidget {
 
   /// The message the next reply will quote, if the agent picked one.
   final ChatMessage? quote;
+
+  /// 输入区常驻说明（未接待 / 他人会话 / 已解决等）。
+  final String? statusHint;
+
+  /// 为 true 时禁止公开回复的附件与语音（内部备注不受影响）。
+  final bool lockPublicReply;
 
   final ValueChanged<String> onChanged;
   final ValueChanged<bool> onToggleNote;
@@ -2580,7 +2706,7 @@ class _Composer extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
         ),
         margin:
-            EdgeInsets.fromLTRB(compact ? 12 : 24, 8, compact ? 12 : 24, 20),
+            EdgeInsets.fromLTRB(compact ? 12 : 24, 8, compact ? 12 : 24, compact ? 8 : 20),
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
         child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2602,7 +2728,32 @@ class _Composer extends StatelessWidget {
                             : scheme.onSurfaceVariant),
                     child: const Text('内部备注')),
               ]),
-              const Divider(),
+              if (!compact) const Divider(),
+              if (statusHint != null)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                  decoration: BoxDecoration(
+                    color: scheme.secondaryContainer.withAlpha(160),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.info_outline,
+                          size: 16, color: scheme.onSecondaryContainer),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          statusHint!,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSecondaryContainer,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               if (uploadError != null)
                 Text(uploadError!,
                     style: TextStyle(color: scheme.error, fontSize: 12)),
@@ -2659,16 +2810,18 @@ class _Composer extends StatelessWidget {
                           controller: controller,
                           focusNode: focusNode,
                           minLines: compact ? 1 : 2,
-                          maxLines: compact ? 4 : 5,
+                          maxLines: compact ? 2 : 5,
                           onChanged: onChanged,
                           textInputAction: TextInputAction.newline,
                           keyboardType: TextInputType.multiline,
                           decoration: InputDecoration(
                               hintText: noteMode
                                   ? '写一条内部备注，访客看不到'
-                                  : visitorTyping
-                                      ? '对方正在输入…'
-                                      : '输入回复内容，Ctrl + Enter 发送',
+                                  : lockPublicReply
+                                      ? '请先完成接待或转派后再回复客户'
+                                      : visitorTyping
+                                          ? '对方正在输入…'
+                                          : '输入回复内容，Ctrl + Enter 发送',
                               filled: true,
                               fillColor: noteMode
                                   ? scheme.tertiaryContainer.withAlpha(35)
@@ -2714,14 +2867,16 @@ class _Composer extends StatelessWidget {
                                     style: const TextStyle(fontSize: 22)))
                         ]),
                 IconButton(
-                    tooltip: '发送图片',
-                    onPressed: uploading ? null : onPickImage,
+                    tooltip: lockPublicReply ? '请先完成接待或转派' : '发送图片',
+                    onPressed:
+                        uploading || lockPublicReply ? null : onPickImage,
                     icon: Icon(Icons.image_outlined,
                         size: 22, color: scheme.onSurfaceVariant)),
                 if (supportsFiles)
                   IconButton(
-                      tooltip: '发送文件',
-                      onPressed: uploading ? null : onPickFile,
+                      tooltip: lockPublicReply ? '请先完成接待或转派' : '发送文件',
+                      onPressed:
+                          uploading || lockPublicReply ? null : onPickFile,
                       icon: Icon(Icons.folder_open_outlined,
                           size: 22, color: scheme.onSurfaceVariant)),
                 voiceControl,
@@ -2748,9 +2903,11 @@ class _Composer extends StatelessWidget {
                     child: Text(
                         noteMode
                             ? '仅团队成员可见'
-                            : compact
-                                ? 'Ctrl + Enter 发送'
-                                : 'Ctrl + Enter 发送 · Enter 换行',
+                            : lockPublicReply
+                                ? '需先接待或转派后才能发送'
+                                : compact
+                                    ? 'Ctrl + Enter 发送'
+                                    : 'Ctrl + Enter 发送 · Enter 换行',
                         style: theme.textTheme.bodySmall
                             ?.copyWith(color: scheme.outline))),
                 FilledButton(

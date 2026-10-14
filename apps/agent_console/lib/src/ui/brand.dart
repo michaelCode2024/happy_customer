@@ -4,10 +4,10 @@ import 'package:relaydesk_agent_console/src/ui/product_brand.dart';
 /// 品牌字号档位：侧栏用紧凑，登录英雄区放大，保证第一眼先看到产品名。
 enum TongYuBrandSize { compact, regular, large, hero }
 
-/// 兼容旧调用名；实现已统一为语聊标识。
+/// 兼容旧调用名；实现已统一为通语标识。
 typedef LiaoQiaoBrandSize = TongYuBrandSize;
 
-/// 展示品牌「语聊」；RelayDesk 协议与存储键不变，已有客户无需迁移。
+/// 展示品牌「通语」；RelayDesk 协议与存储键不变，已有客户无需迁移。
 class TongYuBrand extends StatelessWidget {
   const TongYuBrand({
     super.key,
@@ -95,7 +95,7 @@ class LiaoQiaoBrand extends TongYuBrand {
   });
 }
 
-/// 语聊 Logo 图形：蓝底圆角方块 + 白色对话气泡与三点。
+/// 通语 Logo 图形：双对话气泡，与官网使用相同的轮廓和品牌色。
 class TongYuLogoMark extends StatelessWidget {
   const TongYuLogoMark({super.key, this.size = 36});
 
@@ -114,31 +114,33 @@ class TongYuLogoMark extends StatelessWidget {
 class _TongYuMarkPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    final r = size.shortestSide;
-    final radius = r * 0.22;
-    final bg = RRect.fromRectAndRadius(
-      Rect.fromLTWH(0, 0, r, r),
-      Radius.circular(radius),
-    );
-    canvas.drawRRect(bg, Paint()..color = const Color(0xFF5E78FA));
-
-    // 左侧主气泡
-    final left = RRect.fromRectAndRadius(
-      Rect.fromLTWH(r * 0.16, r * 0.18, r * 0.68, r * 0.56),
-      Radius.circular(r * 0.12),
-    );
-    canvas.drawRRect(left, Paint()..color = Colors.white);
-    final leftTail = Path()
-      ..moveTo(r * 0.22, r * 0.68)
-      ..lineTo(r * 0.18, r * 0.84)
-      ..lineTo(r * 0.38, r * 0.70)
-      ..close();
-    canvas.drawPath(leftTail, Paint()..color = Colors.white);
-
-    for (final x in [0.34, 0.50, 0.66]) {
-      canvas.drawCircle(Offset(r * x, r * 0.45), r * 0.035,
-          Paint()..color = const Color(0xFF5E78FA));
-    }
+    canvas.save();
+    canvas.scale(size.width / 36, size.height / 36);
+    final blue = Paint()..color = const Color(0xFF4263EB);
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(
+            const Rect.fromLTWH(2, 3, 25, 23), const Radius.circular(9)),
+        blue);
+    canvas.drawPath(
+        Path()
+          ..moveTo(8, 23)
+          ..lineTo(8, 31)
+          ..lineTo(17, 24)
+          ..close(),
+        blue);
+    canvas.drawPath(
+        Path()
+          ..moveTo(14, 12)
+          ..lineTo(30, 12)
+          ..lineTo(30, 27)
+          ..lineTo(24, 24)
+          ..lineTo(14, 24),
+        Paint()
+          ..color = Colors.white
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.5
+          ..strokeJoin = StrokeJoin.round);
+    canvas.restore();
   }
 
   @override
@@ -251,86 +253,93 @@ class WorkspaceSidebar extends StatelessWidget {
                       ),
                     ),
                   Padding(
-                    padding: const EdgeInsets.only(bottom: 2),
-                    child: Material(
-                      color: i == selectedIndex
-                          ? scheme.primaryContainer.withOpacity(0.85)
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(10),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(10),
+                      padding: const EdgeInsets.only(bottom: 2),
+                      child: Semantics(
+                        button: true,
+                        selected: i == selectedIndex,
+                        label: items[i].label,
                         onTap: () => onSelected(i),
-                        child: Ink(
-                          decoration: BoxDecoration(
+                        excludeSemantics: true,
+                        child: Material(
+                          color: i == selectedIndex
+                              ? scheme.primaryContainer.withOpacity(0.85)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(10),
+                          child: InkWell(
                             borderRadius: BorderRadius.circular(10),
-                            border: i == selectedIndex
-                                ? Border(
-                                    left: BorderSide(
-                                      color: scheme.primary,
-                                      width: 3,
-                                    ),
-                                  )
-                                : null,
-                          ),
-                          child: Padding(
-                            padding: EdgeInsets.fromLTRB(
-                              i == selectedIndex ? 9 : 12,
-                              11,
-                              12,
-                              11,
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  items[i].icon,
-                                  size: 20,
-                                  color: i == selectedIndex
-                                      ? scheme.primary
-                                      : scheme.onSurfaceVariant,
+                            onTap: () => onSelected(i),
+                            child: Ink(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(10),
+                                border: i == selectedIndex
+                                    ? Border(
+                                        left: BorderSide(
+                                          color: scheme.primary,
+                                          width: 3,
+                                        ),
+                                      )
+                                    : null,
+                              ),
+                              child: Padding(
+                                padding: EdgeInsets.fromLTRB(
+                                  i == selectedIndex ? 9 : 12,
+                                  11,
+                                  12,
+                                  11,
                                 ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    items[i].label,
-                                    style: TextStyle(
-                                      fontSize: 14,
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      items[i].icon,
+                                      size: 20,
                                       color: i == selectedIndex
                                           ? scheme.primary
-                                          : scheme.onSurface,
-                                      fontWeight: i == selectedIndex
-                                          ? FontWeight.w600
-                                          : FontWeight.w400,
+                                          : scheme.onSurfaceVariant,
                                     ),
-                                  ),
-                                ),
-                                if (items[i].count > 0)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 7,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: i == selectedIndex
-                                          ? scheme.primary
-                                          : const Color(0xFFE11D48),
-                                      borderRadius: BorderRadius.circular(999),
-                                    ),
-                                    child: Text(
-                                      '${items[i].count}',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w700,
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        items[i].label,
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          color: i == selectedIndex
+                                              ? scheme.primary
+                                              : scheme.onSurface,
+                                          fontWeight: i == selectedIndex
+                                              ? FontWeight.w600
+                                              : FontWeight.w400,
+                                        ),
                                       ),
                                     ),
-                                  ),
-                              ],
+                                    if (items[i].count > 0)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 7,
+                                          vertical: 2,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: i == selectedIndex
+                                              ? scheme.primary
+                                              : const Color(0xFFE11D48),
+                                          borderRadius:
+                                              BorderRadius.circular(999),
+                                        ),
+                                        child: Text(
+                                          '${items[i].count}',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                    ),
-                  ),
+                      )),
                 ],
               ],
             ),
@@ -342,7 +351,7 @@ class WorkspaceSidebar extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 16, 16),
             child: Text(
-              '语聊工作台',
+              '通语工作台',
               style:
                   TextStyle(fontSize: 11, color: scheme.outline, height: 1.35),
             ),

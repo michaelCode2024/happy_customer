@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/relaydesk/relaydesk/internal/auth"
@@ -31,6 +32,14 @@ func (a *API) groupAuth(next func(http.ResponseWriter, *http.Request, auth.Princ
 		}
 		if !a.tenantActive(r.Context(), p.TenantID) {
 			fail(w, 403, "企业已停用")
+			return
+		}
+		if p.Kind == auth.KindWidget && p.MarketplaceID != uuid.Nil && !a.marketplaceBuyerValid(r.Context(), p) {
+			fail(w, 401, "商城登录已失效")
+			return
+		}
+		if p.Kind == auth.KindWidget && !a.marketplaceVisitorActive(r.Context(), p) {
+			fail(w, 401, "店员已停用")
 			return
 		}
 		if p.Kind == auth.KindAgent {
@@ -200,13 +209,19 @@ func (a *API) groupDetail(w http.ResponseWriter, r *http.Request, p auth.Princip
 		fail(w, 500, "读取群资料失败")
 		return
 	}
+	// 群页只读取本群所属渠道的外观配置，不按品牌名称写死样式。
+	var channelCSS string
+	if err := a.db.QueryRow(r.Context(), `select coalesce(i.custom_css,'') from chat_group g left join inbox i on i.id=g.inbox_id and i.tenant_id=g.tenant_id where g.id=$1 and g.tenant_id=$2`, id, p.TenantID).Scan(&channelCSS); err != nil {
+		fail(w, 500, "读取群外观配置失败")
+		return
+	}
 	canManage := ownerKind == p.Kind && owner == groupActor(p)
 	for _, m := range items {
 		if m["kind"] == p.Kind && m["id"] == groupActor(p) && m["isManager"] == true {
 			canManage = true
 		}
 	}
-	respond(w, 200, map[string]any{"members": items, "actorId": groupActor(p), "actorKind": p.Kind, "group": map[string]any{"id": id, "name": name, "announcement": announcement, "ownerId": owner, "ownerKind": ownerKind, "archived": archived, "dissolved": dissolved, "speakingMode": mode, "maxMembers": capacity, "requireIdentity": requireIdentity, "canInvite": canManage, "canSend": !archived && !dissolved && (mode == "ALL" || canManage)}})
+	respond(w, 200, map[string]any{"members": items, "actorId": groupActor(p), "actorKind": p.Kind, "group": map[string]any{"id": id, "name": name, "customCss": channelCSS, "announcement": announcement, "ownerId": owner, "ownerKind": ownerKind, "archived": archived, "dissolved": dissolved, "speakingMode": mode, "maxMembers": capacity, "requireIdentity": requireIdentity, "canInvite": canManage, "canSend": !archived && !dissolved && (mode == "ALL" || canManage)}})
 }
 func (a *API) groupUpdate(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 	id, ok := a.groupAllowed(r, p, true)
@@ -267,7 +282,7 @@ func (a *API) groupMessages(w http.ResponseWriter, r *http.Request, p auth.Princ
 	after := queryInt64(r, "after", 0)
 	before := queryInt64(r, "before", 0)
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	rows, e := a.db.Query(r.Context(), `select id,sequence,actor_kind,actor_id,name,case when recalled_at is null then content else '' end,created_at,recalled_at is not null from chat_group_message where group_id=$1 and ($2=0 or sequence>$2) and ($3=0 or sequence<$3) and ($4='' or recalled_at is null and content ilike '%'||$4||'%') order by sequence desc limit 100`, id, after, before, q)
+	rows, e := a.db.Query(r.Context(), `select id,sequence,actor_kind,actor_id,name,case when recalled_at is null then content else '' end,created_at,recalled_at is not null,message_type,case when recalled_at is null then metadata else '{}'::jsonb end from chat_group_message where group_id=$1 and ($2=0 or sequence>$2) and ($3=0 or sequence<$3) and ($4='' or recalled_at is null and content ilike '%'||$4||'%') order by sequence desc limit 100`, id, after, before, q)
 	if e != nil {
 		fail(w, 500, "读取消息失败")
 		return
@@ -280,23 +295,48 @@ func (a *API) groupMessages(w http.ResponseWriter, r *http.Request, p auth.Princ
 		var kind, name, content string
 		var at any
 		var recalled bool
-		if rows.Scan(&msg, &seq, &kind, &actor, &name, &content, &at, &recalled) == nil {
-			items = append(items, map[string]any{"id": msg, "sequence": seq, "kind": kind, "actorId": actor, "name": name, "content": content, "createdAt": at, "recalled": recalled})
+		var messageType string
+		var metadata json.RawMessage
+		if rows.Scan(&msg, &seq, &kind, &actor, &name, &content, &at, &recalled, &messageType, &metadata) == nil {
+			items = append(items, map[string]any{"id": msg, "sequence": seq, "kind": kind, "actorId": actor, "name": name, "content": content, "createdAt": at, "recalled": recalled, "messageType": messageType, "metadata": metadata})
 		}
 	}
 	respond(w, 200, map[string]any{"items": items})
 }
 func (a *API) groupSend(w http.ResponseWriter, r *http.Request, p auth.Principal) {
+	a.groupSendWithCommerce(w, r, p, false)
+}
+func (a *API) groupSendWithCommerce(w http.ResponseWriter, r *http.Request, p auth.Principal, trusted bool) {
 	id, ok := a.groupAllowed(r, p, false)
 	if !ok {
 		fail(w, 404, "你不是群成员")
 		return
 	}
 	var in struct {
-		Content  string    `json:"content"`
-		ClientID uuid.UUID `json:"clientId"`
+		Content     string         `json:"content"`
+		ClientID    uuid.UUID      `json:"clientId"`
+		MessageType string         `json:"messageType"`
+		Metadata    map[string]any `json:"metadata"`
 	}
 	if !decode(w, r, &in) {
+		return
+	}
+	if in.MessageType == "" {
+		in.MessageType = "TEXT"
+	}
+	if in.MessageType != "TEXT" && in.MessageType != "CARD" {
+		fail(w, 400, "不支持的群消息类型")
+		return
+	}
+	if in.MessageType == "CARD" {
+		if err := validateCommerceMetadata(in.Metadata, trusted); err != nil || in.Metadata["card"] == nil {
+			fail(w, 400, "群卡片需由商城后端发送有效商品或订单")
+			return
+		}
+	}
+	metadata, err := json.Marshal(orEmpty(in.Metadata))
+	if err != nil {
+		fail(w, 400, "消息元数据无效")
 		return
 	}
 	if strings.TrimSpace(in.Content) == "" || len([]rune(in.Content)) > 4000 || in.ClientID == uuid.Nil {
@@ -343,7 +383,7 @@ func (a *API) groupSend(w http.ResponseWriter, r *http.Request, p auth.Principal
 	}
 	msg := uuid.New()
 	seq++
-	if _, e = tx.Exec(r.Context(), `insert into chat_group_message(id,group_id,sequence,actor_kind,actor_id,name,content,client_id) values($1,$2,$3,$4,$5,$6,$7,$8)`, msg, id, seq, p.Kind, groupActor(p), name, in.Content, in.ClientID); e != nil {
+	if _, e = tx.Exec(r.Context(), `insert into chat_group_message(id,group_id,sequence,actor_kind,actor_id,name,content,client_id,message_type,metadata) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, msg, id, seq, p.Kind, groupActor(p), name, in.Content, in.ClientID, in.MessageType, metadata); e != nil {
 		fail(w, 500, "发送失败")
 		return
 	}
@@ -559,6 +599,7 @@ func (a *API) groupJoin(w http.ResponseWriter, r *http.Request) {
 	var visitor uuid.UUID
 	displayName := in.Name
 	status := 201
+	var parentIdentity auth.Principal
 	if identityToken != "" {
 		// 登录客户：票据绑定入口，与一对一会话复用同一 visitor。
 		identity, verifyErr := a.tokens.Verify(identityToken)
@@ -567,6 +608,11 @@ func (a *API) groupJoin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		displayName = strings.TrimSpace(identity.Name)
+		if identity.MarketplaceID != uuid.Nil && !a.marketplaceBuyerValid(r.Context(), identity) {
+			fail(w, 401, "商城登录已失效")
+			return
+		}
+		parentIdentity = identity
 		if displayName == "" {
 			displayName = in.Name
 		}
@@ -614,7 +660,7 @@ func (a *API) groupJoin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	token, e := a.tokens.IssueWidget(tenant, inbox, visitor)
+	token, e := a.tokens.IssueWidgetFromIdentity(parentIdentity, tenant, inbox, visitor)
 	if e != nil || tx.Commit(r.Context()) != nil {
 		fail(w, 500, "加入失败")
 		return
@@ -643,6 +689,10 @@ func (a *API) groupSession(w http.ResponseWriter, r *http.Request) {
 	identity, verifyErr := a.tokens.Verify(identityToken)
 	if verifyErr != nil || identity.Kind != auth.KindIdentity || identity.ExternalID == "" {
 		failCode(w, 401, "IDENTITY_TOKEN_INVALID", "访客身份票据无效或已过期")
+		return
+	}
+	if identity.MarketplaceID != uuid.Nil && !a.marketplaceBuyerValid(r.Context(), identity) {
+		fail(w, 401, "商城登录已失效")
 		return
 	}
 	if !a.tenantHasFeature(r.Context(), identity.TenantID, "groups") {
@@ -691,7 +741,7 @@ func (a *API) groupSession(w http.ResponseWriter, r *http.Request) {
 		fail(w, 403, "你还不是该群成员，请先接受邀请或由业务系统加人")
 		return
 	}
-	token, e := a.tokens.IssueWidget(tenant, inbox, visitor)
+	token, e := a.tokens.IssueWidgetFromIdentity(identity, tenant, inbox, visitor)
 	if e != nil || tx.Commit(r.Context()) != nil {
 		fail(w, 500, "打开群聊失败")
 		return
@@ -722,12 +772,28 @@ func (a *API) groupPublish(ctx context.Context, id uuid.UUID) {
 		return
 	}
 	rows.Close()
+	// 买家跨店铺统一消息入口同步接收群变更，不发送未授权群正文。
+	marketRows, err := a.db.Query(ctx, `select distinct s.marketplace_id,v.external_id from chat_group_member m join visitor v on v.id=m.actor_id and m.actor_kind='widget' join marketplace_shop s on s.inbox_id=v.inbox_id where m.group_id=$1 and v.external_id is not null`, id)
+	if err == nil {
+		for marketRows.Next() {
+			var mid uuid.UUID
+			var external string
+			if marketRows.Scan(&mid, &external) == nil {
+				channels = append(channels, marketplaceBuyerChannel(mid, external))
+			}
+		}
+		marketRows.Close()
+	}
 	a.publish(ctx, channels, realtime.Event{Type: "group.updated", Data: map[string]any{"groupId": id}})
 }
 func (a *API) groupSocket(w http.ResponseWriter, r *http.Request) {
 	p, e := a.tokens.Verify(r.URL.Query().Get("token"))
 	if e != nil || (p.Kind != auth.KindAgent && p.Kind != auth.KindWidget) || !a.tenantActive(r.Context(), p.TenantID) {
 		fail(w, 401, "登录已失效")
+		return
+	}
+	if p.Kind == auth.KindWidget && (!a.marketplaceVisitorActive(r.Context(), p) || p.MarketplaceID != uuid.Nil && !a.marketplaceBuyerValid(r.Context(), p)) {
+		fail(w, 401, "群聊身份已失效")
 		return
 	}
 	// 与 HTTP 群接口同一套餐门槛，避免降级后旧 token 仍能挂着群聊长连接。

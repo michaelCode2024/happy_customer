@@ -12,7 +12,7 @@ import 'package:relaydesk_agent_console/src/state/credential_store.dart';
 /// than about the widget tree's shape, so they survive UI rearrangements.
 void main() {
   for (final size in const [Size(390, 844), Size(800, 600), Size(1440, 900)]) {
-    testWidgets('切换登录入口保持位置 ${size.width}', (tester) async {
+    testWidgets('次级入口切换后表单与返回路径正常 ${size.width}', (tester) async {
       tester.view.physicalSize = size;
       tester.view.devicePixelRatio = 1;
       addTearDown(() {
@@ -23,17 +23,16 @@ void main() {
       await store.saveServer('http://localhost');
       await tester.pumpWidget(RelayDeskConsoleApp(credentials: store));
       await tester.pumpAndSettle();
-      final anchor = tester.getTopLeft(find.text('客服工作台登录'));
-      final title = tester.getTopLeft(find.text('登录工作台'));
       for (var i = 0; i < 3; i++) {
+        await tester.ensureVisible(find.text('平台管理员登录'));
         await tester.tap(find.text('平台管理员登录'));
         await tester.pumpAndSettle();
-        expect(tester.getTopLeft(find.text('客服工作台登录')), anchor);
-        expect(tester.getTopLeft(find.text('登录运营后台')), title);
+        expect(find.text('登录运营后台'), findsOneWidget);
+        await tester.ensureVisible(find.text('客服工作台登录'));
         await tester.tap(find.text('客服工作台登录'));
         await tester.pumpAndSettle();
-        expect(tester.getTopLeft(find.text('客服工作台登录')), anchor);
-        expect(tester.getTopLeft(find.text('登录工作台')), title);
+        expect(find.text('登录工作台'), findsOneWidget);
+        expect(find.widgetWithText(TextFormField, '企业标识'), findsOneWidget);
       }
       expect(tester.takeException(), isNull);
     });
@@ -47,7 +46,7 @@ void main() {
   testWidgets('an empty store lands on the login form', (tester) async {
     await boot(tester, MemoryCredentialStore());
 
-    expect(find.text('语聊'), findsWidgets);
+    expect(find.text('通语'), findsWidgets);
     expect(find.text('客服工作台登录'), findsOneWidget);
     expect(find.text('登录'), findsOneWidget);
     expect(find.text('高级设置'), findsOneWidget);

@@ -15,7 +15,7 @@ var h5Page = template.Must(template.New("h5").Parse(`<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>语聊客服</title>
+	<title>通语客服</title>
   <style>html,body{margin:0;height:100%;background:#f5f6f8}</style>
 </head>
 <body>
@@ -31,6 +31,13 @@ func (a *API) registerStatic(mux *http.ServeMux) {
 	if a.cfg.StaticDir == "" {
 		return
 	}
+	// 官网与控制台各有入口；精确匹配根路径，避免吞掉未知 API 和资源的 404。
+	website := filepath.Join(a.cfg.StaticDir, "website")
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		http.ServeFile(w, r, filepath.Join(website, "index.html"))
+	})
+	mux.Handle("GET /website/", http.StripPrefix("/website/", http.FileServer(http.Dir(website))))
 	mux.HandleFunc("GET /groups.html", func(w http.ResponseWriter, r *http.Request) {
 		a.setFrameAncestors(w)
 		w.Header().Set("Cache-Control", "no-store")

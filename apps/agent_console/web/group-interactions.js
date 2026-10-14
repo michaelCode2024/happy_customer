@@ -37,6 +37,15 @@ function render() {
     const meta = document.createElement('div'); meta.className = 'meta';
     meta.textContent = m.name + ' · ' + (m.kind === 'widget' ? '客户' : '客服') + ' · ' + new Date(m.createdAt).toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'});
     const text = document.createElement('div'); text.className = 'bubble' + (m.recalled ? ' tombstone' : ''); text.textContent = m.recalled ? '该消息已被撤回' : m.content;
+    const card = m.metadata?.card;
+    if (!m.recalled && m.messageType === 'CARD' && card && ['PRODUCT', 'ORDER'].includes(card.kind)) {
+      text.replaceChildren();
+      const title = document.createElement('strong'); title.textContent = card.title; text.append(title);
+      for (const value of [card.kind === 'ORDER' ? '订单号：' + card.orderNumber : '', card.status || '', Number.isSafeInteger(card.amountMinor) ? `${card.currency} ${Math.floor(card.amountMinor / 100)}.${String(card.amountMinor % 100).padStart(2, '0')}` : '']) {
+        if (value) { const line = document.createElement('div'); line.textContent = value; text.append(line); }
+      }
+      if (typeof card.url === 'string' && /^https?:\/\//.test(card.url)) { const link = document.createElement('a'); link.href = card.url; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = card.kind === 'ORDER' ? '查看订单' : '查看商品'; text.append(link); }
+    }
     box.append(meta, text);
     if (mine(m) && !m.recalled) {
       const button = document.createElement('button'); button.className = 'recall'; button.textContent = '撤回';
@@ -56,6 +65,10 @@ async function refresh(older = false) {
   ]);
   if (generation !== refreshGeneration) return;
   group = list.group;
+  // 外观随本群所属渠道配置更新，独立群页与嵌入页使用相同来源。
+  let channelStyle = document.getElementById('groupChannelStyle');
+  if (!channelStyle) { channelStyle = document.createElement('style'); channelStyle.id = 'groupChannelStyle'; document.head.append(channelStyle); }
+  channelStyle.textContent = group.customCss || '';
   if (!group) { stopMedia(); throw new Error('你已退出或被移出此群'); }
   el('title').textContent = group.name;
   el('announcement').textContent = '群公告：' + group.announcement; el('announcement').hidden = !group.announcement;

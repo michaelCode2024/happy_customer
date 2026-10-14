@@ -332,7 +332,7 @@ class _IntegrationPageState extends State<IntegrationPage> {
 
   Widget _guide(ThemeData theme) =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const WorkspaceHeading('渠道与接入', '管理语聊在不同渠道的接入方式与集成配置'),
+        const WorkspaceHeading('渠道与接入', '管理通语在不同渠道的接入方式与集成配置'),
         if (_snippet != null) _channelGrid(theme),
         Text('让客户从你的产品里直接发起聊天', style: theme.textTheme.headlineSmall),
         const SizedBox(height: 12),
@@ -438,7 +438,7 @@ location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent
 
   Widget _inboxTab(ThemeData theme) =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const WorkspaceHeading('渠道与接入', '管理语聊在不同渠道的接入方式与集成配置'),
+        const WorkspaceHeading('渠道与接入', '管理通语在不同渠道的接入方式与集成配置'),
         const Text('接入入口',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
         const SizedBox(height: 12),
@@ -511,8 +511,8 @@ location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent
         ? h5 : asString(_snippet!['appUrl']);
     final cards = [
       ('网站组件', '嵌入网站的可对话组件', Icons.language, script, h5),
-      ('H5 链接', '通过 H5 链接访问语聊页面', Icons.link, h5, h5),
-      ('App WebView', '在 App WebView 中接入语聊', Icons.phone_android, app, app),
+      ('H5 链接', '通过 H5 链接访问通语页面', Icons.link, h5, h5),
+      ('App WebView', '在 App WebView 中接入通语', Icons.phone_android, app, app),
     ];
     final scheme = theme.colorScheme;
     return LayoutBuilder(builder: (context, box) {
@@ -520,7 +520,7 @@ location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent
       final channels = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('接入渠道', style: theme.textTheme.titleMedium),
         const SizedBox(height: 8),
-        const Text('选择并管理语聊的接入渠道'),
+        const Text('选择并管理通语的接入渠道'),
         const SizedBox(height: 16),
         LayoutBuilder(builder: (context, grid) {
           final columns = grid.maxWidth >= 620 ? 3 : grid.maxWidth >= 420 ? 2 : 1;
@@ -561,7 +561,7 @@ location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('网站组件接入代码', style: theme.textTheme.titleMedium),
           const SizedBox(height: 6),
-          const Text('将以下代码嵌入您的网站中即可使用语聊组件'),
+          const Text('将以下代码嵌入您的网站中即可使用通语组件'),
           const SizedBox(height: 12),
           Container(width: double.infinity, padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(color: const Color(0xFF162131), borderRadius: BorderRadius.circular(10)),

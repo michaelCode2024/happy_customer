@@ -490,13 +490,13 @@ class _CreateTenantDialogState extends State<CreateTenantDialog> {
                               child: Text('体验版 · 2 坐席 / 1000 条')),
                           DropdownMenuItem(
                               value: 'STARTER',
-                              child: Text('专业版 · 3 坐席 / 5000 条')),
+                              child: Text('专业版 · 1 坐席 / 5000 条')),
                           DropdownMenuItem(
                               value: 'GROWTH',
-                              child: Text('旗舰版 · 10 坐席 / 5 万条')),
+                              child: Text('旗舰版 · 3 坐席 / 50,000 条')),
                           DropdownMenuItem(
                               value: 'ENTERPRISE',
-                              child: Text('企业版 · 100 坐席 / 100 万条'))
+                              child: Text('企业版 · 10 坐席 / 1,000,000 条'))
                         ],
                         onChanged: (v) => setState(() => _plan = v ?? _plan)))),
             const SizedBox(height: 16),

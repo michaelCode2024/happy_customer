@@ -29,11 +29,11 @@ type inboxContext struct {
 	WorkingHours    map[string]any
 	AgentsAvailable int
 	// White-label branding delivered to the visitor widget on bootstrap.
-	LogoURL     *string
-	AvatarURL   *string
-	FontFamily  *string
+	LogoURL      *string
+	AvatarURL    *string
+	FontFamily   *string
 	BubbleRadius *int
-	CustomCSS   *string
+	CustomCSS    *string
 }
 
 func (a *API) loadInbox(ctx handlerContext, publicKey string) (inboxContext, error) {
@@ -148,7 +148,7 @@ func (a *API) agentOnlyChannels(ctx handlerContext, conversationID uuid.UUID) []
 
 func (a *API) tenantActive(ctx handlerContext, tenantID uuid.UUID) bool {
 	var status string
-	if a.db.QueryRow(ctx, `select status from tenant where id=$1`, tenantID).Scan(&status) != nil {
+	if a.db.QueryRow(ctx, `select t.status from tenant t where t.id=$1 and not exists(select 1 from marketplace_shop s join marketplace m on m.id=s.marketplace_id where s.tenant_id=t.id and m.status<>'ACTIVE')`, tenantID).Scan(&status) != nil {
 		return false
 	}
 	return status == "ACTIVE"

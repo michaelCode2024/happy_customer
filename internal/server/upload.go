@@ -105,6 +105,17 @@ func (a *API) upload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) canUploadTo(r *http.Request, principal auth.Principal, conversationID uuid.UUID) bool {
+	if !a.tenantActive(r.Context(), principal.TenantID) {
+		return false
+	}
+	if principal.Kind == auth.KindWidget && principal.MarketplaceID != uuid.Nil && !a.marketplaceBuyerValid(r.Context(), principal) {
+		return false
+	}
+	if principal.Kind == auth.KindAgent {
+		if _, active := a.currentAgent(r.Context(), principal); !active || !a.authn.SessionValid(r.Context(), principal.SessionID, principal.AgentID) {
+			return false
+		}
+	}
 	switch principal.Kind {
 	case auth.KindWidget:
 		var exists bool
@@ -208,6 +219,17 @@ func (a *API) authorizeAttachment(r *http.Request, tenantID, conversationID uuid
 	principal, err := a.tokens.Verify(token)
 	if err != nil || principal.TenantID != tenantID {
 		return false
+	}
+	if !a.tenantActive(r.Context(), principal.TenantID) {
+		return false
+	}
+	if principal.Kind == auth.KindWidget && principal.MarketplaceID != uuid.Nil && !a.marketplaceBuyerValid(r.Context(), principal) {
+		return false
+	}
+	if principal.Kind == auth.KindAgent {
+		if _, active := a.currentAgent(r.Context(), principal); !active || !a.authn.SessionValid(r.Context(), principal.SessionID, principal.AgentID) {
+			return false
+		}
 	}
 	switch principal.Kind {
 	case auth.KindWidget:

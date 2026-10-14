@@ -168,6 +168,40 @@ class SessionController extends ChangeNotifier {
     }
   }
 
+  /// 宿主后端签发的店员会话仍须向 SaaS 验证，不信任前端传来的角色。
+  Future<void> adoptHostSession(String server, String token) async {
+    if (_busy) return;
+    _busy = true;
+    _api?.close();
+    _api = null;
+    _session = null;
+    _setPhase(SessionPhase.authenticating);
+    final api = _apiFactory(server)..token = token;
+    try {
+      final agent = await api.me();
+      final inboxes = await api.inboxes();
+      final tenant = api.currentTenant;
+      if (tenant == null) throw StateError('店铺身份无效');
+      _api?.close();
+      _api = api;
+      _session = StoredSession(
+          server: server,
+          token: token,
+          agent: agent,
+          tenant: tenant,
+          inboxes: inboxes);
+      // 宿主会话仅在内存中使用，避免切换商城账号后复用旧店员身份。
+      _error = null;
+      _setPhase(SessionPhase.loggedIn);
+    } catch (_) {
+      api.close();
+      _error = '店铺接待身份验证失败，请返回后重新进入';
+      _setPhase(SessionPhase.loggedOut);
+    } finally {
+      _busy = false;
+    }
+  }
+
   /// Signs out. The socket is closed by [WorkbenchController] before this runs,
   /// so a presence event does not race the revocation.
   Future<void> logout() async {

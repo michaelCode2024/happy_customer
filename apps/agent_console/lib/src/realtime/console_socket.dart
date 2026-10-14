@@ -24,6 +24,7 @@ class ConsoleSocket {
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
   Timer? _heartbeat;
+  Timer? _responseDeadline;
   Timer? _retry;
   int _attempt = 0;
   bool _stopped = false;
@@ -107,7 +108,11 @@ class ConsoleSocket {
   }
 
   void sendRead(String conversationId, int sequence) {
-    _send(<String, Object>{'type': 'read', 'conversationId': conversationId, 'sequence': sequence});
+    _send(<String, Object>{
+      'type': 'read',
+      'conversationId': conversationId,
+      'sequence': sequence
+    });
   }
 
   void _send(Map<String, Object> frame) {
@@ -124,6 +129,9 @@ class ConsoleSocket {
       return;
     }
     _channel = channel;
+    // 握手或心跳无响应时主动重连，避免连接一直显示「连接中」却无推送。
+    _responseDeadline =
+        Timer(const Duration(seconds: 10), () => _retryUnresponsive(channel));
 
     _subscription = channel.stream.listen(
       _onFrame,
@@ -131,6 +139,7 @@ class ConsoleSocket {
         // onDone always follows an error, which is where the retry is scheduled.
       },
       onDone: () {
+        if (!identical(_channel, channel)) return;
         _clearTimers();
         _channel = null;
         _emitState(SocketState.closed);
@@ -157,6 +166,8 @@ class ConsoleSocket {
       return;
     }
     final event = RealtimeEvent.fromJson(decoded);
+    _responseDeadline?.cancel();
+    _responseDeadline = null;
     if (event.isHeartbeat) {
       return;
     }
@@ -171,7 +182,15 @@ class ConsoleSocket {
       _heartbeat?.cancel();
       _heartbeat = Timer.periodic(
         _heartbeatInterval,
-        (_) => _send(<String, String>{'type': 'ping'}),
+        (_) {
+          _send(<String, String>{'type': 'ping'});
+          _responseDeadline?.cancel();
+          final current = _channel;
+          if (current != null) {
+            _responseDeadline = Timer(
+                const Duration(seconds: 10), () => _retryUnresponsive(current));
+          }
+        },
       );
       return;
     }
@@ -194,7 +213,20 @@ class ConsoleSocket {
     });
   }
 
+  void _retryUnresponsive(WebSocketChannel channel) {
+    if (_stopped || !identical(_channel, channel)) return;
+    _clearTimers();
+    _channel = null;
+    _subscription?.cancel();
+    _subscription = null;
+    channel.sink.close();
+    _emitState(SocketState.closed);
+    _scheduleRetry();
+  }
+
   void _clearTimers() {
+    _responseDeadline?.cancel();
+    _responseDeadline = null;
     _heartbeat?.cancel();
     _heartbeat = null;
     _retry?.cancel();

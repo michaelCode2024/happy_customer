@@ -1,4 +1,5 @@
 import 'manual_quota_page.dart';
+import 'platform_plans_page.dart';
 import 'package:relaydesk_agent_console/src/ui/product_brand.dart';
 import 'package:relaydesk_agent_console/src/ui/brand.dart';
 import 'package:flutter/material.dart';
@@ -249,8 +250,10 @@ class _PlatformPageState extends State<PlatformPage> {
       case PlatformSection.tenants:
         return _TenantsSection(controller: widget.controller);
       case PlatformSection.plans:
-        return ManualQuotaPage(
-            key: const ValueKey('quotas'), controller: widget.controller);
+        return Column(children: [
+          Padding(padding: const EdgeInsets.all(12), child: Align(alignment: Alignment.centerRight, child: OutlinedButton(onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => Scaffold(appBar: AppBar(title: const Text('套餐详情与年费')), body: PlatformPlansPage(controller: widget.controller)))), child: const Text('套餐详情与年费')))),
+          Expanded(child: ManualQuotaPage(key: const ValueKey('quotas'), controller: widget.controller)),
+        ]);
       case PlatformSection.ai:
         return _PlatformSettings(controller: widget.controller, index: 1);
       case PlatformSection.about:
@@ -1192,3 +1195,4 @@ class _PlatformSettings extends StatelessWidget {
         ]))
       ]));
 }
+

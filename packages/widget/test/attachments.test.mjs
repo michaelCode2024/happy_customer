@@ -7,6 +7,30 @@ import { resolveOptions } from '../build/modules/config.js';
 const realConnect = VisitorSocket.prototype.connect;
 const realClose = VisitorSocket.prototype.close;
 
+test('恢复匿名历史时读取新渠道皮肤，保留原访客身份', async () => {
+  const cache = new Map();
+  globalThis.localStorage = {getItem:key=>cache.get(key)??null,setItem:(key,value)=>cache.set(key,value)};
+  VisitorSocket.prototype.connect=()=>{}; VisitorSocket.prototype.close=()=>{};
+  let bootstraps=0;
+  VisitorApi.prototype.bootstrap=async()=>{bootstraps++;return {token:'original-visitor-token',visitorId:'original-visitor',expiresIn:3600,inbox:{customCss:'.old{}'},agentsOnline:0};};
+  VisitorApi.prototype.listConversations=async()=>({items:[],inbox:{customCss:'.updated{}',bubbleRadius:16}});
+  const first=new ChatStore(resolveOptions({endpoint:'http://localhost',inboxKey:'branding',storage:'brand-test'}));
+  const options=resolveOptions({endpoint:'http://localhost',inboxKey:'branding',storage:'brand-test'});
+  const restored=new ChatStore(options);let applied;
+  restored.onWhiteLabel=config=>{applied=config;};
+  try{await first.init();await restored.init();assert.equal(bootstraps,1);assert.equal(options.customCss,'.updated{}');assert.equal(applied.bubbleRadius,16);}
+  finally{first.destroy();restored.destroy();delete globalThis.localStorage;}
+});
+
+test('从历史列表进入指定会话，不自动改为另一个未结束会话', async () => {
+  VisitorSocket.prototype.connect=()=>{};VisitorSocket.prototype.close=()=>{};
+  VisitorApi.prototype.bootstrap=async()=>({token:'history-token',visitorId:'history-visitor',expiresIn:3600,inbox:{},agentsOnline:0});
+  VisitorApi.prototype.listConversations=async()=>({items:[{id:'new-open',status:'OPEN'},{id:'chosen-history',status:'RESOLVED'}]});
+  VisitorApi.prototype.listMessages=async()=>({items:[]});
+  const store=new ChatStore(resolveOptions({endpoint:'http://localhost',inboxKey:'history',storage:'',conversationId:'chosen-history'}));
+  try{await store.init();assert.equal(store.snapshot.activeId,'chosen-history');}finally{store.destroy();}
+});
+
 test('登录身份缓存与退出后的匿名身份隔离，WebView 票据可以初始化', async () => {
   const cache = new Map();
   globalThis.localStorage = { getItem: key => cache.get(key) ?? null, setItem: (key, value) => cache.set(key, value) };

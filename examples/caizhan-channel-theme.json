@@ -1,0 +1,6 @@
+{
+  "channelTitle": "在线客服",
+  "channelSubtitle": "彩站为您服务",
+  "welcomeMessage": "你好，欢迎咨询，请直接描述你的问题。",
+  "customCss": ":root,:host{--rd-accent:#FFE443;--rd-accent-ink:#171717;--rd-page:#F5F5F5;--rd-header:#FFF6EC;--rd-ink:#171717}.rd-header{background:var(--rd-header);color:var(--rd-ink)}.rd-heading strong,.rd-header-actions .rd-icon,.rd-header .rd-page-back{color:var(--rd-ink)}.rd-subtitle,.rd-service-subtitle{color:#646A73}.rd-body,.rd-messages{background:var(--rd-page)}.rd-send,.rd-empty .rd-avatar.lg{background:var(--rd-accent);color:var(--rd-accent-ink)}.rd-row.is-mine .rd-bubble{background:#FFF2A6;color:var(--rd-ink)}.rd-send:disabled{background:#FFF2A6;color:#888}body,main,#messages{background:var(--rd-page);color:var(--rd-ink)}header{background:var(--rd-header)}button.primary,#send,.logo{background:var(--rd-accent);color:var(--rd-accent-ink)}.mine .bubble{background:#FFF2A6}.logo:after{color:var(--rd-ink)}"
+}

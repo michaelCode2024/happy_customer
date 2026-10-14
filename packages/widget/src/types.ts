@@ -161,6 +161,7 @@ export interface SearchHit {
 }
 
 export interface ConversationPage {
+  inbox?: InboxInfo;
  automation?: ChannelPresentation;
   agentsOnline?: number;
   aiEnabled?: boolean;

@@ -17,10 +17,11 @@ import (
 // agent console and the platform admin API so every client implements one
 // authentication path.
 const (
-	KindWidget   = "widget"
-	KindAgent    = "agent"
-	KindPlatform = "platform"
-	KindIdentity = "visitor_identity"
+	KindWidget           = "widget"
+	KindAgent            = "agent"
+	KindPlatform         = "platform"
+	KindIdentity         = "visitor_identity"
+	KindMarketplaceBuyer = "marketplace_buyer"
 )
 
 // Roles are evaluated by the permission helpers in this package.
@@ -33,6 +34,7 @@ const (
 var ErrUnauthorized = errors.New("登录已失效或令牌无效，请重新登录")
 
 type Principal struct {
+	MarketplaceID   uuid.UUID `json:"marketplaceId,omitempty"`
 	PlatformAdminID uuid.UUID `json:"pa,omitempty"`
 	Kind            string    `json:"k"`
 	TenantID        uuid.UUID `json:"t"`
@@ -64,6 +66,30 @@ func NewTokenService(key string, widgetTTL, agentTTL time.Duration) *TokenServic
 
 func (s *TokenService) IssueWidget(tenantID, inboxID, visitorID uuid.UUID) (string, error) {
 	return s.issue(Principal{Kind: KindWidget, TenantID: tenantID, InboxID: inboxID, VisitorID: visitorID}, s.widgetTTL)
+}
+
+func (s *TokenService) IssueMarketplaceBuyer(marketplaceID, sessionID uuid.UUID, externalID, name string) (string, error) {
+	return s.issue(Principal{Kind: KindMarketplaceBuyer, MarketplaceID: marketplaceID, SessionID: sessionID, ExternalID: externalID, Name: name}, time.Hour)
+}
+func (s *TokenService) IssueMarketplaceWidget(parent Principal, tenant, inbox, visitor uuid.UUID) (string, error) {
+	parent.Kind = KindWidget
+	parent.TenantID = tenant
+	parent.InboxID = inbox
+	parent.VisitorID = visitor
+	return s.issue(parent, time.Hour)
+}
+func (s *TokenService) IssueMarketplaceIdentity(parent Principal, tenant, inbox uuid.UUID) (string, error) {
+	parent.Kind = KindIdentity
+	parent.TenantID = tenant
+	parent.InboxID = inbox
+	parent.VisitorID = uuid.Nil
+	return s.issue(parent, 5*time.Minute)
+}
+func (s *TokenService) IssueWidgetFromIdentity(parent Principal, tenant, inbox, visitor uuid.UUID) (string, error) {
+	if parent.MarketplaceID != uuid.Nil {
+		return s.IssueMarketplaceWidget(parent, tenant, inbox, visitor)
+	}
+	return s.IssueWidget(tenant, inbox, visitor)
 }
 
 // 客户后端证明登录用户身份；票据不能当聊天令牌使用，且只绑定一个企业入口。

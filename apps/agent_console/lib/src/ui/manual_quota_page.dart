@@ -452,9 +452,9 @@ class _ManualQuotaEditorState extends State<ManualQuotaEditor> {
 
   void _defaults(String plan) {
     final defaults = switch (plan) {
-      'STARTER' => (3, 5000, 0),
-      'GROWTH' => (10, 50000, 5000),
-      'ENTERPRISE' => (100, 1000000, 100000),
+      'STARTER' => (1, 5000, 0),
+      'GROWTH' => (3, 50000, 5000),
+      'ENTERPRISE' => (10, 1000000, 100000),
       _ => (2, 1000, 0)
     };
     setState(() {
@@ -675,7 +675,7 @@ class _ManualQuotaEditorState extends State<ManualQuotaEditor> {
           padding: const EdgeInsets.fromLTRB(18, 28, 18, 20),
           child:
               Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            const Text('语聊',
+            const Text('通语',
                 style: TextStyle(
                     color: Colors.white,
                     fontSize: 24,

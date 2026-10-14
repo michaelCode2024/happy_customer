@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/relaydesk/relaydesk/internal/platform/database"
 )
 
 // Retrieval ranking is only meaningful as a distribution: a formula that puts
@@ -18,7 +19,7 @@ import (
 // The demo tenant's knowledge base is the fixture: nine English-free articles
 // covering a support team's recurring questions, which is the shape of a real
 // tenant's base and therefore the honest thing to calibrate on.
-const demoKnowledgeTenant = "d96b68fa-7e9f-49af-891a-fc4cd4c41d1c"
+var demoKnowledgeTenant = database.DemoTenantID().String()
 
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -31,6 +32,12 @@ func testPool(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("connect: %v", err)
 	}
 	t.Cleanup(pool.Close)
+	if err = database.Migrate(context.Background(), pool); err != nil {
+		t.Fatal(err)
+	}
+	if err = database.EnsureDemoData(context.Background(), pool); err != nil {
+		t.Fatal(err)
+	}
 	return pool
 }
 

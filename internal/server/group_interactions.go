@@ -51,7 +51,7 @@ func (a *API) groupRecall(w http.ResponseWriter, r *http.Request, p auth.Princip
 		fail(w, 400, "消息标识不正确")
 		return
 	}
-	result, e := a.db.Exec(r.Context(), `update chat_group_message set recalled_at=coalesce(recalled_at,now()),content='' where id=$1 and group_id=$2 and actor_kind=$3 and actor_id=$4`, msg, id, p.Kind, groupActor(p))
+	result, e := a.db.Exec(r.Context(), `update chat_group_message set recalled_at=coalesce(recalled_at,now()),content='',metadata='{}' where id=$1 and group_id=$2 and actor_kind=$3 and actor_id=$4`, msg, id, p.Kind, groupActor(p))
 	if e != nil {
 		fail(w, 500, "撤回失败")
 		return

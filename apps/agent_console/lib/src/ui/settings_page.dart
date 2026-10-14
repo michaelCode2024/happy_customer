@@ -378,7 +378,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             'notifications': messageAlertSettings(),
             'version': Text(
-              '版本信息：语聊工作台 · 协议版本 v1',
+              '版本信息：通语工作台 · 协议版本 v1',
               textAlign: TextAlign.center,
               style: theme.textTheme.labelSmall?.copyWith(
                 color: theme.colorScheme.outline,

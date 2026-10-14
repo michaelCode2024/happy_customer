@@ -5,6 +5,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../web/group-interactions.js'), 'utf8');
 
+test('群订单卡片按文本展示，完整金额不缩写，撤回后隐藏卡片',()=>{
+ const env=setup();
+ env.run(`actorId='me';items=[{id:'card',sequence:1,actorId:'other',kind:'widget',name:'店主',createdAt:'2026-10-14T00:00:00Z',messageType:'CARD',metadata:{card:{kind:'ORDER',title:'<img src=x onerror=alert(1)>',orderNumber:'O-1',currency:'CNY',amountMinor:999999999999999,status:'待发货'}}}];render()`);
+ const bubble=env.element('messages').children[0].children[1];
+ assert.equal(bubble.children[0].textContent,'<img src=x onerror=alert(1)>');
+ assert.ok(bubble.children.some(c=>c.textContent==='CNY 9999999999999.99'));
+ env.run(`items[0].recalled=true;render()`);
+ assert.equal(env.element('messages').children[0].children[1].textContent,'该消息已被撤回');
+});
+
 function setup(getUserMedia) {
   const elements = new Map(), timers = new Map(); let timerID = 0;
   function element(id) {

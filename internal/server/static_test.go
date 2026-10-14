@@ -17,10 +17,15 @@ func TestStaticRoutes(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(dir, "console"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Mkdir(filepath.Join(dir, "website"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	for path, content := range map[string]string{
 		"widget.js":            "window.RelayDesk = {};",
 		"console/index.html":   `<base href="/console/">`,
 		"console/main.dart.js": "console.log('console');",
+		"website/index.html":   `<title>通语 TongYu</title><a href="/console/?surface=agent">登录</a>`,
+		"website/site.css":     "body{margin:0}",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(path)), []byte(content), 0644); err != nil {
 			t.Fatal(err)
@@ -35,6 +40,11 @@ func TestStaticRoutes(t *testing.T) {
 		status        int
 	}{
 		{path: "/widget.js", content: "window.RelayDesk", status: 200},
+		{path: "/", content: "通语 TongYu", status: 200},
+		{path: "/website/site.css", content: "margin:0", status: 200},
+		{path: "/website/missing.js", status: 404},
+		{path: "/unknown", status: 404},
+		{path: "/api/unknown", status: 404},
 		{path: "/console/", content: `/console/`, status: 200},
 		{path: "/console/main.dart.js", content: "console.log", status: 200},
 		{path: "/console/unavailable.js", status: 404},

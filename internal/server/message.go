@@ -19,6 +19,7 @@ import (
 
 // messageInput is the common description of a message regardless of who sends it.
 type messageInput struct {
+	CommerceTrusted        bool // 只由鉴权后的商城后端接口设置。
 	ReceptionExempt        bool // 仅由服务端的AI或第三方消息入口设置，客户端元数据不能绕过接单。
 	AutomationOnly         bool
 	AutomationRespectAgent bool
@@ -103,6 +104,9 @@ func (a *API) appendMessage(ctx context.Context, tenantID, conversationID uuid.U
 	if in.ClientMessageID != "" {
 		existing, err := a.findByClientMessageID(ctx, conversationID, in.ClientMessageID)
 		if err == nil {
+			if !sameMessageRetry(existing, in) {
+				return messageView{}, serviceError{"MESSAGE_ID_CONFLICT", "消息标识已被其他发送者或消息用途使用"}
+			}
 			return existing, nil
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
@@ -111,6 +115,11 @@ func (a *API) appendMessage(ctx context.Context, tenantID, conversationID uuid.U
 	}
 
 	metadata := orEmpty(in.Metadata)
+	if messageType == "CARD" {
+		if err := validateCommerceMetadata(metadata, in.CommerceTrusted); err != nil {
+			return messageView{}, err
+		}
+	}
 	if in.Private {
 		metadata["private"] = true
 	}
@@ -130,6 +139,9 @@ func (a *API) appendMessage(ctx context.Context, tenantID, conversationID uuid.U
 		}
 		if in.ClientMessageID != "" {
 			if existing, e := a.findByClientMessageID(ctx, conversationID, in.ClientMessageID); e == nil {
+				if !sameMessageRetry(existing, in) {
+					return messageView{}, serviceError{"MESSAGE_ID_CONFLICT", "消息标识已被其他发送者或消息用途使用"}
+				}
 				return existing, nil
 			}
 		}
@@ -139,12 +151,20 @@ func (a *API) appendMessage(ctx context.Context, tenantID, conversationID uuid.U
 	}
 
 	if in.SenderType == "AGENT" && !in.Private && !in.ReceptionExempt && in.SenderID != nil {
-		var allowed bool
-		if err = tx.QueryRow(ctx, `select assignee_id=$3 and accepted_at is not null from conversation where id=$1 and tenant_id=$2 for update`, conversationID, tenantID, *in.SenderID).Scan(&allowed); err != nil {
+		// 区分未领取 / 他人接待 / 未确认接单，前端才能给出对得上的操作指引。
+		var owner *uuid.UUID
+		var accepted *time.Time
+		if err = tx.QueryRow(ctx, `select assignee_id, accepted_at from conversation where id=$1 and tenant_id=$2 for update`, conversationID, tenantID).Scan(&owner, &accepted); err != nil {
 			return messageView{}, err
 		}
-		if !allowed {
-			return messageView{}, fmt.Errorf("请先确认接单，再回复客户")
+		if owner == nil {
+			return messageView{}, serviceError{"RECEPTION_REQUIRED", "请先点击「开始接待」，再回复客户"}
+		}
+		if *owner != *in.SenderID {
+			return messageView{}, serviceError{"NOT_ASSIGNEE", "该会话由其他客服接待中，请先转派给自己后再回复"}
+		}
+		if accepted == nil {
+			return messageView{}, serviceError{"RECEPTION_REQUIRED", "请先点击「确认接单」，再回复客户"}
 		}
 	}
 
@@ -217,6 +237,9 @@ func (a *API) appendMessage(ctx context.Context, tenantID, conversationID uuid.U
 		// A concurrent retry with the same clientMessageId hits the unique index.
 		if in.ClientMessageID != "" && isUniqueViolation(err) {
 			if existing, lookupErr := a.findByClientMessageID(ctx, conversationID, in.ClientMessageID); lookupErr == nil {
+				if !sameMessageRetry(existing, in) {
+					return messageView{}, serviceError{"MESSAGE_ID_CONFLICT", "消息标识已被其他发送者或消息用途使用"}
+				}
 				return existing, nil
 			}
 		}
@@ -257,6 +280,17 @@ func (a *API) appendMessage(ctx context.Context, tenantID, conversationID uuid.U
 	}
 	a.afterMessageCommitted(ctx, tenantID, conversationID, view, newAssignee, in.SenderType)
 	return view, nil
+}
+
+// 幂等标识不能把其他发送者的消息（尤其是内部备注）当成访客重试返回。
+func sameMessageRetry(existing messageView, in messageInput) bool {
+	if existing.SenderType != in.SenderType || existing.Private != in.Private {
+		return false
+	}
+	if existing.SenderID == nil || in.SenderID == nil {
+		return existing.SenderID == nil && in.SenderID == nil
+	}
+	return *existing.SenderID == *in.SenderID
 }
 
 // afterMessageCommitted runs everything that must not happen inside the
@@ -316,6 +350,7 @@ func (a *API) publishMessage(ctx context.Context, tenantID, conversationID uuid.
 		return
 	}
 	a.publish(ctx, a.conversationChannels(ctx, conversationID), event)
+	a.publishMarketplaceConversation(ctx, conversationID)
 }
 
 // appendVisitorReply stores one visitor message. The reply target is nil for the
@@ -601,20 +636,13 @@ func (a *API) setAssignee(ctx context.Context, tx pgx.Tx, tenantID, conversation
 }
 
 func (a *API) findByClientMessageID(ctx context.Context, conversationID uuid.UUID, clientMessageID string) (messageView, error) {
-	var view messageView
-	var metadata []byte
-	err := a.db.QueryRow(ctx, `
-		select id, conversation_id, sender_type, sender_id, client_message_id, sequence, message_type,
-		       content, metadata, created_at
-		  from message where conversation_id = $1 and client_message_id = $2`, conversationID, clientMessageID).
-		Scan(&view.ID, &view.ConversationID, &view.SenderType, &view.SenderID, &view.ClientMessageID,
-			&view.Sequence, &view.MessageType, &view.Content, &metadata, &view.CreatedAt)
+	view, err := scanMessageRow(a.db.QueryRow(ctx, "select "+messageColumns+messageJoins+" where m.conversation_id=$1 and m.client_message_id=$2", conversationID, clientMessageID))
 	if err != nil {
 		return messageView{}, err
 	}
-	view.Metadata = metadata
-	view.SenderName = a.senderName(ctx, view.SenderType, view.SenderID)
-	view.Attachments = a.messageAttachments(ctx, view.ID)
+	if view.DeletedAt == nil {
+		view.Attachments = a.messageAttachments(ctx, view.ID)
+	}
 	return view, nil
 }
 

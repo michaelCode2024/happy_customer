@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:relaydesk_agent_console/src/util/host_session.dart';
 import 'package:relaydesk_agent_console/src/util/console_surface.dart';
 
 import 'package:flutter/material.dart';
@@ -24,7 +25,8 @@ enum ConsoleSurface { agent, platform }
 
 /// 应用根：按「已登录 → 主页 / 未登录 → 登录页」路由，并记住上次门面。
 class RelayDeskConsoleApp extends StatefulWidget {
-  const RelayDeskConsoleApp({super.key, this.credentials, this.platformApiFactory});
+  const RelayDeskConsoleApp(
+      {super.key, this.credentials, this.platformApiFactory});
 
   final CredentialStore? credentials;
   final PlatformApi Function(String server)? platformApiFactory;
@@ -34,6 +36,7 @@ class RelayDeskConsoleApp extends StatefulWidget {
 }
 
 class _RelayDeskConsoleAppState extends State<RelayDeskConsoleApp> {
+  StreamSubscription<String>? _hostSession;
   late final CredentialStore _store;
   late final SessionController _session;
   late final PlatformController _platform;
@@ -51,18 +54,29 @@ class _RelayDeskConsoleAppState extends State<RelayDeskConsoleApp> {
   @override
   void initState() {
     super.initState();
-    _store = widget.credentials ?? const PreferencesCredentialStore();
-    _manualSurface = loadTabConsoleSurface() != null;
+    _store = widget.credentials ??
+        (isHostedConsole
+            ? MemoryCredentialStore()
+            : const PreferencesCredentialStore());
+    _manualSurface = isHostedConsole || loadTabConsoleSurface() != null;
     _session = SessionController(store: _store)..addListener(_onSessionChanged);
-    _platform = PlatformController(store: _store, apiFactory: widget.platformApiFactory)
-      ..addListener(_onPlatformChanged);
+    _platform =
+        PlatformController(store: _store, apiFactory: widget.platformApiFactory)
+          ..addListener(_onPlatformChanged);
     unawaited(_restorePrefs());
-    unawaited(_session.bootstrap());
-    unawaited(_platform.bootstrap());
+    if (isHostedConsole) {
+      _hostSession = hostSessions().listen((token) =>
+          unawaited(_session.adoptHostSession(Uri.base.origin, token)));
+    } else {
+      unawaited(_session.bootstrap());
+    }
+    if (!isHostedConsole) unawaited(_platform.bootstrap());
+    if (isHostedConsole) _platformResolved = true;
   }
 
   @override
   void dispose() {
+    _hostSession?.cancel();
     _session.removeListener(_onSessionChanged);
     _platform.removeListener(_onPlatformChanged);
     _session.dispose();
@@ -95,7 +109,8 @@ class _RelayDeskConsoleAppState extends State<RelayDeskConsoleApp> {
       'system' => ThemeMode.system,
       _ => null,
     };
-    final storedSurface = loadTabConsoleSurface() ?? await _store.loadConsoleSurface();
+    final storedSurface =
+        loadTabConsoleSurface() ?? await _store.loadConsoleSurface();
     final surface = switch (storedSurface) {
       'platform' => ConsoleSurface.platform,
       'agent' => ConsoleSurface.agent,
@@ -104,7 +119,7 @@ class _RelayDeskConsoleAppState extends State<RelayDeskConsoleApp> {
     if (!mounted) return;
     setState(() {
       if (mode != null) _themeMode = mode;
-      _surface = surface;
+      _surface = isHostedConsole ? ConsoleSurface.agent : surface;
       _surfaceRestored = true;
     });
   }
@@ -143,21 +158,37 @@ class _RelayDeskConsoleAppState extends State<RelayDeskConsoleApp> {
       theme: RelayTheme.light(),
       darkTheme: RelayTheme.dark(),
       themeMode: _themeMode,
-      home: _home(),
+      home: isHostedConsole
+          ? Scaffold(
+              appBar: AppBar(
+                  leading: IconButton(
+                      icon: const Icon(Icons.arrow_back),
+                      tooltip: '返回商城',
+                      onPressed: closeHostedConsole),
+                  title: const Text('店铺消息与群聊')),
+              body: _home(),
+            )
+          : _home(),
     );
   }
 
   Widget _home() {
     // 偏好未恢复完时先 splash，避免门面闪烁。
-    if (!_surfaceRestored || _session.phase == SessionPhase.booting || _platform.phase == PlatformPhase.booting) {
+    if (!_surfaceRestored ||
+        _session.phase == SessionPhase.booting ||
+        (!isHostedConsole && _platform.phase == PlatformPhase.booting)) {
       return const _Splash();
     }
 
     if (!_manualSurface) {
-      if (_surface == ConsoleSurface.agent && _session.phase == SessionPhase.loggedOut && _platform.phase == PlatformPhase.ready) {
+      if (_surface == ConsoleSurface.agent &&
+          _session.phase == SessionPhase.loggedOut &&
+          _platform.phase == PlatformPhase.ready) {
         _surface = ConsoleSurface.platform;
         saveTabConsoleSurface('platform');
-      } else if (_surface == ConsoleSurface.platform && _platform.phase == PlatformPhase.locked && _session.phase == SessionPhase.loggedIn) {
+      } else if (_surface == ConsoleSurface.platform &&
+          _platform.phase == PlatformPhase.locked &&
+          _session.phase == SessionPhase.loggedIn) {
         _surface = ConsoleSurface.agent;
         saveTabConsoleSurface('agent');
       }
@@ -196,8 +227,7 @@ class _RelayDeskConsoleAppState extends State<RelayDeskConsoleApp> {
           case SessionPhase.authenticating:
             return LoginPage(
               session: _session,
-              onPlatformLogin:
-                  _platformResolved ? _openPlatformConsole : null,
+              onPlatformLogin: _platformResolved ? _openPlatformConsole : null,
             );
           case SessionPhase.loggedIn:
             final agentId = _session.agent?.id ?? '';

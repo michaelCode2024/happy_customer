@@ -644,7 +644,9 @@ export class WidgetView {
       return;
     }
     const subtitle = panel.querySelector('.rd-subtitle') as HTMLElement;
-    subtitle.textContent = snapshot.automation?.channelSubtitle ? `${snapshot.automation.channelSubtitle} · ${this.#subtitle(snapshot)}` : this.#subtitle(snapshot);
+    subtitle.textContent = this.#subtitle(snapshot);
+    const serviceSubtitle = panel.querySelector('.rd-service-subtitle') as HTMLElement;
+    serviceSubtitle.textContent = snapshot.automation?.channelSubtitle || this.#options.subtitle;
     subtitle.classList.toggle('is-online', snapshot.agentsOnline > 0);
 
     const back = panel.querySelector('.rd-back') as HTMLElement;
@@ -779,6 +781,7 @@ export class WidgetView {
     const c=snapshot.automation;if(!c){panel.hidden=true;return;}
     const title=this.#root.querySelector<HTMLElement>('.rd-heading strong');
     if(title)title.textContent=c.channelTitle || (this.#options.embedded && this.#options.title === '语聊客服' ? '在线客服' : this.#options.title);
+    if(c.channelTitle)this.#root.querySelector('.rd-panel')?.setAttribute('aria-label',c.channelTitle);
     const items=[...(c.menuItems??[]),...(c.quickLinks??[]),...(c.diversionLinks??[])];
     panel.innerHTML=`<div class="rd-channel-row">${items.map(i=>this.#channelItemHtml(i)).join('')}</div>`;
     // 欢迎页已有引导问题/卡片时，底部再铺一层相同 chips 会重复；有消息后再显示渠道入口。
@@ -975,6 +978,14 @@ export class WidgetView {
   }
 
   #bodyHtml(message: ChatMessage): string {
+    const card = message.metadata?.card as Record<string, unknown> | undefined;
+    if (message.messageType === 'CARD' && card && ['PRODUCT', 'ORDER'].includes(String(card.kind))) {
+      const amount = Number(card.amountMinor);
+      const price = Number.isSafeInteger(amount) && amount >= 0 ? `${Math.floor(amount / 100)}.${String(amount % 100).padStart(2, '0')}` : '';
+      const safe = (value: unknown) => typeof value === 'string' && /^https?:\/\//i.test(value) ? value : '';
+      const image = safe(card.imageUrl), link = safe(card.url);
+      return `<div class="rd-commerce-card">${image ? `<img src="${escapeAttr(image)}" alt="商品图片" style="width:100%;max-height:160px;object-fit:contain" loading="lazy">` : ''}<strong>${escapeHtml(String(card.title || ''))}</strong>${card.kind === 'ORDER' ? `<div>订单号：${escapeHtml(String(card.orderNumber || ''))}</div><div>${escapeHtml(String(card.status || ''))}</div>` : ''}<div>${escapeHtml(String(card.currency || ''))} ${price}</div>${link ? `<a href="${escapeAttr(link)}" target="_blank" rel="noopener noreferrer">查看${card.kind === 'ORDER' ? '订单' : '商品'}</a>` : ''}</div>`;
+    }
     const attachments = message.attachments ?? [];
     if (attachments.length) {
       if (message.messageType === 'AUDIO') {

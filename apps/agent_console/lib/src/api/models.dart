@@ -714,6 +714,40 @@ class Conversation {
   final DateTime? assignmentExpiresAt;
   bool get needsAcceptance =>
       !isUnassigned && acceptedAt == null && assignmentExpiresAt != null;
+
+  /// 未领取或已分配尚未确认接单：公开回复都应先接待，避免「能打字却发不出去」。
+  bool get awaitingReception => isUnassigned || needsAcceptance;
+
+  /// 与顶栏按钮文案保持一致，提示里直接点名，客服才知道要点哪里。
+  String get receptionActionLabel => needsAcceptance ? '确认接单' : '开始接待';
+
+  /// 已分配给别人（含对方尚未确认接单）。
+  bool isHeldByOther(String selfId) =>
+      selfId.isNotEmpty &&
+      !isUnassigned &&
+      assigneeId != selfId;
+
+  /// 当前客服是否可以点「开始接待 / 确认接单」。
+  bool canClaim(String selfId) =>
+      isUnassigned ||
+      (needsAcceptance &&
+          (selfId.isEmpty || assigneeId == selfId));
+
+  /// 公开回复的拦截原因；null 表示可发。已解决会话允许发送（服务端会重新打开）。
+  String? publicReplyBlockReason(String selfId) {
+    if (isUnassigned) {
+      return '请先点击右上角「开始接待」，再回复客户';
+    }
+    if (isHeldByOther(selfId)) {
+      final name = assigneeName.trim().isEmpty ? '其他客服' : assigneeName.trim();
+      return '该会话由「$name」接待中，请先转派给自己后再回复';
+    }
+    if (needsAcceptance) {
+      return '请先点击右上角「确认接单」，再回复客户';
+    }
+    return null;
+  }
+
   final int priority;
   final String source;
   final int lastSequence;

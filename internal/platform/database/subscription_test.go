@@ -29,6 +29,9 @@ func TestSubscriptionTrialWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
+	if err = Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
 
 	tx, err := pool.Begin(ctx)
 	if err != nil {

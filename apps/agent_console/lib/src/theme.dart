@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// 语聊控制台主题：紧凑的中文企业工作台。
+/// 通语控制台主题：紧凑的中文企业工作台。
 ///
 /// 特征：蓝色主色、会话选中浅蓝、白色聊天画布、
 /// 浅蓝坐席气泡、浅灰访客气泡、紧凑的信息密度。
@@ -53,7 +53,7 @@ class RelayTheme {
       outlineVariant: const Color(0xFFE9EDF3),
       outline: tertiary,
       onSurface: const Color(0xFF202B3D),
-      onSurfaceVariant: const Color(0xFF8992A3),
+      onSurfaceVariant: const Color(0xFF637186),
       error: const Color(0xFFF53F3F),
     ));
   }
@@ -210,9 +210,9 @@ class RelayTheme {
       dataTableTheme: DataTableThemeData(
         headingRowColor: WidgetStatePropertyAll(scheme.surfaceContainerHighest),
         headingRowHeight: 44,
-        dataRowMinHeight: 40,
-        dataRowMaxHeight: 48,
-        horizontalMargin: 16,
+        dataRowMinHeight: 64,
+        dataRowMaxHeight: 72,
+        horizontalMargin: 20,
         columnSpacing: 24,
       ),
       segmentedButtonTheme: SegmentedButtonThemeData(

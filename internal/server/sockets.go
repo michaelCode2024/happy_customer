@@ -42,6 +42,10 @@ func (a *API) widgetSocket(w http.ResponseWriter, r *http.Request) {
 		failCode(w, 403, "TENANT_SUSPENDED", "该企业账号已停用")
 		return
 	}
+	if principal.MarketplaceID != uuid.Nil && !a.marketplaceBuyerValid(r.Context(), principal) {
+		fail(w, 401, "商城登录已失效")
+		return
+	}
 	conn, err := a.accept(r, w)
 	if err != nil {
 		return
@@ -426,6 +430,9 @@ func (a *API) advanceReceipt(ctx context.Context, conversationID, tenantID uuid.
 	}
 	data = map[string]any{"conversationId": conversationID, "readerType": readerType, "readerId": readerID, "sequence": sequence}
 	a.publish(ctx, a.conversationChannels(ctx, conversationID), realtime.Event{Type: eventType, TenantID: tenantID.String(), ConversationID: conversationID.String(), Data: data})
+	if read {
+		a.publishMarketplaceConversation(ctx, conversationID)
+	}
 	return nil
 }
 

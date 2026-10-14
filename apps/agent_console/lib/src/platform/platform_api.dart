@@ -32,6 +32,7 @@ class PlatformApi {
 
   bool get hasToken => token.isNotEmpty;
 
+
   void close() => _client.close();
 
   /// ------------------------------------------------------------------ session
@@ -284,3 +285,4 @@ class PlatformApi {
     );
   }
 }
+

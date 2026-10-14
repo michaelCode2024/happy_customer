@@ -687,11 +687,11 @@ func (a *API) platformMeta(w http.ResponseWriter, r *http.Request, _ auth.Princi
 func planLimits(plan string) (int, int) {
 	switch plan {
 	case "STARTER":
-		return 3, 5000
+		return 1, 5000
 	case "GROWTH":
-		return 10, 50000
+		return 3, 50000
 	case "ENTERPRISE":
-		return 100, 1_000_000
+		return 10, 1_000_000
 	default:
 		return 2, 1000
 	}
@@ -748,3 +748,4 @@ func (a *API) platformCreateAgent(w http.ResponseWriter, r *http.Request, p auth
 	p.TenantID = id
 	a.createPlatformAgent(w, r, p)
 }
+

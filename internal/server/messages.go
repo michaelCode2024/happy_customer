@@ -162,6 +162,7 @@ func (a *API) publishMessageUpdated(ctx context.Context, tenantID, conversationI
 		return
 	}
 	a.publish(ctx, a.conversationChannels(ctx, conversationID), event)
+	a.publishMarketplaceConversation(ctx, conversationID)
 }
 
 func (a *API) refreshPreviewIfLatest(ctx context.Context, conversationID uuid.UUID, view messageView) {

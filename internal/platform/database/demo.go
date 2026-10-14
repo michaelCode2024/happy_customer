@@ -34,6 +34,8 @@ const (
 
 func demoID(name string) uuid.UUID { return uuid.NewSHA1(demoNamespace, []byte(name)) }
 
+func DemoTenantID() uuid.UUID { return demoID("tenant") }
+
 // EnsureDemoData creates a complete, self-contained demo tenant: an inbox with a
 
 // published public key, three seats covering every role, canned responses, tags,

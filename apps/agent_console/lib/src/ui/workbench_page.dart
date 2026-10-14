@@ -1,3 +1,4 @@
+import 'package:relaydesk_agent_console/src/util/host_session.dart';
 import '../util/message_alert_stub.dart'
     if (dart.library.html) '../util/message_alert_web.dart';
 import 'package:relaydesk_agent_console/src/util/group_window_stub.dart'
@@ -112,8 +113,14 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
         Timer.periodic(const Duration(seconds: 5), (_) => _refreshPlan());
     _workbench.onGroupUpdated = checkIncomingCall;
     _workbench.connectRealtime();
-    unawaited(_workbench.refreshConversations());
+    unawaited(_openInitialConversation());
     unawaited(_workbench.loadReferenceData());
+  }
+
+  Future<void> _openInitialConversation() async {
+    await _workbench.refreshConversations();
+    final id = hostConversationId;
+    if (mounted && id != null) await _workbench.select(id);
   }
 
   final Set<String> noticedCalls = {};
@@ -230,8 +237,8 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     return <_SectionSpec>[
       const _SectionSpec(
         section: WorkbenchSection.conversations,
-        label: '客户消息',
-        group: '接待',
+        label: '客户会话',
+        group: '日常接待',
         icon: Icons.forum_outlined,
         selectedIcon: Icons.forum,
       ),
@@ -239,21 +246,21 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
         const _SectionSpec(
           section: WorkbenchSection.groups,
           label: '群聊',
-          group: '接待',
+          group: '日常接待',
           icon: Icons.groups_outlined,
           selectedIcon: Icons.groups,
         ),
       const _SectionSpec(
         section: WorkbenchSection.overview,
-        label: '今天待办',
-        group: '接待',
+        label: '工作概览',
+        group: '日常接待',
         icon: Icons.home_outlined,
         selectedIcon: Icons.home_rounded,
       ),
       const _SectionSpec(
         section: WorkbenchSection.knowledge,
         label: '知识库',
-        group: '接待',
+        group: '日常接待',
         icon: Icons.menu_book_outlined,
         selectedIcon: Icons.menu_book,
       ),
@@ -261,30 +268,30 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
         const _SectionSpec(
           section: WorkbenchSection.stats,
           label: '数据统计',
-          group: '接待',
+          group: '日常接待',
           icon: Icons.insights_outlined,
           selectedIcon: Icons.insights,
         ),
       if (admin && _has('integrations'))
         const _SectionSpec(
           section: WorkbenchSection.integrations,
-          label: '接入网站',
-          group: '开通',
+          label: '接入渠道',
+          group: '企业管理',
           icon: Icons.code_rounded,
           selectedIcon: Icons.code,
         ),
       if (admin)
         const _SectionSpec(
           section: WorkbenchSection.enterprise,
-          label: '同事账号',
-          group: '开通',
+          label: '企业管理',
+          group: '企业管理',
           icon: Icons.people_outline,
           selectedIcon: Icons.people,
         ),
       const _SectionSpec(
         section: WorkbenchSection.settings,
         label: '我的设置',
-        group: '账号',
+        group: '个人设置',
         icon: Icons.settings_outlined,
         selectedIcon: Icons.settings,
       ),
@@ -355,7 +362,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: widget.session,
+      listenable: Listenable.merge([widget.session, _workbench]),
       builder: (context, _) {
         _workbench.readingThread = _section == WorkbenchSection.conversations;
         final agent = widget.session.agent;
@@ -369,19 +376,24 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
           builder: (context, constraints) {
             final width = constraints.maxWidth;
             final useRail = width >= 900;
-            final body = _bodyFor(useRail ? width - 76 : width);
+            // 传递实际剩余宽度，避免展开侧栏后仍按整屏宽度强行显示客户资料。
+            final body = _bodyFor(useRail ? width - 220 : width);
             if (!useRail) {
+              // 彩站宿主已有消息页和底部导航；打开会话时让出空间显示消息历史。
+              final hostedThread = isHostedConsole &&
+                  _section == WorkbenchSection.conversations &&
+                  _workbench.selectedId != null;
               final phone = _phoneDestinations(sections);
               final phoneIndex =
                   phone.indexWhere((spec) => spec.section == _section);
               return Scaffold(
                 // 这两个页面已有自己的工具栏，窄屏不再重复占用一行标题。
-                appBar: _section == WorkbenchSection.integrations ||
+                appBar: hostedThread || _section == WorkbenchSection.integrations ||
                         _section == WorkbenchSection.enterprise
                     ? null
                     : _compactAppBar(agent),
                 body: body,
-                bottomNavigationBar: NavigationBar(
+                bottomNavigationBar: hostedThread ? null : NavigationBar(
                   selectedIndex: phoneIndex >= 0 ? phoneIndex : phone.length,
                   onDestinationSelected: (index) {
                     if (index >= phone.length) {
@@ -410,7 +422,20 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
               body: Row(children: [
                 ListenableBuilder(
                     listenable: _workbench,
-                    builder: (context, _) => ConsoleIconRail(
+                    builder: (context, _) => WorkspaceSidebar(
+                          subtitle: '企业客服平台',
+                          leading: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(widget.session.tenant?.name ?? '企业工作空间',
+                                  maxLines: 2,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w600)),
+                              const SizedBox(height: 5),
+                              Text('企业工作空间',
+                                  style: Theme.of(context).textTheme.bodySmall),
+                            ],
+                          ),
                           selectedIndex: sections
                               .indexWhere((spec) => spec.section == _section),
                           onSelected: (index) => setState(
@@ -422,6 +447,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                                   _section == spec.section
                                       ? spec.selectedIcon
                                       : spec.icon,
+                                  group: spec.group,
                                   count: spec.section ==
                                           WorkbenchSection.conversations
                                       ? _workbench.unread
@@ -431,7 +457,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                               onTap: () => setState(
                                   () => _section = WorkbenchSection.settings),
                               child:
-                                  _RailLeading(agent: agent, extended: false)),
+                                  _RailLeading(agent: agent, extended: true)),
                         )),
                 Expanded(
                     child: Column(children: [
@@ -599,7 +625,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
           listenable: _workbench,
           builder: (context, _) => Row(
             children: <Widget>[
-              const Text('客户消息'),
+              const Text('客户会话'),
               const SizedBox(width: 10),
               if (_workbench.queued > 0)
                 Text(
@@ -619,13 +645,13 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
 
   static String _sectionTitle(WorkbenchSection section) => switch (section) {
         WorkbenchSection.groups => '群聊',
-        WorkbenchSection.overview => '今天待办',
-        WorkbenchSection.conversations => '客户消息',
+        WorkbenchSection.overview => '工作概览',
+        WorkbenchSection.conversations => '客户会话',
         WorkbenchSection.stats => '数据统计',
         WorkbenchSection.knowledge => '知识库',
-        WorkbenchSection.integrations => '接入网站',
+        WorkbenchSection.integrations => '接入渠道',
         WorkbenchSection.settings => '我的设置',
-        WorkbenchSection.enterprise => '同事账号',
+        WorkbenchSection.enterprise => '企业管理',
       };
 }
 
@@ -841,6 +867,7 @@ class _CompactSwitch extends StatelessWidget {
         return ChatPanel(
           workbench: workbench,
           picker: picker,
+          showInlineAssist: !isHostedConsole,
           onOpenProfile: () => Navigator.of(context).push(
             MaterialPageRoute<void>(
               builder: (context) => Scaffold(

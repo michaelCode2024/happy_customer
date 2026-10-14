@@ -32,9 +32,9 @@
    - 企业版：后端签发 `identityToken` 后打开 `/groups.html?groupId=<id>&identityToken=<票据>`（页面会立刻换成会话并清掉地址栏中的票据）；或邀请链接同时带 `identityToken`。
    - 专业版及以上：后端调用 `POST /api/v1/open/groups/{id}/member-token`，把返回的 `token` 写入前端 `sessionStorage`（键名 `liaoqiao-group-<groupId>`，值为 `{token,groupId,actorId,actorKind:"widget"}`），再打开 `/groups.html?groupId=<id>`。
 
-匿名邀请链（只填称呼）仍然可用，适合临时客人；登录用户应走 `externalId` 映射，避免同一人出现多个匿名 visitor。
+未启用requireIdentity的群仍允许匿名邀请链；新建商城福利群默认要求登录身份。登录用户应走externalId映射，避免同一人出现多个匿名visitor。
 
-服务群邀请链接具备加入权限，应仅提供给准备邀请的客户；内部群不能生成客户邀请。归档停止发消息及加入，保留历史。移出后不能读取历史或继续发消息。群消息首版仅支持文字，不支持附件和单独的@提醒。
+服务群邀请链接具备加入权限，应仅提供给准备邀请的客户；内部群不能生成客户邀请。归档停止发消息及加入，保留历史。移出后不能读取历史或继续发消息。群消息支持文字和通过商城业务后端发送的商品、订单卡片；群内暂不支持附件和单独的@提醒。
 
 页面文件位于 apps/agent_console/web/groups.html，发布时同时复制到静态资源根目录，以供 /groups.html 使用。
 

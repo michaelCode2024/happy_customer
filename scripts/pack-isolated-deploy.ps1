@@ -23,7 +23,8 @@ $includes = @(
   'cmd', 'internal', 'go.mod', 'go.sum', 'Dockerfile', '.dockerignore',
   'deploy/isolated',
   'packages/widget/dist',
-  'apps/agent_console/build/web'
+  'apps/agent_console/build/web',
+  'apps/website'
 )
 
 Push-Location $root

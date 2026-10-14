@@ -27,6 +27,9 @@ COPY packages/widget/dist/widget.js /static/widget.js
 
 # 整包拷贝 Flutter Web：除 html 外还要有 main.dart.js / flutter.js 等，缺一不可
 COPY apps/agent_console/build/web/ /static/console/
+# 群邀请和消息列表使用根路径资源，发布时必须同步携带，避免独立群页404。
+COPY apps/agent_console/build/web/groups.html apps/agent_console/build/web/group-interactions.js apps/agent_console/build/web/group-conference.js /static/
+COPY apps/website/ /static/website/
 
 ENV STATIC_DIR=/static
 WORKDIR /data

@@ -5,7 +5,7 @@ import 'package:relaydesk_agent_console/src/ui/workspace_layout.dart';
 
 /// 套餐对比与营销卖点，对齐现有 TRIAL / STARTER / GROWTH / ENTERPRISE。
 ///
-/// 价格为展示用参考价，真正开通仍走「企业管理 → 开通企业」。
+/// 年费与对外报价一致；企业开通和服务期限仍由平台管理员确认。
 class PlatformPlansPage extends StatelessWidget {
   const PlatformPlansPage({super.key, required this.controller});
 
@@ -36,9 +36,9 @@ class PlatformPlansPage extends StatelessWidget {
       code: 'STARTER',
       name: '专业版',
       badge: '中小团队',
-      price: '¥299',
-      period: '/月起',
-      seats: '3 坐席',
+      price: '¥2,000',
+      period: '/年',
+      seats: '1 坐席',
       messages: '5,000 条/月',
       history: '历史消息持续保留',
       highlight: false,
@@ -55,9 +55,9 @@ class PlatformPlansPage extends StatelessWidget {
       code: 'GROWTH',
       name: '旗舰版',
       badge: '推荐',
-      price: '¥999',
-      period: '/月起',
-      seats: '10 坐席',
+      price: '¥3,000',
+      period: '/年',
+      seats: '3 坐席',
       messages: '50,000 条/月',
       history: '历史消息持续保留',
       highlight: true,
@@ -73,10 +73,10 @@ class PlatformPlansPage extends StatelessWidget {
     _PlanOffer(
       code: 'ENTERPRISE',
       name: '企业版',
-      badge: '能力最强',
-      price: '¥2,999',
-      period: '/月起',
-      seats: '100 坐席',
+      badge: '顶配',
+      price: '¥5,000',
+      period: '/年',
+      seats: '10 坐席',
       messages: '1,000,000 条/月',
       history: '历史消息持续保留',
       highlight: false,
@@ -109,6 +109,7 @@ class PlatformPlansPage extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
+        const Text('人民币计价，付费套餐按年订阅，服务周期12个月。消息和AI用量按月统计。'),
         const Card(
             child: Padding(
           padding: EdgeInsets.all(18),
@@ -190,7 +191,7 @@ class PlatformPlansPage extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(
-          '已读回执、AI 辅助、自动回复等能力随套餐开放；体验版用于验证接入，生产接待建议专业版及以上。',
+          '送达和已读回执为基础消息能力。AI辅助、自动回复和身份接入按套餐配置开放；体验版免费14天。',
           style: theme.textTheme.bodySmall?.copyWith(
             color: scheme.onSurfaceVariant,
           ),

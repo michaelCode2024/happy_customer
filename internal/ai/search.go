@@ -87,9 +87,9 @@ func (s *Service) search(ctx context.Context, tenantID uuid.UUID, question strin
 		       (m.matched_idf / greatest(mass.total_idf, 1e-9))::float8 as score
 		  from matched m
 		  cross join mass
-		 where m.matched_idf > 0
+		 where m.matched_idf > 0 or not $3
 		 order by score desc, m.title
-		 limit 5`, tenantID, question)
+		 limit 5`, tenantID, question, countHits)
 	if err != nil {
 		return nil, fmt.Errorf("knowledge retrieval: %w", err)
 	}

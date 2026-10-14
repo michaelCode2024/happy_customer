@@ -124,6 +124,7 @@ func (a *API) widgetBootstrap(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, err.Error())
 		return
 	}
+	var parentIdentity auth.Principal
 	if in.IdentityToken != "" {
 		identity, verifyErr := a.tokens.Verify(in.IdentityToken)
 		if verifyErr != nil || identity.Kind != auth.KindIdentity || identity.TenantID != inbox.TenantID || identity.InboxID != inbox.ID || identity.ExternalID == "" {
@@ -133,6 +134,11 @@ func (a *API) widgetBootstrap(w http.ResponseWriter, r *http.Request) {
 		// 登录身份只信任客户后端签发的票据，不能被前端 externalId 覆盖。
 		in.ExternalID = identity.ExternalID
 		in.DisplayName = identity.Name
+		if identity.MarketplaceID != uuid.Nil && !a.marketplaceBuyerValid(r.Context(), identity) {
+			fail(w, 401, "商城身份已失效")
+			return
+		}
+		parentIdentity = identity
 	} else if strings.TrimSpace(in.ExternalID) != "" {
 		failCode(w, 401, "IDENTITY_TOKEN_REQUIRED", "接入登录用户须由业务服务端签发 identityToken；匿名咨询请勿传 externalId")
 		return
@@ -193,7 +199,7 @@ func (a *API) widgetBootstrap(w http.ResponseWriter, r *http.Request) {
 			Data: map[string]any{"visitorId": visitorID, "inboxId": inbox.ID, "displayName": in.DisplayName},
 		})
 	}
-	token, err := a.tokens.IssueWidget(inbox.TenantID, inbox.ID, visitorID)
+	token, err := a.tokens.IssueWidgetFromIdentity(parentIdentity, inbox.TenantID, inbox.ID, visitorID)
 	if err != nil {
 		fail(w, 500, "签发令牌失败")
 		return
@@ -309,13 +315,18 @@ func (a *API) listConversations(w http.ResponseWriter, r *http.Request, p auth.P
 	var online int
 	var aiEnabled bool
 	var welcome, offline string
+	var css, logo, avatar, font string
+	var radius int
 	if err := a.db.QueryRow(r.Context(), `select coalesce(i.welcome_message,''), coalesce(i.offline_message,''), coalesce(s.enabled,false),
 	 (select count(*)::int from agent_presence ap join agent ag on ag.id=ap.agent_id join agent_inbox ai on ai.agent_id=ag.id where ai.inbox_id=i.id and ag.status='ACTIVE' and ap.status='ONLINE')
-	 from inbox i left join ai_setting s on s.inbox_id=i.id where i.id=$1 and i.tenant_id=$2 and i.status='ACTIVE'`, p.InboxID, p.TenantID).Scan(&welcome, &offline, &aiEnabled, &online); err != nil {
+	 ,coalesce(i.custom_css,''),coalesce(i.logo_url,''),coalesce(i.avatar_url,''),coalesce(i.font_family,''),coalesce(i.bubble_radius,12)
+	 from inbox i left join ai_setting s on s.inbox_id=i.id where i.id=$1 and i.tenant_id=$2 and i.status='ACTIVE'`, p.InboxID, p.TenantID).Scan(&welcome, &offline, &aiEnabled, &online, &css, &logo, &avatar, &font, &radius); err != nil {
 		fail(w, 404, "客服入口已停用")
 		return
 	}
-	respond(w, 200, map[string]any{"items": items, "agentsOnline": online, "aiEnabled": aiEnabled && a.tenantHasFeature(r.Context(), p.TenantID, "ai") && a.ai.Available() && a.cfg.AI.AutoReplyEnabled, "welcomeMessage": welcome, "offlineMessage": offline, "automation": a.publicAutomation(r.Context(), p.InboxID)})
+	// 恢复匿名历史及长连接重连时仍读取最新渠道皮肤，不能只在首次bootstrap应用。
+	respond(w, 200, map[string]any{"items": items, "agentsOnline": online, "aiEnabled": aiEnabled && a.tenantHasFeature(r.Context(), p.TenantID, "ai") && a.ai.Available() && a.cfg.AI.AutoReplyEnabled, "welcomeMessage": welcome, "offlineMessage": offline, "automation": a.publicAutomation(r.Context(), p.InboxID),
+		"inbox": map[string]any{"customCss": css, "logoUrl": logo, "avatarUrl": avatar, "fontFamily": font, "bubbleRadius": radius}})
 }
 
 func (a *API) getConversation(w http.ResponseWriter, r *http.Request, p auth.Principal) {

@@ -21,6 +21,8 @@ export interface RelayDeskWidgetOptions {
   /** Header text of the panel and the title of the launcher. */
   title?: string;
   subtitle?: string;
+  /** 消息列表打开指定历史会话，身份与可见范围仍由服务端验证。 */
+  conversationId?: string;
   welcomeMessage?: string;
   offlineMessage?: string;
   placeholder?: string;

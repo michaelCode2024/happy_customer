@@ -77,12 +77,16 @@ func (a *API) guardSocket(ctx context.Context, s *realtime.Subscriber, p auth.Pr
 			case <-s.Done():
 				return
 			case <-ticker.C:
-				valid := a.tenantActive(ctx, p.TenantID)
+				valid := a.tenantActive(ctx, p.TenantID) && (p.ExpiresAt == 0 || time.Now().Unix() < p.ExpiresAt)
 				if p.Kind == auth.KindAgent {
 					current, ok := a.currentAgent(ctx, p)
 					valid = valid && ok && current.Role == p.Role && a.authn.SessionValid(ctx, p.SessionID, p.AgentID)
 				}
 				if p.Kind == auth.KindWidget {
+					valid = valid && a.marketplaceVisitorActive(ctx, p)
+					if p.MarketplaceID != uuid.Nil {
+						valid = valid && a.marketplaceBuyerValid(ctx, p)
+					}
 					var active bool
 					err := a.db.QueryRow(ctx, `select exists(select 1 from inbox where id=$1 and tenant_id=$2 and status='ACTIVE')`, p.InboxID, p.TenantID).Scan(&active)
 					valid = valid && err == nil && active

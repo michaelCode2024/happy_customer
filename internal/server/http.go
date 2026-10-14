@@ -173,6 +173,10 @@ func (a *API) requireWidget(next func(http.ResponseWriter, *http.Request, auth.P
 			failCode(w, 403, "TENANT_SUSPENDED", "企业已停用")
 			return
 		}
+		if principal.MarketplaceID != uuid.Nil && !a.marketplaceBuyerValid(r.Context(), principal) {
+			fail(w, 401, "商城登录已失效")
+			return
+		}
 		var enabled bool
 		if a.db.QueryRow(r.Context(), `select exists(select 1 from visitor v join inbox i on i.id=v.inbox_id where v.id=$1 and v.tenant_id=$2 and i.status='ACTIVE')`, principal.VisitorID, principal.TenantID).Scan(&enabled) != nil || !enabled {
 			failCode(w, 403, "INBOX_DISABLED", "客服入口已停用")

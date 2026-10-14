@@ -1,10 +1,12 @@
 package server
 
 import (
+	"encoding/hex"
 	"net"
 	"net/http"
 	"strings"
 
+	"github.com/relaydesk/relaydesk/internal/auth"
 	"github.com/relaydesk/relaydesk/internal/ratelimit"
 )
 
@@ -23,6 +25,9 @@ func (a *API) limit(limiter *ratelimit.Limiter, next http.HandlerFunc) http.Hand
 }
 
 func rateKey(r *http.Request) string {
+	if key := r.Header.Get("X-RelayDesk-Marketplace-Key"); key != "" {
+		return "marketplace:" + hex.EncodeToString(auth.HashToken(key))
+	}
 	if token := bearer(r); token != "" {
 		return "t:" + token
 	}

@@ -40,7 +40,13 @@ extension QueueFilterLabel on QueueFilter {
 /// That is what makes a dropped connection a non-event rather than a data-loss
 /// bug.
 class WorkbenchController extends ChangeNotifier {
-  WorkbenchController({required this.api, this.selfId = ''});
+  WorkbenchController({required this.api, this.selfId = '', this.visitorAlert});
+
+  final void Function(String messageId, String senderName)? visitorAlert;
+  final DateTime _alertsSince = DateTime.now();
+  final Map<String, int> _notificationSequences = {};
+  final Set<String> _checkingNotifications = {};
+  int _syncTick = 0;
 
   final RelayDeskApi api;
 
@@ -181,6 +187,15 @@ class WorkbenchController extends ChangeNotifier {
 
   String? get threadError => _threadError;
 
+  /// 关闭会话内错误横幅；不自动消失，避免客服错过接单失败等原因。
+  void clearThreadError() {
+    if (_threadError == null) {
+      return;
+    }
+    _threadError = null;
+    _notify();
+  }
+
   /// The quoted message the composer is answering, if any.
   ChatMessage? get replyTo => _replyTo;
 
@@ -274,7 +289,9 @@ class WorkbenchController extends ChangeNotifier {
     });
     _reconnectSubscription = socket.reconnects.listen((_) => _resync());
     socket.connect();
-    _syncTimer ??= Timer.periodic(const Duration(seconds: 15), (_) {
+    _syncTimer ??= Timer.periodic(const Duration(seconds: 3), (_) {
+      // 正常推送时仍15秒兜底；断线时3秒补拉，减少等重连期间的漏看。
+      if (_socketState == SocketState.open && ++_syncTick % 5 != 0) return;
       if (!_closed && !_loadingList && !_loadingThread) _resync();
     });
   }
@@ -315,11 +332,14 @@ class WorkbenchController extends ChangeNotifier {
     }
     if (event.type == 'message.created') {
       if (event.data['senderType'] == 'VISITOR' &&
-          event.data['private'] != true &&
-          _alertedMessages.add(event.data['id'].toString())) {
-        messageAlert(event.data['id'].toString(), '');
-        if (_alertedMessages.length > 500)
-          _alertedMessages.remove(_alertedMessages.first);
+          event.data['private'] != true) {
+        var senderName = asString(event.data['senderName']);
+        if (senderName.trim().isEmpty) {
+          final matches =
+              _conversations.where((c) => c.id == event.conversationId);
+          if (matches.isNotEmpty) senderName = matches.first.visitorName;
+        }
+        _alertVisitor(event.data['id'].toString(), senderName);
       }
       _applyIncomingMessage(event);
     }
@@ -583,6 +603,18 @@ class WorkbenchController extends ChangeNotifier {
       if (generation != _listGeneration) {
         return;
       }
+      for (final row in page.items) {
+        final previous = _notificationSequences[row.id];
+        // 首次打开只建基线；新会话只提醒本次工作台打开后到达的消息。
+        if (silent &&
+            row.lastSequence > (previous ?? 0) &&
+            (previous != null ||
+                (row.lastMessageAt?.isAfter(_alertsSince) ?? false))) {
+          unawaited(_checkMissedAlerts(row, previous ?? 0));
+        } else {
+          _notificationSequences[row.id] = row.lastSequence;
+        }
+      }
       _conversations = page.items;
       // 列表是最新状态来源：新消息自动重开会话时同步标题和操作菜单。
       final currentDetail = _detail;
@@ -620,6 +652,42 @@ class WorkbenchController extends ChangeNotifier {
         _loadingList = false;
         _notify();
       }
+    }
+  }
+
+  void _alertVisitor(String id, String senderName) {
+    if (id.isEmpty || !_alertedMessages.add(id)) return;
+    if (visitorAlert != null) {
+      visitorAlert!(id, senderName);
+    } else {
+      messageAlert(id, '', senderName: senderName);
+    }
+    if (_alertedMessages.length > 500) {
+      _alertedMessages.remove(_alertedMessages.first);
+    }
+  }
+
+  Future<void> _checkMissedAlerts(Conversation row, int after) async {
+    if (!_checkingNotifications.add(row.id)) return;
+    try {
+      final page =
+          await api.messages(row.id, after: after, limit: 200, selfId: selfId);
+      if (_closed) return;
+      for (final message in page.items) {
+        if (message.isFromVisitor && !message.isPrivate && !message.isDeleted) {
+          _alertVisitor(
+              message.id,
+              message.senderName.isEmpty
+                  ? row.visitorName
+                  : message.senderName);
+        }
+      }
+      // 未返回的页不能跳过，接口失败也不推进游标，下一次继续补拉。
+      _notificationSequences[row.id] = math.max(after, page.lastSequence);
+    } on ApiException {
+      // 保留原游标等待下一次补拉。
+    } finally {
+      _checkingNotifications.remove(row.id);
     }
   }
 
@@ -909,10 +977,15 @@ class WorkbenchController extends ChangeNotifier {
     Map<String, dynamic>? metadata,
     QuotedMessage? quote,
   }) async {
-    if (!private && selected?.needsAcceptance == true) {
-      _threadError = '请先点击“确认接单”，再回复客户';
-      _notify();
-      return false;
+    // 未接待、他人会话等禁止公开回复；内部备注仍可写。原因写进 threadError 供横幅展示。
+    final pending = selected;
+    if (!private && pending != null) {
+      final block = pending.publicReplyBlockReason(selfId);
+      if (block != null) {
+        _threadError = block;
+        _notify();
+        return false;
+      }
     }
     final id = _selectedId;
     if (id == null) {

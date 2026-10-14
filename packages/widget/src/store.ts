@@ -207,6 +207,7 @@ export class ChatStore {
         // falls through to a fresh bootstrap.
         try {
           const live = await this.#api.listConversations();
+          if (live.inbox) this.#applyServerWhiteLabel(live.inbox);
           const activeId = this.#pickActive(live.items ?? []);
           this.#patch({
             status: 'READY',
@@ -299,10 +300,11 @@ export class ChatStore {
     if (inbox.avatarUrl) wl.avatarUrl = inbox.avatarUrl;
     if (inbox.fontFamily) wl.fontFamily = inbox.fontFamily;
     if (typeof inbox.bubbleRadius === 'number') wl.bubbleRadius = inbox.bubbleRadius;
-    if (inbox.customCss) wl.customCss = inbox.customCss;
+    if ('customCss' in inbox) wl.customCss = inbox.customCss || '';
     if (Object.keys(wl).length === 0) {
       return;
     }
+    if (Object.entries(wl).every(([key,value]) => this.#options[key as keyof ResolvedOptions] === value)) return;
     Object.assign(this.#options, wl);
     this.onWhiteLabel?.(wl);
   }
@@ -961,6 +963,7 @@ export class ChatStore {
     }
     try {
       const conversations = await this.#api.listConversations();
+      if (conversations.inbox) this.#applyServerWhiteLabel(conversations.inbox);
       this.#patch({ conversations: conversations.items ?? [],
         unread: (conversations.items ?? []).reduce((total, item) => total + (item.visitorUnread ?? 0), 0),
         agentsOnline: conversations.agentsOnline ?? this.#state.agentsOnline,
@@ -1226,6 +1229,9 @@ export class ChatStore {
   }
 
   #pickActive(conversations: Conversation[]): string | undefined {
+    if (this.#options.conversationId) {
+      return conversations.find(item => item.id === this.#options.conversationId)?.id;
+    }
     const open = conversations.find((item) => item.status !== 'RESOLVED');
     return (open ?? conversations[0])?.id;
   }

@@ -114,6 +114,7 @@ func (a *API) Handler() http.Handler {
 	a.registerAdmin(mux)
 	a.registerPlatform(mux)
 	a.registerOpen(mux)
+	a.registerMarketplace(mux)
 	a.registerUploads(mux)
 	a.registerGroups(mux)
 	return chain(mux, a.logger, a.cfg.AllowedOrigins, a.bodyLimit, a.metrics)

@@ -18,18 +18,18 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="语聊工作台与平台运营后台">
+  <meta name="description" content="通语工作台与平台运营后台">
 
   <!-- iOS meta tags & icons -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="语聊客服">
+  <meta name="apple-mobile-web-app-title" content="通语客服">
 
 
   <!-- Favicon -->
   <link rel="icon" type="image/svg+xml" href="favicon.svg"/>
 
-  <title>语聊客服</title>
+  <title>通语客服</title>
   <link rel="manifest" href="manifest.json">
   <!-- HTML 渲染器下由浏览器绘制中文；避免缺字变成方框 -->
   <style>
@@ -42,13 +42,30 @@
   </style>
 </head>
 <body>
+  <!-- 主脚本下载期间给出明确反馈，首帧绘制后移除。 -->
+  <div id="relaydesk-loading" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#f7f9fc;color:#425466;font:16px sans-serif;z-index:99999">
+    <div style="text-align:center">正在加载客服工作台，请稍候…<div style="font-size:13px;margin-top:12px">首次打开需要下载页面资源</div></div>
+  </div>
   <script>
-    // Flutter 离线缓存可能锁住旧的引导文件，导致拿不到新版 worker 的版本号。
-    // 引导文件每次从网络检查，业务资源仍由新版 worker 按内容哈希缓存。
+    window.addEventListener('flutter-first-frame', function () {
+      document.getElementById('relaydesk-loading')?.remove();
+    });
+  </script>
+  <script>
+    // 固定引导地址交由HTTP条件请求检查更新，主脚本仍按编译版本缓存。
+    // 下载失败必须提供重试，不能让用户一直停留在加载占位页。
+    window.relaydeskLoadingFailed = function () {
+      const loading = document.getElementById('relaydesk-loading');
+      if (!loading) return;
+      loading.innerHTML = '<div style="text-align:center">页面资源加载失败或超时<div style="font-size:13px;margin-top:12px">请检查网络后重试</div><button id="relaydesk-load-retry" style="margin-top:18px;padding:10px 24px;border:0;border-radius:8px;background:#4263eb;color:white;cursor:pointer">重新加载</button></div>';
+      document.getElementById('relaydesk-load-retry').onclick = function () { location.reload(); };
+    };
     const bootstrap = document.createElement('script');
-    bootstrap.src = 'flutter_bootstrap.js?release=' + Date.now();
+    bootstrap.src = 'flutter_bootstrap.js';
     bootstrap.async = true;
+    bootstrap.onerror = window.relaydeskLoadingFailed;
     document.body.appendChild(bootstrap);
+    setTimeout(window.relaydeskLoadingFailed, 45000);
   </script>
 </body>
 </html>
