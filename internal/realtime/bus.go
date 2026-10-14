@@ -103,15 +103,46 @@ func (b *Bus) Publish(ctx context.Context, channels []string, event Event) {
 	}
 	b.hub.Deliver(channels, payload)
 
-	message := envelope{Source: b.instanceID, Channels: channels, Event: payload}
-	encoded, err := json.Marshal(message)
-	if err != nil || len(encoded) > maxNotifyPayload+2000 {
-		return
+	// 大群的收件人列表也会超过NOTIFY限制；按完整信封大小切分，保留groupId等事件数据。
+	for _, encoded := range notifyEnvelopes(b.instanceID, channels, payload) {
+		if _, err := b.pool.Exec(ctx, "select pg_notify($1, $2)", notifyChannel, string(encoded)); err != nil {
+			b.logger.Warn("event bus publish failed", "error", err, "type", event.Type)
+		}
 	}
-	// The publish must not fail the request: local clients already received it.
-	if _, err := b.pool.Exec(ctx, "select pg_notify($1, $2)", notifyChannel, string(encoded)); err != nil {
-		b.logger.Warn("event bus publish failed", "error", err, "type", event.Type)
+}
+
+func notifyEnvelopes(source string, channels []string, event json.RawMessage) [][]byte {
+	var result [][]byte
+	base, _ := json.Marshal(envelope{Source: source, Channels: []string{}, Event: event})
+	batch := []string{}
+	size := len(base)
+	flush := func() {
+		if len(batch) > 0 {
+			raw, _ := json.Marshal(envelope{Source: source, Channels: batch, Event: event})
+			result = append(result, raw)
+			batch = nil
+			size = len(base)
+		}
 	}
+	for _, channel := range channels {
+		encoded, _ := json.Marshal(channel)
+		extra := len(encoded)
+		if len(batch) > 0 {
+			extra++
+		}
+		if size+extra > 7900 {
+			flush()
+			extra = len(encoded)
+		}
+		// Channel IDs are server generated and short; reject a malformed oversized ID.
+		if size+extra > 7900 {
+			continue
+		}
+		batch = append(batch, channel)
+		size += extra
+	}
+	flush()
+	return result
 }
 
 func (b *Bus) InstanceID() string { return b.instanceID }

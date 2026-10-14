@@ -51,7 +51,7 @@ async function refresh(older = false) {
   if (!token) return;
   const generation = ++refreshGeneration, q = el('search').value.trim();
   const [list, result] = await Promise.all([
-    api('GET', path('')),
+    api('GET', path('?includeMembers=false')),
     api('GET', path('/messages?q=' + encodeURIComponent(q) + (older && items.length ? '&before=' + Math.min(...items.map(m => m.sequence)) : '')))
   ]);
   if (generation !== refreshGeneration) return;
@@ -59,8 +59,9 @@ async function refresh(older = false) {
   if (!group) { stopMedia(); throw new Error('你已退出或被移出此群'); }
   el('title').textContent = group.name;
   el('announcement').textContent = '群公告：' + group.announcement; el('announcement').hidden = !group.announcement;
-  el('closed').hidden = !group.archived; el('closed').textContent = group.dissolved ? '群已解散，历史消息保留。' : '群已归档，仅可查看历史。';
-  el('draft').disabled = group.archived; el('send').disabled = group.archived || sending; el('callButton').disabled = group.archived;
+  const closed = group.archived || group.dissolved;
+  el('closed').hidden = !closed && group.canSend !== false; el('closed').textContent = group.dissolved ? '群已解散，历史消息保留。' : group.archived ? '群已归档，仅可查看历史。' : '当前群仅群主和管理员可发言，你仍可查看消息。';
+  el('draft').disabled = closed || group.canSend === false; el('send').disabled = closed || group.canSend === false || sending; el('callButton').disabled = closed;
   if (group.archived && call) await finishCall('群已归档或解散');
   const page = result.items.reverse();
   items = older ? [...new Map([...page, ...items].map(m => [m.id, m])).values()].sort((a,b) => a.sequence - b.sequence) : page;
@@ -104,11 +105,11 @@ async function openWithIdentity() {
   } catch(e) { el('join').hidden = !ticket; error(e); } finally { el('loading').hidden = true; }
 }
 el('send').onclick = async () => {
-  const content = el('draft').value.trim(); if (!content || sending || group?.archived) return;
+  const content = el('draft').value.trim(); if (!content || sending || group?.archived || group?.dissolved || group?.canSend === false) return;
   sending = true; el('send').disabled = true; el('error').hidden = true;
   if (!pending || pending.content !== content) pending = {content, clientId: crypto.randomUUID()};
   try { await api('POST', path('/messages'), pending); pending = null; el('draft').value = ''; await refresh(); el('messages').scrollTop = el('messages').scrollHeight; }
-  catch(e) { error(e); } finally { sending = false; el('send').disabled = !!group?.archived; }
+  catch(e) { error(e); } finally { sending = false; el('send').disabled = !!group?.archived || !!group?.dissolved || group?.canSend === false; }
 };
 el('search').oninput = () => { ++refreshGeneration; clearTimeout(searchTimer); searchTimer = setTimeout(() => refresh().catch(error), 300); };
 el('search').onkeydown = e => { if (e.key === 'Enter') { clearTimeout(searchTimer); refresh().catch(error); } };
@@ -118,13 +119,20 @@ async function members(forCall = false) {
   for (const m of data.members) {
     const row = document.createElement('div'); row.className = 'member';
     const label = document.createElement('span'); label.textContent = m.name;
-    const role = document.createElement('small'); role.textContent = (m.kind === 'widget' ? '客户' : '客服') + (m.id === actorId && m.kind === actorKind ? ' · 我' : ''); label.append(role); row.append(label);
+    const role = document.createElement('small'); role.textContent = (m.id === group.ownerId && m.kind === group.ownerKind ? '群主' : m.isManager ? '管理员' : m.kind === 'widget' ? '成员' : '客服') + (m.id === actorId && m.kind === actorKind ? ' · 我' : ''); label.append(role); row.append(label);
     if (!group.archived && !(m.id === actorId && m.kind === actorKind)) {
       const button = document.createElement('button'); button.textContent = '语音通话';
       button.onclick = () => { el('members').close(); initiate(m).catch(error); }; row.append(button);
     }
     const isOwner = actorKind === (group.ownerKind || 'agent') && group.ownerId === actorId;
     if (!forCall && !group.archived && isOwner && !(m.id === actorId && m.kind === actorKind)) {
+      const manager = document.createElement('button'); manager.textContent = m.isManager ? '撤销管理员' : '设为管理员';
+      manager.onclick = async () => {
+        if (!confirm((m.isManager ? '撤销' : '授予') + m.name + '的管理员权限？管理员可发言和生成邀请。')) return;
+        manager.disabled = true;
+        try { await api('PUT', path('/manager'), {kind:m.kind,id:m.id,isManager:!m.isManager}); el('members').close(); await refresh(); }
+        catch(e) { error(e); } finally { manager.disabled = false; }
+      }; row.append(manager);
       const remove = document.createElement('button'); remove.textContent = '移除'; remove.className = 'danger';
       remove.onclick = async () => {
         if (!confirm('将' + m.name + '移出群聊？移除后不能继续访问此群。')) return;
@@ -165,12 +173,33 @@ el('leave').onclick = async () => {
 el('settings').onclick = async () => {
   try {
     const data = await api('GET', path('')); const me = data.members.find(m => m.kind === actorKind && m.id === actorId);
+    group = data.group;
+    const owner = actorKind === (group.ownerKind || 'agent') && group.ownerId === actorId;
+    el('groupRules').hidden = !owner || group.archived || group.dissolved;
+    el('speakingMode').value = group.speakingMode || 'ALL'; el('maxMembers').value = group.maxMembers || 100;
+    el('requireIdentity').checked = !!group.requireIdentity;
+    el('inviteSection').hidden = !group.canInvite || group.archived || group.dissolved;
+    el('inviteResult').textContent = '';
     el('nickname').value = me?.name || ''; el('dialogError').textContent = '';
     el('saveNickname').disabled = group.dissolved; el('dissolve').hidden = actorKind !== (group.ownerKind || 'agent') || group.ownerId !== actorId || group.dissolved;
     el('preferences').showModal();
   } catch(e) { error(e); }
 };
 el('closeSettings').onclick = () => el('preferences').close();
+el('saveGroupRules').onclick = async () => {
+  const capacity = Number(el('maxMembers').value);
+  if (!Number.isInteger(capacity) || capacity < 2 || capacity > 5000) { el('dialogError').textContent = '群人数上限需为2至5000的整数'; return; }
+  el('saveGroupRules').disabled = true;
+  try { await api('PATCH', path('/policy'), {speakingMode:el('speakingMode').value,maxMembers:capacity,requireIdentity:el('requireIdentity').checked}); el('preferences').close(); await refresh(); }
+  catch(e) { el('dialogError').textContent = e.message; }
+  finally { el('saveGroupRules').disabled = false; }
+};
+el('createInvite').onclick = async () => {
+  el('createInvite').disabled = true;
+  try { const result = await api('POST', path('/invite'), {}); el('inviteResult').textContent = '24小时有效；新邀请会撤销旧邀请。' + result.url; }
+  catch(e) { el('dialogError').textContent = e.message; }
+  finally { el('createInvite').disabled = false; }
+};
 el('saveNickname').onclick = async () => {
   el('saveNickname').disabled = true;
   try { await api('PATCH', path('/me'), {name: el('nickname').value.trim()}); el('preferences').close(); await refresh(); }

@@ -12,6 +12,9 @@ import (
 
 // 宿主用自己的用户 ID（externalId）往服务群加人，不在聊桥镜像整库用户。
 func (a *API) registerOpenGroups(mux *http.ServeMux) {
+	mux.HandleFunc("PATCH /api/v1/open/groups/{id}/policy", a.requireAPIKey("write", a.openGroupPolicy))
+	mux.HandleFunc("PUT /api/v1/open/groups/{id}/manager", a.requireAPIKey("write", a.openGroupManager))
+	mux.HandleFunc("POST /api/v1/open/groups/{id}/invite", a.requireAPIKey("write", a.openGroupInvite))
 	mux.HandleFunc("POST /api/v1/open/groups", a.requireAPIKey("write", a.openGroupCreate))
 	mux.HandleFunc("GET /api/v1/open/groups", a.requireAPIKey("read", a.openGroupList))
 	mux.HandleFunc("GET /api/v1/open/groups/{id}", a.requireAPIKey("read", a.openGroupDetail))
@@ -61,10 +64,11 @@ func (a *API) openGroupAddMembers(w http.ResponseWriter, r *http.Request, p apiK
 	var inbox *uuid.UUID
 	var kind string
 	var closed bool
+	var capacity int
 	err = tx.QueryRow(r.Context(), `
-		select g.tenant_id, g.inbox_id, g.kind, (g.archived or g.dissolved_at is not null)
+		select g.tenant_id, g.inbox_id, g.kind, (g.archived or g.dissolved_at is not null),g.max_members
 		  from chat_group g
-		 where g.id=$1 for update`, gid).Scan(&tenant, &inbox, &kind, &closed)
+		 where g.id=$1 for update`, gid).Scan(&tenant, &inbox, &kind, &closed, &capacity)
 	if err != nil || tenant != p.TenantID {
 		fail(w, 404, "群不存在或不属于当前企业")
 		return
@@ -148,7 +152,7 @@ func (a *API) openGroupAddMembers(w http.ResponseWriter, r *http.Request, p apiK
 			already = append(already, row)
 			continue
 		}
-		if memberCount >= 100 {
+		if memberCount >= capacity {
 			skipped = append(skipped, map[string]any{"externalId": externalID, "reason": "群成员已达到上限"})
 			continue
 		}

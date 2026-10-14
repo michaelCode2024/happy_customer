@@ -49,7 +49,7 @@ Content-Type: application/json
 }
 ```
 
-- 每次 1～50 人；群总人数上限 100。
+- 每次 1～50 人；按群的maxMembers限制，旧群默认100人、新建外部群默认2000人，群主可设置2至5000人。具体规则见[第三方群聊接入](第三方群聊接入.md)。
 - 响应：`added` / `alreadyMembers` / `skipped`（含 `reason`）。重复 `externalId` 幂等，已是成员时更新群昵称。
 - 不创建对方用户库镜像；只存「此入口下的 visitor + 群成员」映射。
 

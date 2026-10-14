@@ -24,6 +24,23 @@ function setup(getUserMedia) {
   return {context,elements,element,timers,run:code=>vm.runInContext(code,context)};
 }
 
+test('公告模式下普通成员不能点击发送，保留草稿',async()=>{
+ const env=setup();
+ env.run(`group={canSend:false};el('draft').value='买家消息';api=async()=>{throw new Error('不应调用发送接口')}`);
+ await env.element('send').onclick();
+ assert.equal(env.element('draft').value,'买家消息');
+ assert.equal(env.run('sending'),false);
+});
+
+test('非法福利群容量不发起请求，并保留设置',async()=>{
+ const env=setup();
+ env.element('maxMembers').value='5001';
+ env.run(`api=async()=>{throw new Error('不应调用设置接口')}`);
+ await env.element('saveGroupRules').onclick();
+ assert.match(env.element('dialogError').textContent,/2至5000/);
+ assert.equal(env.element('maxMembers').value,'5001');
+});
+
 test('取消麦克风请求后，延迟返回的音轨必须停止',async()=>{
   let resolve, stopped=0;
   const env=setup(()=>new Promise(r=>resolve=r));

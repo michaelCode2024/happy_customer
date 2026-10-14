@@ -17,6 +17,8 @@
 | POST | /api/v1/groups/{id}/members | 群主添加同企业账号，agentId |
 | DELETE | /api/v1/groups/{id}/members/{kind}/{actor} | 群主移除成员或成员退出，群主不能直接退出 |
 | POST | /api/v1/groups/{id}/invite | 群主生成服务群邀请，24小时有效，撤销旧邀请 |
+| PATCH | /api/v1/groups/{id}/policy | 群主设置speakingMode（ALL/MANAGERS）、maxMembers（2至5000）、requireIdentity |
+| PUT | /api/v1/groups/{id}/manager | 群主设置现有成员管理员：kind、id、isManager；管理员可发言及生成邀请 |
 | POST | /api/v1/group-join/{ticket} | 客户加入：匿名传 `name`；登录客户可传 `identityToken`（可选 `name`），与一对一复用同一 visitor |
 | POST | /api/v1/groups/session | 已入群登录客户用 `identityToken` + `groupId` 换群聊 token，无需邀请链 |
 | GET | /ws/groups?token=... | 实时 group.updated 事件，客户端据 groupId 增量获取状态 |

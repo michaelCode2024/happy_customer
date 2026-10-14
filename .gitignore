@@ -43,7 +43,7 @@ pubspec.lock
 # Locally built binaries (the image build produces these outside Docker)
 .relaydesk-server
 .relaydesk-entrypoint
-server
+/server
 server.exe
 server-linux
 server-linux-next

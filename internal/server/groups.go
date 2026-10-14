@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/relaydesk/relaydesk/internal/auth"
 	"github.com/relaydesk/relaydesk/internal/realtime"
 	"net/http"
@@ -57,7 +58,9 @@ func (a *API) registerGroups(m *http.ServeMux) {
 	m.HandleFunc("POST /api/v1/groups/{id}/read", a.groupAuth(a.groupRead))
 	m.HandleFunc("POST /api/v1/groups/{id}/members", a.requireAgent(a.groupAdd))
 	m.HandleFunc("DELETE /api/v1/groups/{id}/members/{kind}/{actor}", a.groupAuth(a.groupRemove))
-	m.HandleFunc("POST /api/v1/groups/{id}/invite", a.requireAgent(a.groupInvite))
+	m.HandleFunc("POST /api/v1/groups/{id}/invite", a.groupAuth(a.groupInvite))
+	m.HandleFunc("PATCH /api/v1/groups/{id}/policy", a.groupAuth(a.groupPolicy))
+	m.HandleFunc("PUT /api/v1/groups/{id}/manager", a.groupAuth(a.groupManager))
 	m.HandleFunc("POST /api/v1/group-join/{ticket}", a.limit(a.widgetRate, a.groupJoin))
 	// 已入群的登录客户用 identityToken 换群聊会话，无需再走邀请链。
 	m.HandleFunc("POST /api/v1/groups/session", a.limit(a.widgetRate, a.groupSession))
@@ -165,7 +168,7 @@ func (a *API) groupDetail(w http.ResponseWriter, r *http.Request, p auth.Princip
 		fail(w, 404, "群不存在或你不是群成员")
 		return
 	}
-	rows, e := a.db.Query(r.Context(), `select actor_kind,actor_id,name,last_read from chat_group_member where group_id=$1 order by actor_kind,name`, id)
+	rows, e := a.db.Query(r.Context(), `select actor_kind,actor_id,name,last_read,is_manager from chat_group_member where group_id=$1 and ($2 or actor_kind=$3 and actor_id=$4) order by actor_kind,name,actor_id`, id, r.URL.Query().Get("includeMembers") != "false", p.Kind, groupActor(p))
 	if e != nil {
 		fail(w, 500, "读取成员失败")
 		return
@@ -176,18 +179,34 @@ func (a *API) groupDetail(w http.ResponseWriter, r *http.Request, p auth.Princip
 		var kind, name string
 		var actor uuid.UUID
 		var read int64
-		if rows.Scan(&kind, &actor, &name, &read) == nil {
-			items = append(items, map[string]any{"kind": kind, "id": actor, "name": name, "lastRead": read})
+		var manager bool
+		if rows.Scan(&kind, &actor, &name, &read, &manager) == nil {
+			items = append(items, map[string]any{"kind": kind, "id": actor, "name": name, "lastRead": read, "isManager": manager})
 		}
 	}
+	if rows.Err() != nil {
+		rows.Close()
+		fail(w, 500, "读取成员失败")
+		return
+	}
+	rows.Close()
 	var name, announcement, ownerKind string
 	var owner uuid.UUID
 	var archived, dissolved bool
-	if a.db.QueryRow(r.Context(), `select name,announcement,owner_id,owner_kind,archived,dissolved_at is not null from chat_group where id=$1`, id).Scan(&name, &announcement, &owner, &ownerKind, &archived, &dissolved) != nil {
+	var mode string
+	var capacity int
+	var requireIdentity bool
+	if a.db.QueryRow(r.Context(), `select name,announcement,owner_id,owner_kind,archived,dissolved_at is not null,speaking_mode,max_members,require_identity from chat_group where id=$1`, id).Scan(&name, &announcement, &owner, &ownerKind, &archived, &dissolved, &mode, &capacity, &requireIdentity) != nil {
 		fail(w, 500, "读取群资料失败")
 		return
 	}
-	respond(w, 200, map[string]any{"members": items, "actorId": groupActor(p), "actorKind": p.Kind, "group": map[string]any{"id": id, "name": name, "announcement": announcement, "ownerId": owner, "ownerKind": ownerKind, "archived": archived, "dissolved": dissolved}})
+	canManage := ownerKind == p.Kind && owner == groupActor(p)
+	for _, m := range items {
+		if m["kind"] == p.Kind && m["id"] == groupActor(p) && m["isManager"] == true {
+			canManage = true
+		}
+	}
+	respond(w, 200, map[string]any{"members": items, "actorId": groupActor(p), "actorKind": p.Kind, "group": map[string]any{"id": id, "name": name, "announcement": announcement, "ownerId": owner, "ownerKind": ownerKind, "archived": archived, "dissolved": dissolved, "speakingMode": mode, "maxMembers": capacity, "requireIdentity": requireIdentity, "canInvite": canManage, "canSend": !archived && !dissolved && (mode == "ALL" || canManage)}})
 }
 func (a *API) groupUpdate(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 	id, ok := a.groupAllowed(r, p, true)
@@ -296,7 +315,8 @@ func (a *API) groupSend(w http.ResponseWriter, r *http.Request, p auth.Principal
 	}
 	var seq int64
 	var archived bool
-	if e = tx.QueryRow(r.Context(), `select sequence,(archived or dissolved_at is not null) from chat_group where id=$1 for update`, id).Scan(&seq, &archived); e != nil || archived {
+	var speakingMode string
+	if e = tx.QueryRow(r.Context(), `select sequence,(archived or dissolved_at is not null),speaking_mode from chat_group where id=$1 for update`, id).Scan(&seq, &archived, &speakingMode); e != nil || archived {
 		fail(w, 409, "群已归档或解散，不能发送消息")
 		return
 	}
@@ -309,6 +329,10 @@ func (a *API) groupSend(w http.ResponseWriter, r *http.Request, p auth.Principal
 	e = tx.QueryRow(r.Context(), `select id from chat_group_message where group_id=$1 and actor_kind=$2 and actor_id=$3 and client_id=$4`, id, p.Kind, groupActor(p), in.ClientID).Scan(&existing)
 	if e == nil {
 		respond(w, 200, map[string]any{"id": existing})
+		return
+	}
+	if speakingMode == "MANAGERS" && !groupManagerLocked(r, tx, id, p.Kind, groupActor(p)) {
+		failCode(w, 403, "GROUP_MANAGERS_ONLY", "当前群仅群主和管理员可发言")
 		return
 	}
 	if e = a.checkMessageQuota(r.Context(), tx, p.TenantID); e != nil {
@@ -373,9 +397,33 @@ func (a *API) groupAdd(w http.ResponseWriter, r *http.Request, p auth.Principal)
 	if !decode(w, r, &in) {
 		return
 	}
-	tag, e := a.db.Exec(r.Context(), `insert into chat_group_member(group_id,actor_kind,actor_id,name) select $1,'agent',id,display_name from agent where id=$2 and tenant_id=$3 and status='ACTIVE' and exists(select 1 from chat_group where id=$1 and not archived and dissolved_at is null) on conflict do nothing`, id, in.AgentID, p.TenantID)
+	tx, e := a.db.Begin(r.Context())
+	if e != nil {
+		fail(w, 500, "添加成员失败")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	if !groupOwnerLocked(r, tx, id, p) {
+		fail(w, 403, "仅当前群主可添加成员")
+		return
+	}
+	var capacity, count int
+	var closed bool
+	if tx.QueryRow(r.Context(), `select max_members,archived or dissolved_at is not null,(select count(*) from chat_group_member where group_id=$1) from chat_group where id=$1`, id).Scan(&capacity, &closed, &count) != nil {
+		fail(w, 500, "读取群失败")
+		return
+	}
+	if closed || count >= capacity {
+		fail(w, 409, "群已关闭或成员达到上限")
+		return
+	}
+	tag, e := tx.Exec(r.Context(), `insert into chat_group_member(group_id,actor_kind,actor_id,name) select $1,'agent',id,display_name from agent where id=$2 and tenant_id=$3 and status='ACTIVE' and exists(select 1 from chat_group where id=$1 and not archived and dissolved_at is null) on conflict do nothing`, id, in.AgentID, p.TenantID)
 	if e != nil || tag.RowsAffected() == 0 {
 		fail(w, 400, "成员已在群中或账号不可用")
+		return
+	}
+	if tx.Commit(r.Context()) != nil {
+		fail(w, 500, "添加成员失败")
 		return
 	}
 	a.groupPublish(r.Context(), id)
@@ -427,25 +475,32 @@ func (a *API) groupRemove(w http.ResponseWriter, r *http.Request, p auth.Princip
 }
 func inviteHash(s string) string { v := sha256.Sum256([]byte(s)); return hex.EncodeToString(v[:]) }
 func (a *API) groupInvite(w http.ResponseWriter, r *http.Request, p auth.Principal) {
-	id, ok := a.groupAllowed(r, p, true)
+	id, ok := a.groupAllowed(r, p, false)
 	if !ok {
 		fail(w, 403, "仅群主可以邀请客户")
 		return
 	}
-	var kind string
-	var archived bool
-	a.db.QueryRow(r.Context(), `select kind,(archived or dissolved_at is not null) from chat_group where id=$1`, id).Scan(&kind, &archived)
-	if kind != "SERVICE" || archived {
-		fail(w, 400, "只有未归档的客户服务群可邀请客户")
-		return
-	}
-	ticket := uuid.NewString() + uuid.NewString()
 	tx, e := a.db.Begin(r.Context())
 	if e != nil {
 		fail(w, 500, "创建邀请失败")
 		return
 	}
 	defer tx.Rollback(r.Context())
+	var kind string
+	var archived bool
+	if tx.QueryRow(r.Context(), `select kind,archived or dissolved_at is not null from chat_group where id=$1 for update`, id).Scan(&kind, &archived) != nil || kind != "SERVICE" || archived {
+		fail(w, 400, "仅开放的客户服务群可邀请")
+		return
+	}
+	if !groupManagerLocked(r, tx, id, p.Kind, groupActor(p)) {
+		fail(w, 403, "仅群主或管理员可邀请")
+		return
+	}
+	a.issueGroupInvite(w, r, tx, id)
+}
+func (a *API) issueGroupInvite(w http.ResponseWriter, r *http.Request, tx pgx.Tx, id uuid.UUID) {
+	ticket := uuid.NewString() + uuid.NewString()
+	var e error
 	if _, e = tx.Exec(r.Context(), `update chat_group_invite set revoked=true where group_id=$1`, id); e != nil {
 		fail(w, 500, "撤销旧邀请失败")
 		return
@@ -458,7 +513,7 @@ func (a *API) groupInvite(w http.ResponseWriter, r *http.Request, p auth.Princip
 		fail(w, 500, "生成邀请失败")
 		return
 	}
-	respond(w, 200, map[string]any{"url": strings.TrimRight(a.cfg.PublicBaseURL, "/") + "/groups.html?invite=" + ticket, "expiresIn": 86400})
+	respond(w, 200, map[string]any{"url": strings.TrimRight(a.cfg.PublicBaseURL, "/") + "/groups.html?invite=" + ticket, "ticket": ticket, "expiresIn": 86400})
 }
 func (a *API) groupJoin(w http.ResponseWriter, r *http.Request) {
 	var in struct {
@@ -485,9 +540,15 @@ func (a *API) groupJoin(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	var id, tenant, inbox uuid.UUID
-	e = tx.QueryRow(r.Context(), `select g.id,g.tenant_id,g.inbox_id from chat_group_invite i join chat_group g on g.id=i.group_id join tenant t on t.id=g.tenant_id where i.token_hash=$1 and not i.revoked and i.expires_at>now() and g.kind='SERVICE' and not g.archived and g.dissolved_at is null and t.status in ('ACTIVE','TRIAL') for update of g`, inviteHash(r.PathValue("ticket"))).Scan(&id, &tenant, &inbox)
+	var capacity int
+	var requireIdentity bool
+	e = tx.QueryRow(r.Context(), `select g.id,g.tenant_id,g.inbox_id,g.max_members,g.require_identity from chat_group_invite i join chat_group g on g.id=i.group_id join tenant t on t.id=g.tenant_id join inbox b on b.id=g.inbox_id and b.status='ACTIVE' where i.token_hash=$1 and not i.revoked and i.expires_at>now() and g.kind='SERVICE' and not g.archived and g.dissolved_at is null and t.status in ('ACTIVE','TRIAL') for update of g`, inviteHash(r.PathValue("ticket"))).Scan(&id, &tenant, &inbox, &capacity, &requireIdentity)
 	if e != nil {
 		fail(w, 404, "邀请已过期或已撤销")
+		return
+	}
+	if requireIdentity && identityToken == "" {
+		failCode(w, 401, "IDENTITY_TOKEN_REQUIRED", "请先登录商城再加入福利群")
 		return
 	}
 	if !a.tenantHasFeature(r.Context(), tenant, "groups") {
@@ -528,7 +589,7 @@ func (a *API) groupJoin(w http.ResponseWriter, r *http.Request) {
 			status = 200
 		} else {
 			var count int
-			if tx.QueryRow(r.Context(), `select count(*) from chat_group_member where group_id=$1`, id).Scan(&count) != nil || count >= 100 {
+			if tx.QueryRow(r.Context(), `select count(*) from chat_group_member where group_id=$1`, id).Scan(&count) != nil || count >= capacity {
 				fail(w, 409, "群成员已达到上限")
 				return
 			}
@@ -539,7 +600,7 @@ func (a *API) groupJoin(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		var count int
-		if tx.QueryRow(r.Context(), `select count(*) from chat_group_member where group_id=$1`, id).Scan(&count) != nil || count >= 100 {
+		if tx.QueryRow(r.Context(), `select count(*) from chat_group_member where group_id=$1`, id).Scan(&count) != nil || count >= capacity {
 			fail(w, 409, "群成员已达到上限")
 			return
 		}
@@ -656,6 +717,11 @@ func (a *API) groupPublish(ctx context.Context, id uuid.UUID) {
 			}
 		}
 	}
+	if rows.Err() != nil {
+		rows.Close()
+		return
+	}
+	rows.Close()
 	a.publish(ctx, channels, realtime.Event{Type: "group.updated", Data: map[string]any{"groupId": id}})
 }
 func (a *API) groupSocket(w http.ResponseWriter, r *http.Request) {
