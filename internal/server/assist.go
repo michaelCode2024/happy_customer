@@ -53,6 +53,10 @@ func (a *API) consoleAssist(w http.ResponseWriter, r *http.Request, p auth.Princ
 		fail(w, 400, "不支持的助手任务")
 		return
 	}
+	if !a.ai.Available() {
+		failCode(w, 503, "AI_UNAVAILABLE", "AI 暂未配置，请联系管理员")
+		return
+	}
 	// A conversation is optional. Summarising a whole thread needs one; tone
 	// rewriting a sentence the agent typed does not.
 	var conversationID uuid.UUID
@@ -102,17 +106,27 @@ func (a *API) consoleAssist(w http.ResponseWriter, r *http.Request, p auth.Princ
 	}
 	success := false
 	defer func() { finish(success) }()
-	result, err := a.ai.AssistWithTools(ctx, request)
+	// 工作台草稿只依据会话与租户知识库；通用的订单/退货示例工具不代表该企业政策。
+	result, err := a.ai.Assist(ctx, request)
 	success = err == nil && strings.TrimSpace(result.Text) != ""
 	if err != nil {
 		a.logger.Error("assist failed", "error", err, "task", task, "tenant", p.TenantID)
 		fail(w, 502, "AI 调用失败，请稍后重试")
 		return
 	}
-	a.recordAssistUsage(ctx, p, conversationID, string(task), result)
+	if !success {
+		failCode(w, 502, "AI_EMPTY_RESPONSE", "AI 未生成有效内容，请重试")
+		return
+	}
+	interactionID, err := a.recordAssistUsage(ctx, p, conversationID, string(task), result)
+	if err != nil {
+		fail(w, 500, "保存 AI 草稿失败，请重试")
+		return
+	}
 	respond(w, 200, map[string]any{
-		"task": result.Task, "text": result.Text, "label": result.Label, "score": result.Score,
-		"sources": result.Sources, "provider": result.Provider, "usage": result.Usage,
+		"interactionId": interactionID,
+		"task":          result.Task, "text": result.Text, "label": result.Label, "score": result.Score,
+		"sources": result.Sources, "sourceDetails": result.SourceDetails, "provider": result.Provider, "usage": result.Usage,
 		"available": a.ai.Available(),
 	})
 }
@@ -191,21 +205,27 @@ func (a *API) consoleAssistStream(w http.ResponseWriter, r *http.Request, p auth
 
 // recordAssistUsage writes the accounting row. Failures are logged and dropped:
 // a metering write must never turn a successful answer into an error response.
-func (a *API) recordAssistUsage(ctx context.Context, p auth.Principal, conversationID uuid.UUID, task string, result ai.AssistResult) {
+func (a *API) recordAssistUsage(ctx context.Context, p auth.Principal, conversationID uuid.UUID, task string, result ai.AssistResult) (uuid.UUID, error) {
 	var conversation any
 	if conversationID != uuid.Nil {
 		conversation = conversationID
 	}
+	sources := result.Sources
+	if sources == nil {
+		sources = []string{}
+	}
+	id := uuid.New()
 	_, err := a.db.Exec(ctx, `insert into ai_interaction(
 			id, tenant_id, conversation_id, provider, score, answered, reason,
-			sources, task, prompt_tokens, completion_tokens, total_tokens, agent_id)
-		values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-		uuid.New(), p.TenantID, conversation, result.Provider, result.Score,
-		strings.TrimSpace(result.Text) != "", task, result.Sources, task,
-		result.Usage.PromptTokens, result.Usage.CompletionTokens, result.Usage.TotalTokens, p.AgentID)
+			sources, task, prompt_tokens, completion_tokens, total_tokens, agent_id, draft_text)
+		values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+		id, p.TenantID, conversation, result.Provider, result.Score,
+		strings.TrimSpace(result.Text) != "", task, sources, task,
+		result.Usage.PromptTokens, result.Usage.CompletionTokens, result.Usage.TotalTokens, p.AgentID, result.Text)
 	if err != nil {
 		a.logger.Warn("assist usage not recorded", "error", err, "task", task)
 	}
+	return id, err
 }
 
 // consoleAIUsage summarises model consumption for the tenant. It groups by task

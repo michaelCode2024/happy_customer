@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
+import 'package:relaydesk_agent_console/src/api/models.dart';
 import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
 import 'package:relaydesk_agent_console/src/theme.dart';
 import 'package:relaydesk_agent_console/src/ui/chat_panel.dart';
@@ -137,7 +138,7 @@ void main() {
             return http.Response.bytes(utf8.encode(jsonEncode(body)), 200);
           }));
       final controller = WorkbenchController(api: api);
-      final draft = ValueNotifier<String>('');
+      final draft = ValueNotifier<AssistResult?>(null);
       await controller.refreshConversations();
       await controller.select('c1');
       await tester.pumpWidget(MaterialApp(
@@ -151,12 +152,17 @@ void main() {
           ))));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      expect(find.text('回复客户'), findsOneWidget);
+      if(width>=760) expect(find.text('回复客户'), findsOneWidget);
+      else {
+        expect(tester.getSize(find.byKey(const ValueKey('mobile-composer'))).height,lessThan(160));
+        await tester.tap(find.byTooltip('展开工具')); await tester.pumpAndSettle();
+      }
       final field = find.byType(TextField).first;
       await tester.tap(find.text('内部备注'));
-      draft.value = 'AI 建议只进入公开回复草稿';
+      draft.value = const AssistResult(task: 'SUGGEST', text: 'AI 建议只进入公开回复草稿');
       await tester.pump();
-      expect(tester.widget<TextField>(field).controller!.text, draft.value);
+      expect(
+          tester.widget<TextField>(field).controller!.text, draft.value!.text);
       expect(find.text('写一条内部备注，访客看不到'), findsNothing);
       await tester.tap(field);
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);

@@ -13,10 +13,15 @@ import 'package:relaydesk_agent_console/src/ui/ai_assist_panel.dart';
 /// agent needs to identify the customer (name, contact, source) and keeps notes
 /// at the bottom, where they are read and written during the conversation.
 class VisitorSidebar extends StatefulWidget {
-  const VisitorSidebar({super.key, required this.workbench, this.onAdopt});
+  const VisitorSidebar(
+      {super.key,
+      required this.workbench,
+      this.onAdopt,
+      this.showHeader = true});
 
   final WorkbenchController workbench;
-  final ValueChanged<String>? onAdopt;
+  final ValueChanged<AssistResult>? onAdopt;
+  final bool showHeader;
 
   @override
   State<VisitorSidebar> createState() => _VisitorSidebarState();
@@ -25,6 +30,8 @@ class VisitorSidebar extends StatefulWidget {
 class _VisitorSidebarState extends State<VisitorSidebar> {
   final _note = TextEditingController();
   final _displayName = TextEditingController();
+  final Map<String, String> _noteDrafts = {};
+  String? _draftVisitorId;
   List<VisitorNote> _notes = const <VisitorNote>[];
   List<Conversation> _history = const <Conversation>[];
   VisitorProfile? _profile;
@@ -48,6 +55,14 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
       return;
     }
     final revision = ++_loadRevision;
+    // 草稿按客户保留，切换后不能把上一位客户的订单信息带到当前客户。
+    if (_draftVisitorId != visitorId) {
+      if (_draftVisitorId != null) _noteDrafts[_draftVisitorId!] = _note.text;
+      _draftVisitorId = visitorId;
+      _note.text = _noteDrafts[visitorId] ?? '';
+      _displayName.clear();
+    }
+    _savingNote = false;
     _loadedVisitorId = visitorId;
     _profile = null;
     _notes = const <VisitorNote>[];
@@ -87,22 +102,37 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
   Future<void> _addNote() async {
     final content = _note.text.trim();
     final visitorId = _loadedVisitorId;
-    if (content.isEmpty || visitorId == null || _savingNote) {
+    if (content.isEmpty ||
+        visitorId == null ||
+        _savingNote ||
+        widget.workbench.detail?.visitor?.id != visitorId) {
       return;
     }
+    final revision = _loadRevision;
     setState(() => _savingNote = true);
     try {
       final note = await widget.workbench.api.addNote(visitorId, content);
-      if (!mounted) {
+      // 已切换客户的回包不能插入当前列表，也不能清除当前正在填写的新草稿。
+      if (!mounted ||
+          revision != _loadRevision ||
+          widget.workbench.detail?.visitor?.id != visitorId) {
+        if (_noteDrafts[visitorId]?.trim() == content) {
+          _noteDrafts.remove(visitorId);
+        }
         return;
       }
       setState(() {
         _notes = <VisitorNote>[note, ..._notes];
-        _note.clear();
+        if (_note.text.trim() == content) {
+          _note.clear();
+          _noteDrafts.remove(visitorId);
+        }
         _savingNote = false;
       });
     } catch (error) {
-      if (!mounted) {
+      if (!mounted ||
+          revision != _loadRevision ||
+          widget.workbench.detail?.visitor?.id != visitorId) {
         return;
       }
       setState(() {
@@ -163,21 +193,22 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Container(
-              height: 56,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              alignment: Alignment.centerLeft,
-              decoration: BoxDecoration(
-                border:
-                    Border(bottom: BorderSide(color: scheme.outlineVariant)),
+            if (widget.showHeader)
+              Container(
+                height: 56,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                alignment: Alignment.centerLeft,
+                decoration: BoxDecoration(
+                  border:
+                      Border(bottom: BorderSide(color: scheme.outlineVariant)),
+                ),
+                child: Text(
+                  '客户资料',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
               ),
-              child: Text(
-                '客户资料',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-              ),
-            ),
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(22, 24, 22, 24),

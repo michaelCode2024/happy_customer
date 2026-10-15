@@ -32,12 +32,19 @@ type Subscriber struct {
 	done      chan struct{}
 	closeOnce sync.Once
 	logger    *slog.Logger
+	filter    func([]byte) []byte
 }
 
 const subscriberQueue = 64
 
 func (h *Hub) Subscribe(conn *websocket.Conn, channels []string) *Subscriber {
+	return h.SubscribeFiltered(conn, channels, nil)
+}
+
+// Filter runs at write time so queued frames cannot bypass a changed scope.
+func (h *Hub) SubscribeFiltered(conn *websocket.Conn, channels []string, filter func([]byte) []byte) *Subscriber {
 	s := &Subscriber{
+		filter: filter,
 		conn:   conn,
 		send:   make(chan []byte, subscriberQueue),
 		done:   make(chan struct{}),
@@ -159,6 +166,12 @@ func (s *Subscriber) writeLoop() {
 			_ = s.conn.Close(websocket.StatusNormalClosure, "closed")
 			return
 		case payload := <-s.send:
+			if s.filter != nil {
+				payload = s.filter(payload)
+				if len(payload) == 0 {
+					continue
+				}
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			err := s.conn.Write(ctx, websocket.MessageText, payload)
 			cancel()

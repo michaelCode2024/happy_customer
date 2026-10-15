@@ -421,7 +421,8 @@ func (a *API) consolePinnedMessages(w http.ResponseWriter, r *http.Request, p au
 // ---------------------------------------------------------------- drafts
 
 type draftRequest struct {
-	Content string `json:"content"`
+	Content             string `json:"content"`
+	AssistInteractionID string `json:"assistInteractionId"`
 }
 
 // consoleDraft stores the half-written reply for this agent and conversation.
@@ -434,12 +435,14 @@ func (a *API) consoleDraft(w http.ResponseWriter, r *http.Request, p auth.Princi
 		return
 	}
 	var content string
-	err := a.db.QueryRow(r.Context(), `select content from message_draft
-		where conversation_id = $1 and agent_id = $2`, id, p.AgentID).Scan(&content)
+	var assistID string
+	err := a.db.QueryRow(r.Context(), `select d.content, coalesce(i.id::text,'') from message_draft d
+		left join ai_interaction i on i.id=d.assist_interaction_id and i.sent_message_id is null
+		where d.conversation_id = $1 and d.agent_id = $2`, id, p.AgentID).Scan(&content, &assistID)
 	if err != nil {
 		content = ""
 	}
-	respond(w, 200, map[string]any{"conversationId": id, "content": content})
+	respond(w, 200, map[string]any{"conversationId": id, "content": content, "assistInteractionId": assistID})
 }
 
 func (a *API) consoleSaveDraft(w http.ResponseWriter, r *http.Request, p auth.Principal) {
@@ -463,11 +466,26 @@ func (a *API) consoleSaveDraft(w http.ResponseWriter, r *http.Request, p auth.Pr
 		respond(w, 200, map[string]any{"status": "OK", "content": ""})
 		return
 	}
-	if _, err := a.db.Exec(r.Context(), `insert into message_draft(conversation_id, tenant_id, agent_id, content, updated_at)
-		values($1,$2,$3,$4, now())
+	var assistID *uuid.UUID
+	if in.AssistInteractionID != "" {
+		parsed, err := uuid.Parse(in.AssistInteractionID)
+		if err != nil {
+			fail(w, 400, "AI 草稿标识不合法")
+			return
+		}
+		var allowed bool
+		_ = a.db.QueryRow(r.Context(), `select exists(select 1 from ai_interaction where id=$1 and tenant_id=$2 and conversation_id=$3 and agent_id=$4 and adopted_at is not null and sent_message_id is null and task in ('SUGGEST','POLISH'))`, parsed, p.TenantID, id, p.AgentID).Scan(&allowed)
+		if !allowed {
+			fail(w, 400, "AI 草稿不属于当前会话或已经发送")
+			return
+		}
+		assistID = &parsed
+	}
+	if _, err := a.db.Exec(r.Context(), `insert into message_draft(conversation_id, tenant_id, agent_id, content, updated_at,assist_interaction_id)
+		values($1,$2,$3,$4, now(),$5)
 		on conflict (conversation_id, agent_id)
-		do update set content = excluded.content, updated_at = now()`,
-		id, p.TenantID, p.AgentID, in.Content); err != nil {
+		do update set content = excluded.content, assist_interaction_id=excluded.assist_interaction_id, updated_at = now()`,
+		id, p.TenantID, p.AgentID, in.Content, assistID); err != nil {
 		fail(w, 500, "保存草稿失败")
 		return
 	}
@@ -512,7 +530,7 @@ func (a *API) consoleSearchMessages(w http.ResponseWriter, r *http.Request, p au
 	args = append(args, p.AgentID)
 	conditions = append(conditions, `exists (select 1 from conversation c
 		where c.id = m.conversation_id
-		  and exists (select 1 from agent_inbox ai where ai.inbox_id = c.inbox_id and ai.agent_id = $`+itoa(len(args))+`))`)
+		  and `+conversationVisibility("c", "$"+itoa(len(args)), auth.CanViewReports(p.Role))+`)`)
 
 	rows, err := a.db.Query(r.Context(), `
 		select m.id, m.conversation_id, m.sender_type, m.sender_id, m.client_message_id, m.sequence,
@@ -707,13 +725,7 @@ func (a *API) consoleForwardMessage(w http.ResponseWriter, r *http.Request, p au
 	// The destination is checked against the same inbox membership rule as
 	// every other console route, so forwarding cannot be used to inject text
 	// into a thread the agent cannot otherwise open.
-	var allowed bool
-	err = a.db.QueryRow(r.Context(), `select exists(
-			select 1 from conversation c
-			 where c.id = $1 and c.tenant_id = $2
-			   and (exists (select 1 from agent_inbox ai where ai.inbox_id = c.inbox_id and ai.agent_id = $3)
-			        or c.assignee_id = $3))`, target, p.TenantID, p.AgentID).Scan(&allowed)
-	if err != nil || !allowed {
+	if !a.agentConversationAccess(r.Context(), p, target) {
 		failCode(w, 404, "CONVERSATION_NOT_FOUND", "目标会话不存在或你没有权限")
 		return
 	}

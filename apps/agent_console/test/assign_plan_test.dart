@@ -45,7 +45,7 @@ void main() {
       expect(find.text('正常服务'), findsOneWidget);
       final seats = find.widgetWithText(TextFormField, '坐席上限');
       final messages = find.widgetWithText(TextFormField, '每月消息额度');
-      expect(tester.widget<TextFormField>(seats).controller!.text, '100');
+      expect(tester.widget<TextFormField>(seats).controller!.text, '10');
       expect(
           tester.widget<TextFormField>(messages).controller!.text, '1000000');
       await tester.enterText(seats, '-1');

@@ -1,3 +1,5 @@
+import 'package:relaydesk_agent_console/src/ui/design_a.dart';
+import 'pwa_panel.dart';
 import 'package:flutter/material.dart';
 import 'package:relaydesk_agent_console/src/ui/brand.dart';
 import 'package:relaydesk_agent_console/src/ui/product_brand.dart';
@@ -27,9 +29,11 @@ class LoginShell extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    // 登录页连同安全区域共用 MaterialApp 同步给浏览器的表面色。
+    final pageBackground = scheme.surface;
     final platform = heroKind == LoginHeroKind.platform;
     return Scaffold(
-      backgroundColor: scheme.surface,
+      backgroundColor: pageBackground,
       body: LayoutBuilder(builder: (context, constraints) {
         final wide = constraints.maxWidth >= 960;
         final padding = wide ? 48.0 : 24.0;
@@ -45,7 +49,9 @@ class LoginShell extends StatelessWidget {
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    if (canOpenWebsite) ...[
+                    const PwaPanel(hideUpdateBanner: true),
+                    const SizedBox(height: 12),
+                    if (canReturnToWebsite) ...[
                       Align(
                           alignment: Alignment.centerLeft,
                           child: TextButton.icon(
@@ -124,6 +130,11 @@ class LoginShell extends StatelessWidget {
                             foregroundColor: scheme.onSurfaceVariant)),
                     const SizedBox(height: 22),
                     const Divider(),
+                    if (canOpenWebsite && canReturnToWebsite)
+                      TextButton.icon(
+                          onPressed: openDownloads,
+                          icon: const Icon(Icons.download_outlined),
+                          label: const Text('安卓客户端下载 / iPhone 添加到桌面')),
                     const SizedBox(height: 12),
                     Wrap(
                         alignment: WrapAlignment.spaceBetween,
@@ -200,7 +211,10 @@ class _LoginHeroPanel extends StatelessWidget {
                                             fontSize: 14,
                                             height: 1.9,
                                             color: scheme.onSurfaceVariant)),
-                                    const SizedBox(height: 32),
+                                    const Center(
+                                        child:
+                                            TongYuArtwork(ai: true, size: 180)),
+                                    const SizedBox(height: 24),
                                     Container(
                                         padding: const EdgeInsets.all(22),
                                         decoration: BoxDecoration(

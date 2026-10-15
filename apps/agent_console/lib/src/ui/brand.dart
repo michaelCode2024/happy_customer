@@ -1,3 +1,4 @@
+import 'package:relaydesk_agent_console/src/ui/design_a.dart';
 import 'package:flutter/material.dart';
 import 'package:relaydesk_agent_console/src/ui/product_brand.dart';
 
@@ -188,7 +189,7 @@ class WorkspaceSidebar extends StatelessWidget {
     final dark = scheme.brightness == Brightness.dark;
     // 左侧导航纯白/深色贴边，与腾讯云控制台侧栏一致，不做灰渐变。
     return Container(
-      width: 220,
+      width: 232,
       decoration: BoxDecoration(
         color: dark ? const Color(0xFF151922) : Colors.white,
         border: Border(right: BorderSide(color: scheme.outlineVariant)),
@@ -202,7 +203,7 @@ class WorkspaceSidebar extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const TongYuBrand(),
-                const SizedBox(height: 8),
+                const SizedBox(height: 18),
                 Text(
                   subtitle,
                   maxLines: 1,
@@ -253,7 +254,7 @@ class WorkspaceSidebar extends StatelessWidget {
                       ),
                     ),
                   Padding(
-                      padding: const EdgeInsets.only(bottom: 2),
+                      padding: const EdgeInsets.only(bottom: 5),
                       child: Semantics(
                         button: true,
                         selected: i == selectedIndex,
@@ -344,6 +345,20 @@ class WorkspaceSidebar extends StatelessWidget {
               ],
             ),
           ),
+          if (MediaQuery.sizeOf(context).height >= 960)
+            Container(
+                margin: const EdgeInsets.fromLTRB(14, 8, 14, 16),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                    color: scheme.primaryContainer.withOpacity(.5),
+                    borderRadius: BorderRadius.circular(14)),
+                child: const Row(children: [
+                  TongYuArtwork(ai: true, size: 50),
+                  SizedBox(width: 8),
+                  Expanded(
+                      child: Text('让每一次咨询，\n都有温暖的回应。',
+                          style: TextStyle(fontSize: 11, height: 1.8)))
+                ])),
           if (footer != null)
             Padding(
                 padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),

@@ -1,3 +1,4 @@
+import 'package:relaydesk_agent_console/src/ui/design_a.dart';
 import 'package:relaydesk_agent_console/src/util/labels.dart';
 import 'package:relaydesk_agent_console/src/util/format.dart';
 import 'package:relaydesk_agent_console/src/ui/workspace_layout.dart';
@@ -166,8 +167,10 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
   Widget build(BuildContext context) => DefaultTabController(
       length: 6,
       child: Scaffold(
-        appBar: AppBar(
-            title: const Text('企业管理'),
+        appBar: WorkspaceAppBar(
+            title: '企业管理',
+            description: '管理团队、客服入口与服务用量',
+            icon: Icons.apartment_outlined,
             actions: [
               IconButton(
                   onPressed: _loading ? null : _load,
@@ -227,6 +230,12 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
             .toList();
         return ListView(padding: const EdgeInsets.all(24), children: [
           const WorkspaceHeading('团队成员', '集中查看团队账号、接待权限与在线状态。新账号由平台管理员建立。'),
+          const TongYuHero(
+              compact: true,
+              title: '好的服务，来自并肩的团队。',
+              description: '让每一位成员找到自己的接待入口，让每一次协作更有默契。',
+              eyebrow: 'TEAM / 团队协作'),
+          const SizedBox(height: 24),
           // 汇总当前企业的真实成员数据；搜索只筛选列表，不改变团队总览。
           Padding(
             padding: const EdgeInsets.only(bottom: 24),
@@ -246,7 +255,7 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.surface,
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(16),
                   border: Border.all(
                       color: Theme.of(context).colorScheme.outlineVariant)),
               child: Column(
@@ -873,4 +882,3 @@ class _InboxDialogState extends State<_InboxDialog> {
                 child: Text(_busy ? '保存中…' : '保存'))
           ]);
 }
-

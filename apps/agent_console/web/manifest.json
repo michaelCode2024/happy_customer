@@ -1,18 +1,47 @@
 {
   "name": "通语工作台",
   "short_name": "通语",
-  "start_url": ".",
+  "id": "/console/",
+  "scope": "/console/",
+  "start_url": "/console/?surface=agent&source=pwa",
   "display": "standalone",
-  "background_color": "#F5F7FA",
-  "theme_color": "#2F6BFF",
-  "description": "通语客户沟通与团队协作平台",
+  "background_color": "#FFFFFF",
+  "theme_color": "#FFFFFF",
+  "description": "通语客服工作台：团队接待、离线会话与草稿、后台消息提醒",
   "prefer_related_applications": false,
   "icons": [
     {
-      "src": "favicon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "icons/Icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
       "purpose": "any"
+    },
+    {
+      "src": "icons/Icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "lang": "zh-CN",
+  "display_override": [
+    "standalone"
+  ],
+  "categories": [
+    "business",
+    "productivity"
+  ],
+  "shortcuts": [
+    {
+      "name": "客户消息",
+      "short_name": "消息",
+      "url": "/console/?surface=agent",
+      "icons": [
+        {
+          "src": "icons/Icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
     }
   ]
 }

@@ -12,6 +12,14 @@ import (
 
 func receptionNotice(ctx context.Context, tx pgx.Tx, tenant, conversation uuid.UUID, content, state string) error {
 	_, err := tx.Exec(ctx, `insert into reception_notice(tenant_id,conversation_id,content,state) values($1,$2,$3,$4)`, tenant, conversation, content, state)
+	if err == nil && state == "ASSIGNED" {
+		_, err = tx.Exec(ctx, `with inserted as (
+		insert into agent_notification(tenant_id,agent_id,conversation_id,kind,title)
+		select c.tenant_id,c.assignee_id,c.id,'ASSIGNED','有新会话分配给你，请及时接待'
+		from conversation c where c.id=$1 and c.tenant_id=$2 and c.assignee_id is not null returning id,agent_id
+		) insert into push_delivery(notification_id,subscription_id)
+		select n.id,s.id from inserted n join push_subscription s on s.agent_id=n.agent_id`, conversation, tenant)
+	}
 	return err
 }
 

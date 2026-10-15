@@ -17,13 +17,28 @@
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <script>
+    // Keep embedded host sessions on Flutter. Normal web entry uses the dedicated layouts.
+    (() => {
+      const q = new URLSearchParams(location.search);
+      if (q.get('embedded') === '1' || q.get('layout') === 'flutter') return;
+      const platform = q.get('surface') === 'platform' || (!q.has('surface') && sessionStorage.getItem('liaoqiao.consoleSurface') === 'platform');
+      const mobile = !platform && q.get('layout') !== 'desktop' && matchMedia('(max-width: 760px)').matches && (matchMedia('(pointer: coarse)').matches || /iPhone|iPad|Android/i.test(navigator.userAgent));
+      if (platform && !q.has('surface')) q.set('surface','platform');
+      location.replace('/console/' + (mobile ? 'mobile.html' : 'desktop.html') + (q.size ? '?' + q.toString() : '') + location.hash);
+    })();
+  </script>
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="通语工作台与平台运营后台">
 
   <!-- iOS meta tags & icons -->
+  <meta name="theme-color" content="#ffffff">
+  <meta name="color-scheme" content="light dark">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="通语客服">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
 
   <!-- Favicon -->
@@ -35,37 +50,113 @@
   <style>
     html, body {
       margin: 0;
+      background-color: var(--tongyu-page-bg, #ffffff);
       height: 100%;
       font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC",
         "Noto Sans SC", "Segoe UI", sans-serif;
     }
+
+    #relaydesk-loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--tongyu-page-bg,#fff);color:inherit;z-index:99999;opacity:1;transition:opacity .22s ease;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif}
+    #relaydesk-loading.leaving{opacity:0;pointer-events:none}
+    .tongyu-start-identity{text-align:center;padding:24px;transform:translateY(-20px)}
+    .tongyu-start-icon{position:relative;display:grid;place-items:center;width:108px;height:108px;margin:0 auto 18px}
+    .tongyu-start-icon:before{content:'';position:absolute;inset:7px;border-radius:30px;background:#f8f9fc;transform:rotate(-9deg)}
+    [data-tongyu-theme="dark"] .tongyu-start-icon:before{background:#202632}
+    .tongyu-start-icon svg{position:relative;animation:tongyu-breathe 2.8s ease-in-out infinite}
+    .tongyu-start-title{font-size:28px;letter-spacing:4px;line-height:1.4;margin:0 0 9px;font-weight:650}
+    .tongyu-start-english{font-size:10px;letter-spacing:4px;opacity:.55;margin:0 0 29px;padding-left:4px}
+    .tongyu-start-tagline{font-size:13px;letter-spacing:1px;opacity:.65;margin:0}
+    .tongyu-start-activity{position:relative;overflow:hidden;width:70px;height:3px;background:#edf0f6;border-radius:8px;margin:34px auto 0}
+    .tongyu-start-activity:after{content:'';display:block;width:26px;height:100%;border-radius:8px;background:#4263eb;animation:tongyu-travel 1.7s ease-in-out infinite}
+    .tongyu-start-foot{position:absolute;bottom:calc(24px + env(safe-area-inset-bottom,0px));left:20px;right:20px;text-align:center;font-size:10px;letter-spacing:2px;opacity:.45}
+    .tongyu-start-status{font-size:12px;line-height:1.9;opacity:.7;max-width:280px;margin:22px auto 0}
+    #relaydesk-load-retry{display:block;margin:16px auto 0;border:0;border-radius:9px;background:#4263eb;color:#fff;font:14px inherit;padding:12px 28px;cursor:pointer}
+    @keyframes tongyu-breathe{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+    @keyframes tongyu-travel{0%,100%{transform:translateX(-28px)}50%{transform:translateX(44px)}}
+    @media(prefers-reduced-motion:reduce){#relaydesk-loading,.tongyu-start-icon svg,.tongyu-start-activity:after{animation:none;transition:none}}
   </style>
+  <script>
+    // Flutter 全屏网页引擎会重建 viewport，保留 cover 才能读取苹果底部安全距离。
+    function retainSafeViewport() {
+      const meta = document.querySelector('meta[name="viewport"]');
+      if (meta && !meta.content.includes('viewport-fit=cover')) meta.content += ', viewport-fit=cover';
+    }
+    new MutationObserver(retainSafeViewport).observe(document.head,
+        {childList:true,subtree:true,attributes:true,attributeFilter:['content']});
+    retainSafeViewport();
+    // 首帧前读取已保存的外观，避免深色登录页与白色网页安全区域拼接。
+    window.tongyuSyncTheme = function(color, dark) {
+      if (!/^#[0-9a-f]{6}$/i.test(color)) return;
+      const root = document.documentElement;
+      root.style.setProperty('--tongyu-page-bg', color);
+      root.style.backgroundColor = color;
+      root.dataset.tongyuTheme = dark ? 'dark' : 'light';
+      root.style.colorScheme = dark ? 'dark' : 'light';
+      root.style.color = dark ? '#e2e8f0' : '#425466';
+      document.querySelector('meta[name="theme-color"]').content = color;
+      document.querySelector('meta[name="color-scheme"]').content = dark ? 'dark' : 'light';
+      if (document.body) document.body.style.backgroundColor = color;
+      const loading = document.getElementById('relaydesk-loading');
+      if (loading) { loading.style.backgroundColor = color; loading.style.color = dark ? '#e2e8f0' : '#425466'; }
+    };
+    let savedAppearance = 'system';
+    try { savedAppearance = JSON.parse(localStorage.getItem('flutter.relaydesk.themeMode')) || 'system'; } catch (_) {}
+    const initialDark = savedAppearance === 'dark' ||
+        (savedAppearance !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+    window.tongyuSyncTheme(initialDark ? '#171b22' : '#ffffff', initialDark);
+  </script>
 </head>
 <body>
   <!-- 主脚本下载期间给出明确反馈，首帧绘制后移除。 -->
-  <div id="relaydesk-loading" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#f7f9fc;color:#425466;font:16px sans-serif;z-index:99999">
-    <div style="text-align:center">正在加载客服工作台，请稍候…<div style="font-size:13px;margin-top:12px">首次打开需要下载页面资源</div></div>
+  <div id="relaydesk-loading" role="status" aria-label="正在打开通语">
+    <div class="tongyu-start-identity"><div class="tongyu-start-icon"><svg xmlns="http://www.w3.org/2000/svg" width="76" height="76" viewBox="0 0 36 36"><rect x="2" y="3" width="25" height="23" rx="9" fill="#4263eb"/><path d="M8 23v8l9-7" fill="#4263eb"/><path d="M14 12h16v15l-6-3H14" fill="none" stroke="#fff" stroke-width="2.5" stroke-linejoin="round"/></svg>
+</div><h1 class="tongyu-start-title">通语</h1><p class="tongyu-start-english">TONGYU</p><p class="tongyu-start-tagline">让每一次咨询，都有回应。</p><div class="tongyu-start-activity" aria-hidden="true"></div><div class="tongyu-start-status" id="tongyu-start-status"></div></div><div class="tongyu-start-foot">客户服务 · 从容有序</div>
   </div>
   <script>
-    window.addEventListener('flutter-first-frame', function () {
-      document.getElementById('relaydesk-loading')?.remove();
+    function dismissTongyuSplash() {
+      if (!window.tongyuFirstFramePainted || !window.tongyuAppReady) return;
+      window.tongyuFirstFrameReady = true;
+      const splash = document.getElementById('relaydesk-loading');
+      if (!splash) return;
+      splash.classList.add('leaving');
+      setTimeout(() => splash.remove(), matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 220);
+    }
+    window.addEventListener('flutter-first-frame', () => {
+      window.tongyuFirstFramePainted = true; dismissTongyuSplash();
+    });
+    window.addEventListener('tongyu-app-ready', () => {
+      window.tongyuAppReady = true; dismissTongyuSplash();
     });
   </script>
   <script>
     // 固定引导地址交由HTTP条件请求检查更新，主脚本仍按编译版本缓存。
     // 下载失败必须提供重试，不能让用户一直停留在加载占位页。
     window.relaydeskLoadingFailed = function () {
+      if (window.tongyuFirstFrameReady) return;
       const loading = document.getElementById('relaydesk-loading');
       if (!loading) return;
-      loading.innerHTML = '<div style="text-align:center">页面资源加载失败或超时<div style="font-size:13px;margin-top:12px">请检查网络后重试</div><button id="relaydesk-load-retry" style="margin-top:18px;padding:10px 24px;border:0;border-radius:8px;background:#4263eb;color:white;cursor:pointer">重新加载</button></div>';
-      document.getElementById('relaydesk-load-retry').onclick = function () { location.reload(); };
+      loading.querySelector('.tongyu-start-activity')?.remove();
+      const status = document.getElementById('tongyu-start-status');
+      status.setAttribute('role','alert');
+      status.textContent = '暂时无法打开通语，请检查网络后重试。';
+      if (!document.getElementById('relaydesk-load-retry')) {
+        const retry = document.createElement('button');retry.id='relaydesk-load-retry';retry.textContent='重新加载';
+        retry.onclick = () => location.reload();status.appendChild(retry);
+      }
     };
     const bootstrap = document.createElement('script');
     bootstrap.src = 'flutter_bootstrap.js';
     bootstrap.async = true;
     bootstrap.onerror = window.relaydeskLoadingFailed;
     document.body.appendChild(bootstrap);
+    setTimeout(() => {
+      if (window.tongyuFirstFrameReady || document.getElementById('relaydesk-load-retry')) return;
+      const status = document.getElementById('tongyu-start-status');
+      if (status) status.textContent = '连接时间较长，请检查网络。正在继续尝试连接…';
+    },8000);
     setTimeout(window.relaydeskLoadingFailed, 45000);
   </script>
+  <script src="pwa-client.js"></script>
+  <script src="push-client.js"></script>
 </body>
 </html>

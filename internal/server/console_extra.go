@@ -374,6 +374,7 @@ func (a *API) consoleKnowledgeCreate(w http.ResponseWriter, r *http.Request, p a
 		QuestionExamples string `json:"questionExamples"`
 		CategoryID       string `json:"categoryId"`
 		Status           string `json:"status"`
+		SourceQuestion   string `json:"sourceQuestion"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -391,13 +392,40 @@ func (a *API) consoleKnowledgeCreate(w http.ResponseWriter, r *http.Request, p a
 		return
 	}
 	id := uuid.New()
-	if _, err := a.db.Exec(r.Context(), `insert into knowledge_entry(id, tenant_id, category_id, title, content, question_examples, status)
+	tx, err := a.db.Begin(r.Context())
+	if err != nil {
+		fail(w, 500, "创建知识条目失败")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	if in.SourceQuestion != "" {
+		var exists bool
+		err := tx.QueryRow(r.Context(), `select exists(select 1 from ai_interaction i join message m on m.id=i.question_message_id
+		 where i.tenant_id=$1 and m.content=$2 and m.deleted_at is null and i.reason in ('NO_KNOWLEDGE_BASE','LOW_CONFIDENCE'))`, p.TenantID, in.SourceQuestion).Scan(&exists)
+		if err != nil || !exists || status != "ACTIVE" {
+			fail(w, 400, "原问题不存在或知识尚未启用")
+			return
+		}
+	}
+	if _, err := tx.Exec(r.Context(), `insert into knowledge_entry(id, tenant_id, category_id, title, content, question_examples, status)
 		values($1,$2,$3,$4,$5,$6,$7)`, id, p.TenantID, categoryID, in.Title, in.Content, in.QuestionExamples, status); err != nil {
 		if isUniqueViolation(err) {
 			fail(w, 409, "该标题已存在，请编辑原条目")
 			return
 		}
 		fail(w, 500, "创建知识条目失败")
+		return
+	}
+	if in.SourceQuestion != "" {
+		_, err = tx.Exec(r.Context(), `insert into knowledge_gap_resolution(tenant_id,question_hash,question,knowledge_id,resolved_by)
+		 values($1,md5($2),$2,$3,$4) on conflict(tenant_id,question_hash) do update set knowledge_id=excluded.knowledge_id,resolved_by=excluded.resolved_by,resolved_at=now()`, p.TenantID, in.SourceQuestion, id, p.AgentID)
+		if err != nil {
+			fail(w, 500, "关联原问题失败，知识未保存，请重试")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		fail(w, 500, "保存知识失败，请重试")
 		return
 	}
 	a.asyncEmbedKnowledgeEntry(id, in.Title, in.Content)
@@ -501,7 +529,8 @@ func (a *API) consoleKnowledgeSearch(w http.ResponseWriter, r *http.Request, p a
 		"provider": reply.Provider,
 		"handoff":  reply.Handoff,
 		"reason":   string(reply.Reason),
-		"sources":  reply.Sources,
+		// 测试台需要本次检索的正文；自动回复和开放 API 仍保留原有标题列表协议。
+		"sources": reply.SourceDetails,
 	})
 }
 

@@ -50,13 +50,30 @@ type AssistRequest struct {
 // the remaining fields are task-specific and empty when the task does not
 // produce them.
 type AssistResult struct {
-	Task     Task     `json:"task"`
-	Text     string   `json:"text"`
-	Label    string   `json:"label,omitempty"`
-	Score    float64  `json:"score,omitempty"`
-	Sources  []string `json:"sources,omitempty"`
-	Provider string   `json:"provider"`
-	Usage    Usage    `json:"usage"`
+	Task          Task           `json:"task"`
+	Text          string         `json:"text"`
+	Label         string         `json:"label,omitempty"`
+	Score         float64        `json:"score,omitempty"`
+	Sources       []string       `json:"sources,omitempty"`
+	SourceDetails []AssistSource `json:"sourceDetails,omitempty"`
+	Provider      string         `json:"provider"`
+	Usage         Usage          `json:"usage"`
+}
+
+// 来源快照与本次检索一致，不能按标题重新搜索，否则同名知识可能对应另一篇正文。
+type AssistSource struct {
+	ID      string  `json:"id"`
+	Title   string  `json:"title"`
+	Content string  `json:"content"`
+	Score   float64 `json:"score"`
+}
+
+func assistSources(entries []knowledgeEntry) []AssistSource {
+	sources := make([]AssistSource, 0, len(entries))
+	for _, entry := range entries {
+		sources = append(sources, AssistSource{ID: entry.id.String(), Title: entry.title, Content: entry.content, Score: entry.score})
+	}
+	return sources
 }
 
 // Assist runs one assistant task. SUGGEST is grounded in the knowledge base — a
@@ -69,6 +86,10 @@ func (s *Service) Assist(ctx context.Context, request AssistRequest) (AssistResu
 		return result, nil
 	}
 	input := strings.TrimSpace(request.Question)
+	// 润色与翻译只处理明确选定的原文，避免历史客户消息影响客服草稿的意思。
+	if request.Task == TaskPolish || request.Task == TaskTranslate {
+		request.History = nil
+	}
 	if input == "" && len(request.History) == 0 {
 		return result, nil
 	}
@@ -76,13 +97,14 @@ func (s *Service) Assist(ctx context.Context, request AssistRequest) (AssistResu
 	messages := make([]Message, 0, len(request.History)+3)
 	messages = append(messages, Message{Role: "system", Content: assistPrompt(request.Task, request.Tone, request.Language)})
 	if request.Task == TaskSuggest {
-		entries, err := s.search(ctx, request.TenantID, input, true)
+		entries, err := s.SearchHybrid(ctx, request.TenantID, input, true)
 		if err != nil {
 			return result, err
 		}
 		if len(entries) > 0 {
 			messages = append(messages, Message{Role: "user", Content: buildPrompt(entries)})
 			result.Sources = titles(entries)
+			result.SourceDetails = assistSources(entries)
 			for _, entry := range entries {
 				if entry.score > result.Score {
 					result.Score = entry.score
@@ -131,7 +153,8 @@ func (s *Service) AssistWithTools(ctx context.Context, request AssistRequest) (A
 	if input == "" && len(request.History) == 0 {
 		return result, nil
 	}
-	if len(s.tools) == 0 {
+	// 摘要等任务必须使用各自的输入结构，不能被已注册的业务工具改变为续写对话。
+	if len(s.tools) == 0 || request.Task != TaskSuggest {
 		return s.Assist(ctx, request)
 	}
 
@@ -145,6 +168,7 @@ func (s *Service) AssistWithTools(ctx context.Context, request AssistRequest) (A
 		if len(entries) > 0 {
 			messages = append(messages, Message{Role: "user", Content: buildPrompt(entries)})
 			result.Sources = titles(entries)
+			result.SourceDetails = assistSources(entries)
 			for _, entry := range entries {
 				if entry.score > result.Score {
 					result.Score = entry.score
@@ -294,15 +318,15 @@ func assistPrompt(task Task, tone, language string) string {
 1. 只能依据知识库资料，不要编造价格、承诺、政策或时间。
 2. 语气` + voice + `，与访客使用同一种语言。
 3. 直接输出可以发送的回复正文，不要写“建议回复：”之类的开头，不要使用 Markdown 标题。
-4. 控制在 200 字以内，需要分点时最多 3 条。
+4. 控制在 120 字以内，需要分点时最多 3 条；只保留本次问题需要的信息，不重复问候和结束语。
 5. 知识库资料不足以回答时，只输出：需要人工确认后回复。`
 	case TaskSummarize:
 		return `你是 RelayDesk 的会话摘要助手。阅读对话记录，输出摘要。
 规则：
 1. 先一句话说明访客的核心诉求。
-2. 再列出已确认的事实、待办事项和未解决的问题，每条一行，以“- ”开头。
-3. 不要评价坐席表现，不要编造对话中没有的信息。
-4. 全部使用中文，控制在 200 字以内。`
+2. 再列出已确认的事实、待办事项和未解决的问题，最多 3 条，每条一行，以“- ”开头；没有内容的分类不输出。
+3. 不要评价坐席表现，不要编造对话中没有的信息。访客的疑问不是已确认事实；尚未得到明确答复的能力、政策和承诺只能列为待确认，不能推断为支持或已解决。
+4. 全部使用中文，控制在 100 字以内。使用普通文本，不使用 Markdown 标题或加粗。`
 	case TaskSentiment:
 		return `你是情绪分析器。判断最后一条访客消息的情绪。
 只输出一行，格式为：POSITIVE / NEUTRAL / NEGATIVE 加一个 0 到 1 的置信度数字。

@@ -1,3 +1,4 @@
+import '../util/pwa_bridge.dart';
 import 'package:relaydesk_agent_console/src/util/message_alert_stub.dart'
     if (dart.library.html) 'package:relaydesk_agent_console/src/util/message_alert_web.dart';
 import 'dart:async';
@@ -20,13 +21,13 @@ enum QueueFilter { mine, unassigned, all }
 extension QueueFilterLabel on QueueFilter {
   String get label => switch (this) {
         QueueFilter.mine => '我的',
-        QueueFilter.unassigned => '待分配',
+        QueueFilter.unassigned => '待接待',
         QueueFilter.all => '全部',
       };
 
   String get wire => switch (this) {
         QueueFilter.mine => 'mine',
-        QueueFilter.unassigned => 'unassigned',
+        QueueFilter.unassigned => 'reception',
         QueueFilter.all => 'all',
       };
 }
@@ -65,6 +66,82 @@ class WorkbenchController extends ChangeNotifier {
 
   List<Conversation> _conversations = const <Conversation>[];
   int _queued = 0;
+  int _receptionWaiting = 0;
+  List<Conversation> _receptionQueue = const [];
+  Set<String>? _receptionBaseline;
+  Conversation? _receptionNotice;
+  String _receptionNoticePreview = '';
+  int _receptionQueueRequest = 0;
+  String? _claimingId;
+
+  int get receptionWaiting => _receptionWaiting;
+  List<Conversation> get receptionQueue => _receptionQueue;
+  Conversation? get receptionNotice => _receptionNotice;
+  String get receptionNoticePreview => _receptionNoticePreview;
+  int get receptionQueueRequest => _receptionQueueRequest;
+  bool get claiming => _claimingId != null;
+
+  void dismissReceptionNotice() {
+    _receptionNotice = null;
+    _notify();
+  }
+
+  /// 查看队列不自动选中或认领，保留正在处理的会话与草稿。
+  Future<void> showReceptionQueue() async {
+    _receptionQueueRequest++;
+    _filter = QueueFilter.unassigned;
+    _inboxFilter = null;
+    _search = '';
+    _includeResolved = false;
+    _notify();
+    await refreshConversations();
+  }
+
+  Future<void> _refreshReceptionQueue(int generation) async {
+    try {
+      final page = await api.conversations(filter: 'reception', limit: 100);
+      if (_closed || generation != _listGeneration) return;
+      final queue =
+          page.items.where((c) => !c.isResolved && c.canClaim(selfId)).toList();
+      final ids = queue.map((c) => c.id).toSet();
+      final baseline = _receptionBaseline;
+      // 首次加载只显示常驻提示；重连补拉仍能发现新增待接待，不逐条弹历史。
+      if (baseline != null) {
+        final arrivals = queue.where((c) => !baseline.contains(c.id));
+        if (arrivals.isNotEmpty) {
+          final arrival = arrivals.first;
+          var preview = '客户已进入待接待队列，请及时回应';
+          try {
+            // 分配会产生系统消息，卡片应展示客户原话，而不是重复分配通知。
+            final messages = await api.messages(arrival.id,
+                after: math.max(0, arrival.lastSequence - 30),
+                limit: 50,
+                selfId: selfId);
+            final visitorMessages = messages.items
+                .where((m) => m.isFromVisitor && !m.isPrivate && !m.isDeleted);
+            if (visitorMessages.isNotEmpty &&
+                visitorMessages.last.content.trim().isNotEmpty) {
+              preview = visitorMessages.last.content;
+            }
+          } on ApiException {
+            // 预览失败仍保留接待提醒，不以系统消息冒充客户咨询。
+          }
+          if (_closed || generation != _listGeneration) return;
+          _receptionNotice = arrival;
+          _receptionNoticePreview = preview;
+        }
+      }
+      _receptionBaseline = ids;
+      _receptionQueue = queue;
+      _receptionWaiting = page.receptionWaiting;
+      if (_receptionNotice != null) {
+        final matches = queue.where((c) => c.id == _receptionNotice!.id);
+        _receptionNotice = matches.isEmpty ? null : matches.first;
+      }
+    } on ApiException {
+      // 不把刷新失败当作队列已清空；下轮实时同步继续核对。
+    }
+  }
 
   /// 服务端汇总的坐席未读条数；侧栏「客户消息」角标只用这个，不用待接待数顶替。
   int _unread = 0;
@@ -308,6 +385,12 @@ class WorkbenchController extends ChangeNotifier {
 
   void Function(String groupId)? onGroupUpdated;
   void _onEvent(RealtimeEvent event) {
+    if (event.type == 'conversation.scope.changed') {
+      unawaited(refreshConversations(silent: true));
+      final id = _selectedId;
+      if (id != null) unawaited(_loadDetail(id));
+      return;
+    }
     if (event.type == 'support.assets.updated') {
       unawaited(loadCanned());
       unawaited(loadTags());
@@ -631,16 +714,17 @@ class WorkbenchController extends ChangeNotifier {
         }
       }
       _queued = page.queued;
+      await _refreshReceptionQueue(generation);
+      if (_closed || generation != _listGeneration) return;
       _unread = page.unread;
+      setAppBadge(_unread);
       _listError = null;
       // A conversation that vanished from the filter (because someone else
       // claimed it) should not stay open in the reading pane.
       final selected = _selectedId;
       if (selected != null &&
           !_conversations.any((item) => item.id == selected)) {
-        if (_filter != QueueFilter.all) {
-          await _loadDetail(selected);
-        }
+        await _loadDetail(selected);
       }
     } on ApiException catch (failure) {
       if (generation != _listGeneration) {
@@ -740,6 +824,7 @@ class WorkbenchController extends ChangeNotifier {
     clearSearch();
     _notify();
     await _loadDetail(conversationId);
+    if (_selectedId != conversationId) return;
     // The pin bar is loaded before the transcript so it is on screen even if the
     // pinned message itself has aged out of the window.
     unawaited(_loadPins(conversationId));
@@ -780,6 +865,11 @@ class WorkbenchController extends ChangeNotifier {
       _notify();
     } on ApiException catch (failure) {
       if (_selectedId != conversationId) {
+        return;
+      }
+      if (failure.code == 'CONVERSATION_NOT_FOUND' ||
+          failure.statusCode == 403) {
+        clearSelection();
         return;
       }
       _threadError = failure.message;
@@ -890,8 +980,12 @@ class WorkbenchController extends ChangeNotifier {
       if (_selectedId != conversationId || page.items.isEmpty) {
         return;
       }
-      final merged = List<ChatMessage>.of(_messages)..addAll(page.items);
-      merged.sort(_bySequence);
+      // 实时事件、重连补拉与离线快照可能重叠，按消息 ID 合并防止重复气泡。
+      final byId = {for (final message in _messages) message.id: message};
+      for (final message in page.items) {
+        byId[message.id] = message;
+      }
+      final merged = byId.values.toList()..sort(_bySequence);
       _messages = _trimHistory(merged);
       _lastSequence = math.max(_lastSequence, page.lastSequence);
       _scheduleDelivered();
@@ -1243,13 +1337,14 @@ class WorkbenchController extends ChangeNotifier {
   }
 
   /// Saves the draft text. Blank content clears it.
-  Future<void> saveDraft(String content) async {
+  Future<void> saveDraft(String content, {String? assistInteractionId}) async {
     final id = _selectedId;
     if (id == null) {
       return;
     }
     try {
-      await api.saveDraft(id, content);
+      await api.saveDraft(id, content,
+          assistInteractionId: assistInteractionId);
     } on ApiException {
       // A draft is a convenience: losing one must never interrupt a reply.
     }
@@ -1325,9 +1420,12 @@ class WorkbenchController extends ChangeNotifier {
 
   Future<void> claim() async {
     final id = _selectedId;
-    if (id == null) {
+    if (id == null || claiming) {
       return;
     }
+    _claimingId = id;
+    _threadError = null;
+    _notify();
     try {
       await api.claim(id);
       // The claim endpoint only acknowledges, so the assignment is read back
@@ -1339,7 +1437,12 @@ class WorkbenchController extends ChangeNotifier {
       // needs, not an error to hide.
       _threadError = failure.message;
       _notify();
+      // 抢单冲突后重新读取真实归属，不继续展示可接待按钮。
+      await _loadDetail(id);
       await refreshConversations(silent: true);
+    } finally {
+      _claimingId = null;
+      _notify();
     }
   }
 

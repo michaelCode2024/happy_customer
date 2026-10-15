@@ -28,6 +28,7 @@ class _StatsPageState extends State<StatsPage> {
   bool _loading = true;
   String? _error;
   int _days = 14;
+  int _loadRevision = 0;
 
   @override
   void initState() {
@@ -36,13 +37,14 @@ class _StatsPageState extends State<StatsPage> {
   }
 
   Future<void> _load() async {
+    final revision = ++_loadRevision;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
       final overview = await widget.workbench.api.stats(days: _days);
-      if (!mounted) {
+      if (!mounted || revision != _loadRevision) {
         return;
       }
       setState(() {
@@ -50,7 +52,7 @@ class _StatsPageState extends State<StatsPage> {
         _loading = false;
       });
     } catch (error) {
-      if (!mounted) {
+      if (!mounted || revision != _loadRevision) {
         return;
       }
       setState(() {
@@ -66,17 +68,10 @@ class _StatsPageState extends State<StatsPage> {
     final overview = _overview;
     return Scaffold(
       backgroundColor: Colors.transparent,
-      appBar: AppBar(
-        title: const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('每一份服务，都值得被看见。'),
-              SizedBox(height: 3),
-              Text('了解会话趋势、响应效率和团队工作量',
-                  style: TextStyle(fontSize: 12, color: Color(0xFF8992A3)))
-            ]),
-        toolbarHeight: 76,
-        backgroundColor: Colors.transparent,
+      appBar: WorkspaceAppBar(
+        title: '数据统计',
+        description: '了解会话趋势、响应效率和团队工作量',
+        icon: Icons.insights_outlined,
         actions: <Widget>[
           if (overview?.isTenantWide ?? false)
             Padding(

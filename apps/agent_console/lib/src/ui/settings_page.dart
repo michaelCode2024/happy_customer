@@ -1,3 +1,5 @@
+import 'package:relaydesk_agent_console/src/ui/workspace_layout.dart';
+import 'pwa_panel.dart';
 import 'package:relaydesk_agent_console/src/util/message_alert_stub.dart'
     if (dart.library.html) 'package:relaydesk_agent_console/src/util/message_alert_web.dart';
 import 'package:flutter/material.dart';
@@ -157,18 +159,10 @@ class _SettingsPageState extends State<SettingsPage> {
     final theme = Theme.of(context);
     return Scaffold(
       backgroundColor: Colors.transparent,
-      appBar: AppBar(
-        title: const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('个人设置'),
-              SizedBox(height: 3),
-              Text('管理你的工作状态、个人资料与外观',
-                  style: TextStyle(fontSize: 12, color: Color(0xFF71817E)))
-            ]),
-        toolbarHeight: 64,
-        backgroundColor: Colors.transparent,
-      ),
+      appBar: const WorkspaceAppBar(
+          title: '个人设置',
+          description: '管理你的工作状态、个人资料与外观',
+          icon: Icons.settings_outlined),
       body: ListenableBuilder(
         listenable: widget.session,
         builder: (context, _) {
@@ -432,7 +426,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         padding: const EdgeInsets.only(bottom: 4),
                         child: ListTile(
                             shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8)),
+                                borderRadius: BorderRadius.circular(16)),
                             selected: _settingsTab == i,
                             selectedTileColor: theme
                                 .colorScheme.primaryContainer
@@ -457,6 +451,8 @@ class _SettingsPageState extends State<SettingsPage> {
                       ][_settingsTab],
                       style: theme.textTheme.bodySmall),
                   const SizedBox(height: 16),
+                  if (_settingsTab == 3)
+                    PwaPanel(api: widget.session.api, settingsOnly: true),
                   for (final i in groups[_settingsTab])
                     Padding(
                         padding: const EdgeInsets.only(bottom: 16),
@@ -479,8 +475,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 Expanded(child: content)
               ]);
             return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              SizedBox(
-                  width: 240,
+              Container(
+                  width: 220,
+                  color: theme.colorScheme.surface,
                   child: SingleChildScrollView(
                       padding: const EdgeInsets.fromLTRB(16, 16, 0, 16),
                       child: navigation)),

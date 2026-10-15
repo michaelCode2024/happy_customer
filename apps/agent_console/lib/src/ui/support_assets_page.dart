@@ -12,12 +12,14 @@ class SupportAssetsPage extends StatefulWidget {
       this.knowledge = false,
       this.embedded = false,
       this.initialKnowledgeTab = 0,
-      this.onGapAdd});
+      this.onGapAdd,
+      this.onGapTest});
   final RelayDeskApi api;
   final bool knowledge;
   final bool embedded;
   final int initialKnowledgeTab;
-  final ValueChanged<String>? onGapAdd;
+  final Future<bool> Function(String)? onGapAdd;
+  final ValueChanged<String>? onGapTest;
   @override
   State<SupportAssetsPage> createState() => _SupportAssetsPageState();
 }
@@ -28,6 +30,8 @@ class _SupportAssetsPageState extends State<SupportAssetsPage> {
   List<Map<String, dynamic>> _categories = [];
   List<Map<String, dynamic>> _gaps = [];
   bool _loading = true;
+  bool _showResolved = false;
+  Map<String, dynamic> _feedback = {};
   String? _error;
   @override
   void initState() {
@@ -44,11 +48,14 @@ class _SupportAssetsPageState extends State<SupportAssetsPage> {
       if (widget.knowledge) {
         final values = await Future.wait([
           widget.api.adminGet('knowledge-categories'),
-          widget.api.adminGet('knowledge-gaps')
+          widget.api.adminGet(
+              'knowledge-gaps${_showResolved ? '?status=RESOLVED' : ''}'),
+          widget.api.assistFeedbackSummary(),
         ]);
         if (!mounted) return;
         _categories = asMapList(values[0]['items']);
         _gaps = asMapList(values[1]['items']);
+        _feedback = values[2];
       } else {
         final replies = await widget.api.cannedResponses();
         final tags = await widget.api.tags();
@@ -187,36 +194,57 @@ class _SupportAssetsPageState extends State<SupportAssetsPage> {
                       const PopupMenuItem(value: 'edit', child: Text('编辑')),
                     const PopupMenuItem(value: 'delete', child: Text('删除'))
                   ])));
+  // 嵌入知识库时由外层标签唯一控制正文，避免内外两组标签各选各的。
+  Widget _content(List<Widget> pages) => widget.knowledge && widget.embedded
+      ? Column(children: [
+          Align(
+              alignment: Alignment.centerRight,
+              child: IconButton(
+                  tooltip: '刷新素材',
+                  onPressed: _load,
+                  icon: const Icon(Icons.refresh))),
+          Expanded(child: pages[widget.initialKnowledgeTab]),
+        ])
+      : TabBarView(children: pages);
+
   @override
   Widget build(BuildContext context) => DefaultTabController(
       length: 2,
       initialIndex: widget.knowledge ? widget.initialKnowledgeTab : 0,
       child: Scaffold(
           backgroundColor: Colors.transparent,
-          appBar: AppBar(
-              toolbarHeight: widget.embedded ? 0 : kToolbarHeight,
-              title: Text(widget.knowledge ? '知识运营' : '团队素材'),
-              actions: [
-                IconButton(
-                    tooltip: '刷新',
-                    onPressed: _load,
-                    icon: const Icon(Icons.refresh))
-              ],
-              bottom: PreferredSize(
-                preferredSize: const Size.fromHeight(48),
-                child: Row(children: [
-                  Expanded(
-                      child: TabBar(
-                          tabs: widget.knowledge
-                              ? const [Tab(text: '分类与导入'), Tab(text: '未解决问题')]
-                              : const [Tab(text: '常用回复'), Tab(text: '会话标签')])),
-                  if (widget.embedded)
+          appBar: widget.knowledge && widget.embedded
+              ? null
+              : AppBar(
+                  toolbarHeight: widget.embedded ? 0 : kToolbarHeight,
+                  title: Text(widget.knowledge ? '知识运营' : '团队素材'),
+                  actions: [
                     IconButton(
-                        tooltip: '刷新素材',
+                        tooltip: '刷新',
                         onPressed: _load,
-                        icon: const Icon(Icons.refresh)),
-                ]),
-              )),
+                        icon: const Icon(Icons.refresh))
+                  ],
+                  bottom: PreferredSize(
+                    preferredSize: const Size.fromHeight(48),
+                    child: Row(children: [
+                      Expanded(
+                          child: TabBar(
+                              tabs: widget.knowledge
+                                  ? const [
+                                      Tab(text: '分类与导入'),
+                                      Tab(text: '未解决问题')
+                                    ]
+                                  : const [
+                                      Tab(text: '常用回复'),
+                                      Tab(text: '会话标签')
+                                    ])),
+                      if (widget.embedded)
+                        IconButton(
+                            tooltip: '刷新素材',
+                            onPressed: _load,
+                            icon: const Icon(Icons.refresh)),
+                    ]),
+                  )),
           body: _loading
               ? const Center(child: CircularProgressIndicator())
               : _error != null
@@ -225,81 +253,103 @@ class _SupportAssetsPageState extends State<SupportAssetsPage> {
                       Text(_error!),
                       OutlinedButton(onPressed: _load, child: const Text('重试'))
                     ]))
-                  : TabBarView(
-                      children: widget.knowledge
-                          ? [
-                              ListView(
-                                  padding: const EdgeInsets.all(24),
-                                  children: [
-                                    const WorkspaceHeading(
-                                        '分类与导入', '按业务整理知识，批量导入常见问题与答案'),
-                                    Wrap(
-                                        spacing: 12,
-                                        runSpacing: 12,
-                                        children: [
-                                          FilledButton.icon(
-                                              onPressed: () => _edit('知识分类'),
-                                              icon: const Icon(Icons.add),
-                                              label: const Text('添加分类')),
-                                          OutlinedButton.icon(
-                                              onPressed: () => _edit('批量导入'),
-                                              icon: const Icon(
-                                                  Icons.upload_outlined),
-                                              label: const Text('批量导入知识'))
-                                        ]),
-                                    const SizedBox(height: 20),
-                                    for (final c in _categories)
-                                      _row(
-                                          '知识分类',
-                                          asString(c['id']),
-                                          asString(c['name']),
-                                          '${c['entryCount'] ?? 0} 条知识')
-                                  ]),
-                              ListView(
-                                  padding: const EdgeInsets.all(24),
-                                  children: [
-                                    const WorkspaceHeading(
-                                        '未解决问题', '近 30 天未被 AI 解决的问题，帮助团队补充知识'),
-                                    if (_gaps.isEmpty)
-                                      const Text(
-                                          '暂无未解决问题。配置 AI 并接待访客后，这里会汇总知识缺口。'),
-                                    for (final gap in _gaps)
-                                      Card(
-                                          child: ListTile(
-                                              title: Text(
-                                                  asString(gap['question'])),
-                                              trailing: widget.onGapAdd == null
-                                                  ? null
-                                                  : TextButton(
-                                                      onPressed: () => widget
-                                                              .onGapAdd!(
+                  : _content(widget.knowledge
+                      ? [
+                          ListView(
+                              padding: const EdgeInsets.all(24),
+                              children: [
+                                const WorkspaceHeading(
+                                    '分类与导入', '按业务整理知识，批量导入常见问题与答案'),
+                                Wrap(spacing: 12, runSpacing: 12, children: [
+                                  FilledButton.icon(
+                                      onPressed: () => _edit('知识分类'),
+                                      icon: const Icon(Icons.add),
+                                      label: const Text('添加分类')),
+                                  OutlinedButton.icon(
+                                      onPressed: () => _edit('批量导入'),
+                                      icon: const Icon(Icons.upload_outlined),
+                                      label: const Text('批量导入知识'))
+                                ]),
+                                const SizedBox(height: 20),
+                                for (final c in _categories)
+                                  _row(
+                                      '知识分类',
+                                      asString(c['id']),
+                                      asString(c['name']),
+                                      '${c['entryCount'] ?? 0} 条知识')
+                              ]),
+                          ListView(
+                              padding: const EdgeInsets.all(24),
+                              children: [
+                                const WorkspaceHeading(
+                                    '未解决问题', '近 30 天未被 AI 解决的问题，帮助团队补充知识'),
+                                Text(
+                                    '近 30 天推荐回复：生成 ${_feedback['generated'] ?? 0} · 插入 ${_feedback['adopted'] ?? 0} · 已发送 ${_feedback['sent'] ?? 0} · 修改后发送 ${_feedback['edited'] ?? 0}'),
+                                const SizedBox(height: 6),
+                                Text(
+                                    '客服反馈：有用 ${_feedback['helpful'] ?? 0} · 需改进 ${_feedback['needsWork'] ?? 0}。插入和发送均不代表问题已解决。'),
+                                SwitchListTile(
+                                    title: const Text('查看已补充知识的问题'),
+                                    value: _showResolved,
+                                    onChanged: (value) {
+                                      setState(() => _showResolved = value);
+                                      _load();
+                                    }),
+                                if (_gaps.isEmpty) const Text('当前列表暂无问题。'),
+                                for (final gap in _gaps)
+                                  Card(
+                                      child: ListTile(
+                                          title:
+                                              Text(asString(gap['question'])),
+                                          trailing: _showResolved
+                                              ? TextButton(
+                                                  onPressed: widget.onGapTest ==
+                                                          null
+                                                      ? null
+                                                      : () => widget.onGapTest!(
                                                           asString(
                                                               gap['question'])),
+                                                  child: const Text('验证检索'))
+                                              : widget.onGapAdd == null
+                                                  ? null
+                                                  : TextButton(
+                                                      onPressed: () async {
+                                                        final saved = await widget
+                                                                .onGapAdd!(
+                                                            asString(gap[
+                                                                'question']));
+                                                        if (saved && mounted) {
+                                                          _notice(
+                                                              '知识已保存，原问题已关联。可在已补充列表验证检索。');
+                                                          await _load();
+                                                        }
+                                                      },
                                                       child:
                                                           const Text('补充知识')),
-                                              subtitle: Text(
-                                                  '出现 ${gap['count']} 次 · ${aiReasonLabel(asString(gap['reason']))}')))
-                                  ]),
-                            ]
-                          : [
-                              _list(
-                                  '常用回复',
-                                  '保存常见回答，在聊天输入框一键引用',
-                                  [
-                                    for (final reply in _replies)
-                                      _row('常用回复', reply.id, reply.title,
-                                          reply.content)
-                                  ],
-                                  () => _edit('常用回复')),
-                              _list(
-                                  '会话标签',
-                                  '统一会话分类，方便团队筛选与跟进',
-                                  [
-                                    for (final tag in _tags)
-                                      _row('标签', tag.id, tag.name, '')
-                                  ],
-                                  () => _edit('标签')),
-                            ])));
+                                          subtitle: Text(_showResolved
+                                              ? '已补充：${gap['knowledgeTitle']} · 可验证是否命中'
+                                              : '出现 ${gap['count']} 次 · ${aiReasonLabel(asString(gap['reason']))}')))
+                              ]),
+                        ]
+                      : [
+                          _list(
+                              '常用回复',
+                              '保存常见回答，在聊天输入框一键引用',
+                              [
+                                for (final reply in _replies)
+                                  _row('常用回复', reply.id, reply.title,
+                                      reply.content)
+                              ],
+                              () => _edit('常用回复')),
+                          _list(
+                              '会话标签',
+                              '统一会话分类，方便团队筛选与跟进',
+                              [
+                                for (final tag in _tags)
+                                  _row('标签', tag.id, tag.name, '')
+                              ],
+                              () => _edit('标签')),
+                        ])));
 }
 
 class _AssetEditor extends StatefulWidget {

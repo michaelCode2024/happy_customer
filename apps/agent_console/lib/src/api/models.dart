@@ -624,11 +624,14 @@ class AssistResult {
     this.label = '',
     this.score = 0.0,
     this.sources = const <String>[],
+    this.sourceDetails = const <KnowledgeHit>[],
     this.provider = '',
     this.available = false,
+    this.interactionId = '',
   });
 
   factory AssistResult.fromJson(Map<String, dynamic> json) => AssistResult(
+        interactionId: asString(json['interactionId']),
         task: asString(json['task']),
         text: asString(json['text']),
         label: asString(json['label']),
@@ -638,14 +641,19 @@ class AssistResult {
                 .toList(growable: false) ??
             const <String>[],
         provider: asString(json['provider']),
+        sourceDetails: asMapList(json['sourceDetails'])
+            .map(KnowledgeHit.fromJson)
+            .toList(growable: false),
         available: asBool(json['available']),
       );
 
   final String task;
+  final String interactionId;
   final String text;
   final String label;
   final double score;
   final List<String> sources;
+  final List<KnowledgeHit> sourceDetails;
   final String provider;
   final bool available;
 }
@@ -723,15 +731,12 @@ class Conversation {
 
   /// 已分配给别人（含对方尚未确认接单）。
   bool isHeldByOther(String selfId) =>
-      selfId.isNotEmpty &&
-      !isUnassigned &&
-      assigneeId != selfId;
+      selfId.isNotEmpty && !isUnassigned && assigneeId != selfId;
 
   /// 当前客服是否可以点「开始接待 / 确认接单」。
   bool canClaim(String selfId) =>
       isUnassigned ||
-      (needsAcceptance &&
-          (selfId.isEmpty || assigneeId == selfId));
+      (needsAcceptance && (selfId.isEmpty || assigneeId == selfId));
 
   /// 公开回复的拦截原因；null 表示可发。已解决会话允许发送（服务端会重新打开）。
   String? publicReplyBlockReason(String selfId) {

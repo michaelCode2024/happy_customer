@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http/httptest"
 	"os"
@@ -53,6 +54,20 @@ func TestReceptionAcceptanceAndTimeout(t *testing.T) {
 		}
 	}()
 	a := &API{db: db, logger: slog.Default(), bus: realtime.NewBus(db, realtime.NewHub(slog.Default()), slog.Default()), webhooks: webhook.NewDispatcher(db, 3, slog.Default())}
+	checkQueue := func(agent uuid.UUID, want int) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		a.consoleConversations(w, httptest.NewRequest("GET", "/?filter=reception", nil), auth.Principal{TenantID: tenant, AgentID: agent})
+		var body struct {
+			Items   []conversationView `json:"items"`
+			Waiting int                `json:"receptionWaiting"`
+		}
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &body) != nil || len(body.Items) != want || body.Waiting != want {
+			t.Fatalf("reception queue: status=%d body=%s want=%d", w.Code, w.Body, want)
+		}
+	}
+	checkQueue(first, 1)
+	checkQueue(second, 1)
 	// 实际管理接口持久化超时配置，并拒绝越界值。
 	for _, v := range []struct {
 		body string
@@ -80,6 +95,8 @@ func TestReceptionAcceptanceAndTimeout(t *testing.T) {
 	if timedOut == second {
 		replacement = first
 	}
+	checkQueue(timedOut, 1)
+	checkQueue(replacement, 0)
 	var accepted, expires *time.Time
 	var paused bool
 	if err = db.QueryRow(ctx, `select accepted_at,assignment_expires_at,bot_paused from conversation where id=$1`, conversation).Scan(&accepted, &expires, &paused); err != nil {
@@ -133,6 +150,7 @@ func TestReceptionAcceptanceAndTimeout(t *testing.T) {
 	if err = a.acceptReception(ctx, tenant, conversation, replacement, "客服乙"); err != nil {
 		t.Fatal(err)
 	}
+	checkQueue(replacement, 0)
 	if err = a.acceptReception(ctx, tenant, conversation, replacement, "客服乙"); err != nil {
 		t.Fatal(err)
 	}

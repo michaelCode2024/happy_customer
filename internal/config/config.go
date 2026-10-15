@@ -224,7 +224,7 @@ func Load() (Config, error) {
 			TimeoutSeconds:      aiTimeout,
 			ConfidenceThreshold: threshold,
 			AutoReplyEnabled:    autoReply,
-			EmbeddingProvider:   env("AI_EMBEDDING_PROVIDER", env("AI_PROVIDER", "")),
+			EmbeddingProvider:   envAllowEmpty("AI_EMBEDDING_PROVIDER", env("AI_PROVIDER", "")),
 			EmbeddingModel:      env("AI_EMBEDDING_MODEL", "text-embedding-ada-002"),
 		},
 		RateLimit: RateLimit{
@@ -258,6 +258,14 @@ func Load() (Config, error) {
 
 func env(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}
+
+// 显式留空表示禁用向量服务，不能再次回退到仅支持文本的聊天提供方。
+func envAllowEmpty(key, fallback string) string {
+	if value, exists := os.LookupEnv(key); exists {
 		return value
 	}
 	return fallback

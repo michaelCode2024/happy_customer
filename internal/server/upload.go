@@ -112,9 +112,11 @@ func (a *API) canUploadTo(r *http.Request, principal auth.Principal, conversatio
 		return false
 	}
 	if principal.Kind == auth.KindAgent {
-		if _, active := a.currentAgent(r.Context(), principal); !active || !a.authn.SessionValid(r.Context(), principal.SessionID, principal.AgentID) {
+		current, active := a.currentAgent(r.Context(), principal)
+		if !active || !a.authn.SessionValid(r.Context(), principal.SessionID, principal.AgentID) {
 			return false
 		}
+		principal = current
 	}
 	switch principal.Kind {
 	case auth.KindWidget:
@@ -227,9 +229,11 @@ func (a *API) authorizeAttachment(r *http.Request, tenantID, conversationID uuid
 		return false
 	}
 	if principal.Kind == auth.KindAgent {
-		if _, active := a.currentAgent(r.Context(), principal); !active || !a.authn.SessionValid(r.Context(), principal.SessionID, principal.AgentID) {
+		current, active := a.currentAgent(r.Context(), principal)
+		if !active || !a.authn.SessionValid(r.Context(), principal.SessionID, principal.AgentID) {
 			return false
 		}
+		principal = current
 	}
 	switch principal.Kind {
 	case auth.KindWidget:
@@ -238,13 +242,7 @@ func (a *API) authorizeAttachment(r *http.Request, tenantID, conversationID uuid
 			where id=$1 and visitor_id=$2)`, conversationID, principal.VisitorID).Scan(&exists)
 		return err == nil && exists
 	case auth.KindAgent:
-		var allowed bool
-		err := a.db.QueryRow(r.Context(), `
-			select exists(select 1 from conversation c
-			 where c.id=$1 and c.tenant_id=$2
-			   and (exists (select 1 from agent_inbox ai where ai.inbox_id = c.inbox_id and ai.agent_id = $3)
-			        or c.assignee_id = $3))`, conversationID, principal.TenantID, principal.AgentID).Scan(&allowed)
-		return err == nil && allowed
+		return a.agentConversationAccess(r.Context(), principal, conversationID)
 	}
 	return false
 }

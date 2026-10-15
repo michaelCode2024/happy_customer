@@ -123,7 +123,17 @@ func (a *API) consoleSocket(w http.ResponseWriter, r *http.Request) {
 	} else {
 		channels = append(channels, a.inboxChannels(r.Context(), principal.TenantID, principal.AgentID)...)
 	}
-	subscriber := a.hub.Subscribe(conn, channels)
+	streamPrincipal := principal
+	// Daily reception streams stay personal even for a supervisor. Team watching
+	// requires an explicit scope and the supervisor role.
+	if !(auth.CanViewReports(principal.Role) && r.URL.Query().Get("scope") == "team") {
+		streamPrincipal.Role = auth.RoleAgent
+	}
+	subscriber := a.hub.SubscribeFiltered(conn, channels, func(payload []byte) []byte {
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+		return a.filterConsoleEvent(ctx, principal, payload)
+	})
 	defer a.hub.Unsubscribe(subscriber)
 	a.guardSocket(r.Context(), subscriber, principal)
 
@@ -347,12 +357,7 @@ func (a *API) visitorOwnsConversation(r *http.Request, p auth.Principal, convers
 }
 
 func (a *API) agentCanSee(r *http.Request, p auth.Principal, conversationID uuid.UUID) bool {
-	var allowed bool
-	err := a.db.QueryRow(r.Context(), `select exists(select 1 from conversation c
-		where c.id = $1 and c.tenant_id = $2
-		  and (exists (select 1 from agent_inbox ai where ai.inbox_id = c.inbox_id and ai.agent_id = $3)
-		       or c.assignee_id = $3))`, conversationID, p.TenantID, p.AgentID).Scan(&allowed)
-	return err == nil && allowed
+	return a.agentConversationAccess(r.Context(), p, conversationID)
 }
 
 // markRead is the shared read-cursor update used by the REST and socket paths.
@@ -403,6 +408,12 @@ func (a *API) advanceReceipt(ctx context.Context, conversationID, tenantID uuid.
 		return err
 	}
 	if read {
+		if readerType == "AGENT" {
+			_, err = tx.Exec(ctx, `update agent_notification n set read_at=now() where n.tenant_id=$1 and n.agent_id=$2 and n.conversation_id=$3 and n.read_at is null and (n.message_id is null or exists(select 1 from message m where m.id=n.message_id and m.sequence<=$4))`, tenantID, readerID, conversationID, sequence)
+			if err != nil {
+				return err
+			}
+		}
 		unreadColumn := "agent_unread"
 		predicate := "sender_type='VISITOR'"
 		if readerType == "VISITOR" {

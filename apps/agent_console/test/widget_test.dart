@@ -56,6 +56,12 @@ void main() {
   testWidgets('submitting an empty form reports every field', (tester) async {
     await boot(tester, MemoryCredentialStore());
 
+    // 客户端已有默认服务地址，空表单用例需要显式清空该字段。
+    await tester.ensureVisible(find.text('高级设置'));
+    await tester.tap(find.text('高级设置'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextFormField, '服务器地址'), '');
+
     await tester.ensureVisible(find.text('登录'));
     await tester.tap(find.text('登录'));
     await tester.pumpAndSettle();
@@ -102,6 +108,16 @@ void main() {
 
     final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
     expect(app.themeMode, ThemeMode.dark);
+    expect(tester.widget<Scaffold>(find.byType(Scaffold).first).backgroundColor,
+        const Color(0xFF171B22));
+  });
+
+  testWidgets('浅色登录页与网页共享背景使用纯白色', (tester) async {
+    final store = MemoryCredentialStore();
+    await store.saveThemeMode('light');
+    await boot(tester, store);
+    expect(tester.widget<Scaffold>(find.byType(Scaffold).first).backgroundColor,
+        Colors.white);
   });
 
   testWidgets('the operations console is reachable and comes back',
@@ -131,6 +147,11 @@ void main() {
     await tester.ensureVisible(find.text('平台管理员登录'));
     await tester.tap(find.text('平台管理员登录'));
     await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.text('高级设置'));
+    await tester.tap(find.text('高级设置'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextFormField, '服务器地址'), '');
 
     await tester.ensureVisible(find.text('登录'));
     await tester.tap(find.text('登录'));

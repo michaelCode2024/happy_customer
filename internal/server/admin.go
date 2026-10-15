@@ -1791,15 +1791,21 @@ func (a *API) adminKnowledgeGaps(w http.ResponseWriter, r *http.Request, p auth.
 	if days < 1 || days > 365 {
 		days = 30
 	}
+	resolved := r.URL.Query().Get("status") == "RESOLVED"
 	rows, err := a.db.Query(r.Context(), `
-		select coalesce(m.content, ''), coalesce(i.reason, ''), count(*)::int, max(i.created_at)
+		select coalesce(m.content, ''), coalesce(i.reason, ''), count(*)::int, max(i.created_at),coalesce(k.id::text,''),coalesce(k.title,'')
 		  from ai_interaction i
 		  left join message m on m.id = i.question_message_id
+		  left join knowledge_gap_resolution g on g.tenant_id=i.tenant_id and g.question_hash=md5(m.content)
+		  left join knowledge_entry k on k.id=g.knowledge_id and k.tenant_id=i.tenant_id and k.status='ACTIVE'
 		 where i.tenant_id = $1 and i.answered = false
+		   and i.reason in ('NO_KNOWLEDGE_BASE', 'LOW_CONFIDENCE')
+		   and m.deleted_at is null and btrim(coalesce(m.content, '')) <> ''
 		   and i.created_at >= now() - make_interval(days => $2::int)
-		 group by 1, 2
+		 group by 1, 2,k.id,k.title,g.resolved_at
+		 having $3 = (k.id is not null and max(i.created_at)<=g.resolved_at)
 		 order by 3 desc, 4 desc
-		 limit 50`, p.TenantID, days)
+		 limit 50`, p.TenantID, days, resolved)
 	if err != nil {
 		a.logger.Error("knowledge gaps failed", "error", err)
 		fail(w, 500, "查询未命中问题失败")
@@ -1808,15 +1814,15 @@ func (a *API) adminKnowledgeGaps(w http.ResponseWriter, r *http.Request, p auth.
 	defer rows.Close()
 	items := make([]map[string]any, 0, 20)
 	for rows.Next() {
-		var question, reason string
+		var question, reason, knowledgeID, knowledgeTitle string
 		var count int
 		var lastAt time.Time
-		if err := rows.Scan(&question, &reason, &count, &lastAt); err != nil {
+		if err := rows.Scan(&question, &reason, &count, &lastAt, &knowledgeID, &knowledgeTitle); err != nil {
 			fail(w, 500, "查询未命中问题失败")
 			return
 		}
 		items = append(items, map[string]any{
-			"question": question, "reason": reason, "count": count, "lastAskedAt": lastAt,
+			"question": question, "reason": reason, "count": count, "lastAskedAt": lastAt, "knowledgeId": knowledgeID, "knowledgeTitle": knowledgeTitle, "resolved": resolved,
 		})
 	}
 	respond(w, 200, map[string]any{"items": items, "days": days})

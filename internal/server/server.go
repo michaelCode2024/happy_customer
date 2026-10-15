@@ -99,6 +99,7 @@ func New(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) (*API, error)
 // Run starts the background workers (event bus, webhook retries, retention) and
 // returns when ctx is cancelled.
 func (a *API) Run(ctx context.Context) {
+	go a.pushLoop(ctx)
 	go a.bus.Start(ctx)
 	go a.webhooks.Run(ctx)
 	go a.retentionLoop(ctx)
@@ -111,6 +112,7 @@ func (a *API) Handler() http.Handler {
 	a.registerStatic(mux)
 	a.registerWidget(mux)
 	a.registerConsole(mux)
+	a.registerNotifications(mux)
 	a.registerAdmin(mux)
 	a.registerPlatform(mux)
 	a.registerOpen(mux)

@@ -32,6 +32,7 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
   final _search = TextEditingController();
   final _scroll = ScrollController();
   Timer? _searchDebounce;
+  int _receptionQueueRequest = 0;
 
   @override
   void initState() {
@@ -70,6 +71,11 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
       listenable: widget.workbench,
       builder: (context, _) {
         final workbench = widget.workbench;
+        if (_receptionQueueRequest != workbench.receptionQueueRequest) {
+          _receptionQueueRequest = workbench.receptionQueueRequest;
+          _searchDebounce?.cancel();
+          _search.clear();
+        }
         return Column(
           children: <Widget>[
             // 对齐腾讯 IM：顶栏「会话」+ 筛选 Tab + 搜索，列表信息密度更高。
@@ -84,16 +90,15 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
                     ),
                   ),
                   const Spacer(),
-                  if (workbench.queued > 0)
+                  if (workbench.receptionWaiting > 0)
                     Padding(
                       padding: const EdgeInsets.only(right: 4),
                       child: Tooltip(
-                        message: '未分配、需点击「开始接待」领取的会话',
+                        message: '待领取或派给你尚未确认的会话',
                         child: InkWell(
-                          onTap: () =>
-                              workbench.setFilter(QueueFilter.unassigned),
+                          onTap: workbench.showReceptionQueue,
                           borderRadius: BorderRadius.circular(8),
-                          child: _QueueChip(count: workbench.queued),
+                          child: _QueueChip(count: workbench.receptionWaiting),
                         ),
                       ),
                     ),

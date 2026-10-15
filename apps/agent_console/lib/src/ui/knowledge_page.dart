@@ -1,3 +1,5 @@
+import 'package:relaydesk_agent_console/src/ui/design_a.dart';
+import 'package:relaydesk_agent_console/src/ui/workspace_layout.dart';
 import 'package:relaydesk_agent_console/src/util/labels.dart';
 import 'package:relaydesk_agent_console/src/ui/support_assets_page.dart';
 import 'package:flutter/material.dart';
@@ -170,7 +172,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
     }
   }
 
-  Future<void> _edit(
+  Future<bool> _edit(
       {KnowledgeEntry? existing, String initialQuestion = ''}) async {
     List<Map<String, dynamic>> categories;
     try {
@@ -179,9 +181,9 @@ class _KnowledgePageState extends State<KnowledgePage> {
       if (mounted)
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text("读取分类失败：$error")));
-      return;
+      return false;
     }
-    if (!mounted) return;
+    if (!mounted) return false;
     final saved = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
@@ -195,6 +197,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
                     title: draft.title,
                     content: draft.content,
                     questionExamples: draft.examples,
+                    sourceQuestion: initialQuestion,
                     categoryId: draft.categoryId);
               } else {
                 await widget.workbench.api.updateKnowledge(
@@ -206,6 +209,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
               }
             }));
     if (saved == true && mounted) await _load();
+    return saved == true;
   }
 
   Future<void> _delete(KnowledgeEntry entry) async {
@@ -281,141 +285,235 @@ class _KnowledgePageState extends State<KnowledgePage> {
     final canEdit = widget.session.agent?.canManageKnowledge ?? false;
     return Scaffold(
         backgroundColor: Colors.transparent,
-        body: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Padding(
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
-              child: Wrap(
-                  alignment: WrapAlignment.spaceBetween,
-                  spacing: 16,
-                  runSpacing: 12,
-                  children: [
-                    Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('AI 知识中心', style: theme.textTheme.headlineSmall),
-                          const SizedBox(height: 4),
-                          Text('维护知识 → 检验回答 → 补齐未解决问题',
-                              style: theme.textTheme.bodySmall)
-                        ]),
-                    Wrap(spacing: 8, children: [
-                      OutlinedButton.icon(
-                          onPressed: _load,
-                          icon: const Icon(Icons.refresh, size: 18),
-                          label: const Text('刷新')),
-                      if (canEdit)
-                        FilledButton.icon(
-                            onPressed: () => _edit(),
-                            icon: const Icon(Icons.add, size: 18),
-                            label: const Text('新增知识'))
-                    ])
-                  ])),
-          if (canEdit)
-            Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(children: [
-                      for (final item in <(int, String)>[
-                        (0, '知识与回答测试'),
-                        if (canEdit) (1, '分类与批量导入'),
-                        if (canEdit) (2, '未解决问题')
-                      ])
-                        Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: ChoiceChip(
-                                label: Text(item.$2),
-                                selected: _tab == item.$1,
-                                onSelected: (_) {
-                                  setState(() => _tab = item.$1);
-                                  if (item.$1 == 0) _load();
-                                }))
-                    ]))),
-          if (_tab == 0)
-            Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
-                child: Wrap(spacing: 10, runSpacing: 8, children: [
-                  _summary(theme, '本次加载', '${_entries.length} 条'),
-                  _summary(theme, '已启用',
-                      '${_entries.where((e) => e.status == 'ACTIVE').length} 条'),
-                  _summary(theme, '缺少相似问法',
-                      '${_entries.where((e) => e.questionExamples.isEmpty).length} 条'),
-                  _summary(theme, '内容分类', '${_categories.length} 类')
-                ])),
-          Expanded(
-              child: _tab != 0
-                  ? SupportAssetsPage(
-                      key: ValueKey(_tab),
-                      api: widget.workbench.api,
-                      knowledge: true,
-                      embedded: true,
-                      onGapAdd: (q) => _edit(initialQuestion: q),
-                      initialKnowledgeTab: _tab == 2 ? 1 : 0)
-                  : LayoutBuilder(builder: (context, c) {
-                      final list = _buildList(theme, canEdit),
-                          bench = _buildBench(theme);
-                      if (c.maxWidth < 1000) {
-                        return Column(children: [
-                          Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-                              child: Row(children: [
-                                ChoiceChip(
-                                    label: const Text('知识管理'),
-                                    selected: !_mobileBench,
-                                    onSelected: (_) =>
-                                        setState(() => _mobileBench = false)),
-                                const SizedBox(width: 8),
-                                ChoiceChip(
-                                    label: const Text('回答测试'),
-                                    selected: _mobileBench,
-                                    onSelected: (_) =>
-                                        setState(() => _mobileBench = true))
-                              ])),
-                          Expanded(
-                              child: Padding(
-                                  padding:
-                                      const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                                  child: _mobileBench
-                                      ? SingleChildScrollView(child: bench)
-                                      : list))
-                        ]);
-                      }
-                      return Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                          child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(flex: 7, child: list),
-                                const SizedBox(width: 20),
-                                Expanded(
-                                    flex: 4,
-                                    child: SingleChildScrollView(child: bench))
-                              ]));
-                    }))
-        ]));
+        body: LayoutBuilder(builder: (context, viewport) {
+          final content =
+              Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            WorkspacePageHeader(
+              title: '知识库',
+              description: '让 AI 从准确的企业知识中找到答案',
+              icon: Icons.menu_book_outlined,
+              actions: [
+                OutlinedButton.icon(
+                    onPressed: _loading ? null : _load,
+                    icon: const Icon(Icons.refresh, size: 16),
+                    label: const Text('刷新')),
+                if (canEdit)
+                  FilledButton.icon(
+                      onPressed: () => _edit(),
+                      icon: const Icon(Icons.add, size: 16),
+                      label: const Text('新增知识')),
+              ],
+            ),
+            LayoutBuilder(
+                builder: (context, box) => _tab != 0 || box.maxWidth < 900
+                    ? const SizedBox.shrink()
+                    : const Padding(
+                        padding: EdgeInsets.fromLTRB(28, 0, 28, 20),
+                        child: TongYuHero(
+                            compact: true,
+                            title: '你的团队经验，值得一个更好的家。',
+                            description: '把产品说明、接入指引与常见问答整理在一起，为每一次回答提供依据。',
+                            eyebrow: 'KNOWLEDGE / 团队知识'))),
+            WorkspaceTabs(
+                labels: ['知识管理', if (canEdit) '分类与批量导入', if (canEdit) '未解决问题'],
+                selectedIndex: _tab,
+                onSelected: (index) {
+                  setState(() => _tab = index);
+                  if (index == 0) _load();
+                }),
+            if (_tab == 0) _metrics(theme),
+            if (_tab == 0 && _categories.isNotEmpty) _categoryCards(theme),
+            Expanded(
+                child: _tab != 0
+                    ? SupportAssetsPage(
+                        key: ValueKey(_tab),
+                        api: widget.workbench.api,
+                        knowledge: true,
+                        embedded: true,
+                        onGapAdd: (q) => _edit(initialQuestion: q),
+                        onGapTest: (q) {
+                          setState(() {
+                            _tab = 0;
+                            _mobileBench = true;
+                            _question.text = q;
+                          });
+                          _runRetrieval();
+                        },
+                        initialKnowledgeTab: _tab == 2 ? 1 : 0)
+                    : LayoutBuilder(builder: (context, c) {
+                        final list = _buildList(theme, canEdit),
+                            bench = _buildBench(theme);
+                        if (c.maxWidth < 880) {
+                          return Column(children: [
+                            Padding(
+                                padding:
+                                    const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                                child: Row(children: [
+                                  ChoiceChip(
+                                      label: const Text('知识管理'),
+                                      selected: !_mobileBench,
+                                      onSelected: (_) =>
+                                          setState(() => _mobileBench = false)),
+                                  const SizedBox(width: 8),
+                                  ChoiceChip(
+                                      label: const Text('回答测试'),
+                                      selected: _mobileBench,
+                                      onSelected: (_) =>
+                                          setState(() => _mobileBench = true))
+                                ])),
+                            Expanded(
+                                child: Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                        16, 0, 16, 16),
+                                    child: _mobileBench
+                                        ? SingleChildScrollView(child: bench)
+                                        : list))
+                          ]);
+                        }
+                        return Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                            child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(flex: 7, child: list),
+                                  const SizedBox(width: 20),
+                                  Expanded(
+                                      flex: 4,
+                                      child:
+                                          SingleChildScrollView(child: bench))
+                                ]));
+                      }))
+          ]);
+          return viewport.maxWidth >= 900
+              ? SingleChildScrollView(
+                  child: SizedBox(
+                      height:
+                          viewport.maxHeight < 1000 ? 1000 : viewport.maxHeight,
+                      child: content))
+              : content;
+        }));
   }
+
+  Widget _metrics(ThemeData theme) => LayoutBuilder(builder: (context, box) {
+        final metrics = [
+          ('知识条目', '${_entries.length}', Icons.menu_book_outlined),
+          (
+            '已启用',
+            '${_entries.where((e) => e.status == 'ACTIVE').length}',
+            Icons.check_circle_outline
+          ),
+          (
+            '缺少相似问法',
+            '${_entries.where((e) => e.questionExamples.isEmpty).length}',
+            Icons.edit_note_outlined
+          ),
+          ('内容分类', '${_categories.length}', Icons.category_outlined),
+        ];
+        return Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+            child: box.maxWidth < 900
+                ? Wrap(spacing: 10, runSpacing: 8, children: [
+                    for (final m in metrics) _summary(theme, m.$1, m.$2)
+                  ])
+                : Row(children: [
+                    for (var i = 0; i < metrics.length; i++) ...[
+                      if (i > 0) const SizedBox(width: 14),
+                      Expanded(
+                          child: WorkspaceKpiCard(
+                              label: metrics[i].$1,
+                              value: metrics[i].$2,
+                              icon: metrics[i].$3)),
+                    ]
+                  ]));
+      });
+
+  Widget _categoryCards(ThemeData theme) =>
+      LayoutBuilder(builder: (context, box) {
+        if (box.maxWidth < 900) return const SizedBox.shrink();
+        return SizedBox(
+            height: 104,
+            child: ListView.separated(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                scrollDirection: Axis.horizontal,
+                itemCount: _categories.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                itemBuilder: (context, index) {
+                  final c = _categories[index],
+                      id = asString(_categories[index]['id']);
+                  final count =
+                      _entries.where((e) => e.categoryId == id).length;
+                  return SizedBox(
+                      width: 210,
+                      child: Material(
+                          color: _categoryFilter == id
+                              ? theme.colorScheme.primaryContainer
+                              : theme.colorScheme.surface,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                              side: BorderSide(
+                                  color: theme.colorScheme.outlineVariant)),
+                          child: InkWell(
+                              borderRadius: BorderRadius.circular(14),
+                              onTap: () => setState(() => _categoryFilter =
+                                  _categoryFilter == id ? '' : id),
+                              child: Padding(
+                                  padding: const EdgeInsets.all(14),
+                                  child: Row(children: [
+                                    Icon(Icons.folder_open_outlined,
+                                        color: theme.colorScheme.primary),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                        child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            children: [
+                                          Text(asString(c['name']),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                  fontWeight: FontWeight.w600)),
+                                          const SizedBox(height: 5),
+                                          Text('$count 篇 · 查看知识 ↗',
+                                              style: theme.textTheme.bodySmall),
+                                        ])),
+                                  ])))));
+                }));
+      });
 
   Widget _summary(ThemeData theme, String title, String value) => Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
           color: theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: theme.colorScheme.outlineVariant)),
+          borderRadius: BorderRadius.circular(6)),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Text(title, style: theme.textTheme.bodySmall),
-        const SizedBox(width: 16),
-        Text(value, style: theme.textTheme.titleSmall)
+        const SizedBox(width: 10),
+        Text(value,
+            style: theme.textTheme.titleSmall
+                ?.copyWith(color: theme.colorScheme.primary))
       ]));
 
   Widget _buildList(ThemeData theme, bool canEdit) {
     return Container(
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(8),
-        border:
-            Border.all(color: theme.colorScheme.outlineVariant.withAlpha(120)),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
       child: Column(
         children: <Widget>[
+          Padding(
+              padding: const EdgeInsets.fromLTRB(18, 18, 18, 4),
+              child: Row(children: [
+                const Icon(Icons.article_outlined, size: 18),
+                const SizedBox(width: 8),
+                Text('知识条目', style: theme.textTheme.titleSmall),
+                const Spacer(),
+                Text('${_visibleEntries.length} 条',
+                    style: theme.textTheme.bodySmall),
+              ])),
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
             child: Row(
@@ -425,6 +523,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
                     controller: _search,
                     decoration: const InputDecoration(
                       hintText: '搜索标题或内容',
+                      prefixIcon: Icon(Icons.search, size: 18),
                       contentPadding:
                           EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                       isDense: true,
@@ -533,7 +632,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    '把常见问答、产品说明、退换政策录进来，AI 就能自动回答。',
+                                    '添加产品说明和常见问答，作为 AI 推荐回复的参考。',
                                     textAlign: TextAlign.center,
                                     style: theme.textTheme.bodySmall?.copyWith(
                                       color: theme.colorScheme.onSurfaceVariant,
@@ -693,24 +792,29 @@ class _KnowledgePageState extends State<KnowledgePage> {
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(8),
-        border:
-            Border.all(color: theme.colorScheme.outlineVariant.withAlpha(120)),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
+          const Center(child: TongYuArtwork(ai: true, size: 145)),
+          const SizedBox(height: 10),
+          Text('让好知识，遇见好答案。',
+              style: theme.textTheme.titleLarge
+                  ?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 16),
           Row(
             children: <Widget>[
-              Icon(Icons.science_outlined,
-                  size: 18, color: theme.colorScheme.primary),
+              Icon(Icons.auto_awesome_outlined,
+                  size: 20, color: theme.colorScheme.primary),
               const SizedBox(width: 8),
-              Text('回答测试台', style: theme.textTheme.titleSmall),
+              Text('AI 回答测试', style: theme.textTheme.titleSmall),
             ],
           ),
           const SizedBox(height: 6),
           Text(
-            '模拟客户提问，验证知识命中与 AI 回答。',
+            '模拟真实提问，检查回答内容与知识来源。',
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
@@ -730,7 +834,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
               alignLabelWithHint: true,
               filled: true,
               labelText: '模拟客户提问',
-              hintText: '例如：订单什么时候发货？',
+              hintText: '例如：网站嵌入支持手机访问吗？',
             ),
           ),
           const SizedBox(height: 10),
@@ -777,7 +881,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
               decoration: BoxDecoration(
                   color:
                       theme.colorScheme.surfaceContainerHighest.withAlpha(65),
-                  borderRadius: BorderRadius.circular(8)),
+                  borderRadius: BorderRadius.circular(16)),
               child: Column(children: [
                 Icon(Icons.chat_bubble_outline,
                     size: 28, color: theme.colorScheme.outline),
@@ -864,7 +968,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
                   decoration: BoxDecoration(
                     color:
                         theme.colorScheme.surfaceContainerHighest.withAlpha(90),
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(16),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

@@ -18,11 +18,11 @@ void main() {
     );
   });
 
-  test('native app does not guess an address', () {
+  test('native app uses the configured TongYu service', () {
     expect(
       initialServerHint('',
           web: false, location: Uri.parse('https://chat.example.com/console/')),
-      '',
+      'https://chat.lookfunny.xyz',
     );
   });
 }

@@ -149,7 +149,7 @@ void main() {
       // 有历史消息时错误也要出现在横幅，不能只埋在空会话占位文案里。
       expect(find.textContaining('开始接待'), findsWidgets);
       await tester.enterText(find.byType(TextField).last, '草稿应保留');
-      await tester.tap(find.text('发送'));
+      await tester.tap(width < 760 ? find.byTooltip('发送') : find.text('发送'));
       await tester.pumpAndSettle();
       expect(find.text('草稿应保留'), findsOneWidget);
       expect(tester.takeException(), isNull);

@@ -1,3 +1,4 @@
+import 'package:relaydesk_agent_console/src/ui/design_a.dart';
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
@@ -133,7 +134,7 @@ class _ManualQuotaPageState extends State<ManualQuotaPage> {
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(16),
           border:
               Border.all(color: Theme.of(context).colorScheme.outlineVariant)),
       child: child);
@@ -148,11 +149,11 @@ class _ManualQuotaPageState extends State<ManualQuotaPage> {
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(
               widget.history
-                  ? '操作记录'
+                  ? '额度变更记录'
                   : widget.overview
-                      ? '平台概览'
-                      : '套餐与额度',
-              style: theme.textTheme.headlineSmall
+                      ? '运营概况'
+                      : '企业服务额度',
+              style: theme.textTheme.titleMedium
                   ?.copyWith(fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
           Text(widget.history ? '追溯额度调整前后、操作者与原因' : '企业服务与额度统一管理',
@@ -164,12 +165,20 @@ class _ManualQuotaPageState extends State<ManualQuotaPage> {
             icon: const Icon(Icons.refresh))
       ]),
       const SizedBox(height: 20),
+      if (widget.overview) ...[
+        const TongYuHero(
+            compact: true,
+            title: '看见服务全貌，让团队稳步前行。',
+            description: '企业服务、套餐额度与近期变更，在一个清晰的空间里管理。',
+            eyebrow: 'PLATFORM / 平台运营'),
+        const SizedBox(height: 20)
+      ],
       if (!widget.history) ...[
         Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
                 color: theme.colorScheme.primaryContainer.withOpacity(.4),
-                borderRadius: BorderRadius.circular(10)),
+                borderRadius: BorderRadius.circular(16)),
             child: const Row(children: [
               Icon(Icons.verified_user_outlined),
               SizedBox(width: 12),
@@ -551,7 +560,7 @@ class _ManualQuotaEditorState extends State<ManualQuotaEditor> {
       padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(16),
           border:
               Border.all(color: Theme.of(context).colorScheme.outlineVariant)),
       child: child);
@@ -671,17 +680,18 @@ class _ManualQuotaEditorState extends State<ManualQuotaEditor> {
           child: Row(children: [
         Container(
           width: 216,
-          color: const Color(0xff182334),
+          color: theme.colorScheme.surface,
           padding: const EdgeInsets.fromLTRB(18, 28, 18, 20),
           child:
               Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            const Text('通语',
+            Text('通语',
                 style: TextStyle(
-                    color: Colors.white,
+                    color: theme.colorScheme.onSurface,
                     fontSize: 24,
                     fontWeight: FontWeight.w700)),
             const SizedBox(height: 8),
-            const Text('超级管理员', style: TextStyle(color: Color(0xffa4b0c2))),
+            Text('平台管理 · 超级管理员',
+                style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
             const SizedBox(height: 36),
             for (final item in const [
               (PlatformSection.overview, '平台概览', Icons.dashboard_outlined),
@@ -700,9 +710,9 @@ class _ManualQuotaEditorState extends State<ManualQuotaEditor> {
                     style: TextButton.styleFrom(
                       foregroundColor: item.$1 == PlatformSection.plans
                           ? Colors.white
-                          : const Color(0xffa4b0c2),
+                          : theme.colorScheme.onSurfaceVariant,
                       backgroundColor: item.$1 == PlatformSection.plans
-                          ? const Color(0xff4263eb)
+                          ? theme.colorScheme.primaryContainer
                           : Colors.transparent,
                       alignment: Alignment.centerLeft,
                       padding: const EdgeInsets.symmetric(
@@ -719,7 +729,7 @@ class _ManualQuotaEditorState extends State<ManualQuotaEditor> {
                   )),
             const Spacer(),
             Text(widget.controller.operatorName,
-                style: const TextStyle(color: Colors.white)),
+                style: TextStyle(color: theme.colorScheme.onSurface)),
           ]),
         ),
         Expanded(child: page),

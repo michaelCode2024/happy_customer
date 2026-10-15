@@ -1,9 +1,14 @@
+import 'pwa_panel.dart';
 import 'package:relaydesk_agent_console/src/util/host_session.dart';
 import '../util/message_alert_stub.dart'
     if (dart.library.html) '../util/message_alert_web.dart';
 import 'package:relaydesk_agent_console/src/util/group_window_stub.dart'
     if (dart.library.html) 'package:relaydesk_agent_console/src/util/group_window_web.dart';
 import 'package:relaydesk_agent_console/src/ui/groups_page.dart';
+import 'notification_center.dart';
+import '../util/push_bridge_stub.dart'
+    if (dart.library.html) '../util/push_bridge_web.dart';
+import '../util/website.dart';
 import 'dart:async';
 import 'package:relaydesk_agent_console/src/ui/overview_page.dart';
 import 'package:relaydesk_agent_console/src/ui/brand.dart';
@@ -16,12 +21,14 @@ import 'package:relaydesk_agent_console/src/state/session_controller.dart';
 import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
 import 'package:relaydesk_agent_console/src/ui/chat_panel.dart';
 import 'package:relaydesk_agent_console/src/ui/conversation_list.dart';
+import 'package:relaydesk_agent_console/src/ui/reception_guidance.dart';
 import 'package:relaydesk_agent_console/src/ui/integration_page.dart';
 import 'package:relaydesk_agent_console/src/ui/knowledge_page.dart';
 import 'package:relaydesk_agent_console/src/ui/settings_page.dart';
 import 'package:relaydesk_agent_console/src/ui/tenant_admin_page.dart';
 import 'package:relaydesk_agent_console/src/ui/stats_page.dart';
 import 'package:relaydesk_agent_console/src/ui/visitor_sidebar.dart';
+import 'package:relaydesk_agent_console/src/ui/conversation_context_panel.dart';
 import 'package:relaydesk_agent_console/src/util/attachment_picker.dart';
 import 'package:relaydesk_agent_console/src/util/voice_player.dart';
 
@@ -78,8 +85,9 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
 
   /// True while the customer record is open as a pushed page on a narrow window.
   bool _profileOpen = false;
-  final _assistDraft = ValueNotifier<String>('');
+  final _assistDraft = ValueNotifier<AssistResult?>(null);
   Timer? _planRefresh;
+  StreamSubscription<String>? _notificationNavigation;
   Map<String, dynamic> _features = {};
   bool _loadingPlan = false;
   Future<void> _refreshPlan() async {
@@ -103,6 +111,10 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
   void initState() {
     super.initState();
     initializeMessageAlerts();
+    _notificationNavigation = notificationConversationEvents().listen((id) {
+      if (mounted && RegExp(r'^[0-9a-fA-F-]{36}$').hasMatch(id))
+        _openNotificationConversation(id);
+    });
     _workbench = WorkbenchController(
       api: widget.session.api,
       selfId: widget.session.agent?.id ?? '',
@@ -119,8 +131,13 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
 
   Future<void> _openInitialConversation() async {
     await _workbench.refreshConversations();
-    final id = hostConversationId;
+    final id = hostConversationId ?? await initialNotificationConversation();
     if (mounted && id != null) await _workbench.select(id);
+  }
+
+  void _openNotificationConversation(String id) {
+    setState(() => _section = WorkbenchSection.conversations);
+    unawaited(_workbench.select(id));
   }
 
   final Set<String> noticedCalls = {};
@@ -220,6 +237,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
 
   @override
   void dispose() {
+    _notificationNavigation?.cancel();
     _planRefresh?.cancel();
     _assistDraft.dispose();
     _workbench.dispose();
@@ -237,7 +255,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     return <_SectionSpec>[
       const _SectionSpec(
         section: WorkbenchSection.conversations,
-        label: '客户会话',
+        label: '客户消息',
         group: '日常接待',
         icon: Icons.forum_outlined,
         selectedIcon: Icons.forum,
@@ -275,7 +293,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
       if (admin && _has('integrations'))
         const _SectionSpec(
           section: WorkbenchSection.integrations,
-          label: '接入渠道',
+          label: '接入管理',
           group: '企业管理',
           icon: Icons.code_rounded,
           selectedIcon: Icons.code,
@@ -290,7 +308,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
         ),
       const _SectionSpec(
         section: WorkbenchSection.settings,
-        label: '我的设置',
+        label: '个人设置',
         group: '个人设置',
         icon: Icons.settings_outlined,
         selectedIcon: Icons.settings,
@@ -377,7 +395,38 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
             final width = constraints.maxWidth;
             final useRail = width >= 900;
             // 传递实际剩余宽度，避免展开侧栏后仍按整屏宽度强行显示客户资料。
-            final body = _bodyFor(useRail ? width - 220 : width);
+            final content = ReceptionGuidance(
+              workbench: _workbench,
+              onShowQueue: () {
+                setState(() => _section = WorkbenchSection.conversations);
+                if (width < 980) _workbench.clearSelection();
+                unawaited(_workbench.showReceptionQueue());
+              },
+              onOpen: (conversation) {
+                setState(() => _section = WorkbenchSection.conversations);
+                _workbench.dismissReceptionNotice();
+                unawaited(_workbench.select(conversation.id));
+              },
+              // 接待区直接进入工作画布，标题由全局面包屑和会话列表承担。
+              // 留白只用于分隔三栏，不再让宣传文案占用聊天与输入空间。
+              child: useRail && _section == WorkbenchSection.conversations
+                  ? Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: _bodyFor(width - 264)))
+                  : _bodyFor(useRail ? width - 232 : width),
+            );
+            final body = Column(children: [
+              if (!isHostedConsole)
+                PwaPanel(
+                    api: widget.session.api,
+                    onReconnect: () async {
+                      await _workbench.refreshConversations();
+                      await _workbench.reloadSelected();
+                    }),
+              Expanded(child: content),
+            ]);
             if (!useRail) {
               // 彩站宿主已有消息页和底部导航；打开会话时让出空间显示消息历史。
               final hostedThread = isHostedConsole &&
@@ -388,34 +437,37 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                   phone.indexWhere((spec) => spec.section == _section);
               return Scaffold(
                 // 这两个页面已有自己的工具栏，窄屏不再重复占用一行标题。
-                appBar: hostedThread || _section == WorkbenchSection.integrations ||
-                        _section == WorkbenchSection.enterprise
-                    ? null
-                    : _compactAppBar(agent),
+                appBar:
+                    hostedThread || _section != WorkbenchSection.conversations
+                        ? null
+                        : _compactAppBar(agent),
                 body: body,
-                bottomNavigationBar: hostedThread ? null : NavigationBar(
-                  selectedIndex: phoneIndex >= 0 ? phoneIndex : phone.length,
-                  onDestinationSelected: (index) {
-                    if (index >= phone.length) {
-                      unawaited(_openMoreSections(sections));
-                      return;
-                    }
-                    setState(() => _section = phone[index].section);
-                  },
-                  destinations: <Widget>[
-                    for (final spec in phone)
-                      NavigationDestination(
-                        icon: Icon(spec.icon),
-                        selectedIcon: Icon(spec.selectedIcon),
-                        label: spec.label,
+                bottomNavigationBar: hostedThread
+                    ? null
+                    : NavigationBar(
+                        selectedIndex:
+                            phoneIndex >= 0 ? phoneIndex : phone.length,
+                        onDestinationSelected: (index) {
+                          if (index >= phone.length) {
+                            unawaited(_openMoreSections(sections));
+                            return;
+                          }
+                          setState(() => _section = phone[index].section);
+                        },
+                        destinations: <Widget>[
+                          for (final spec in phone)
+                            NavigationDestination(
+                              icon: Icon(spec.icon),
+                              selectedIcon: Icon(spec.selectedIcon),
+                              label: spec.label,
+                            ),
+                          const NavigationDestination(
+                            icon: Icon(Icons.more_horiz),
+                            selectedIcon: Icon(Icons.more_horiz),
+                            label: '更多',
+                          ),
+                        ],
                       ),
-                    const NavigationDestination(
-                      icon: Icon(Icons.more_horiz),
-                      selectedIcon: Icon(Icons.more_horiz),
-                      label: '更多',
-                    ),
-                  ],
-                ),
               );
             }
             return Scaffold(
@@ -423,19 +475,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                 ListenableBuilder(
                     listenable: _workbench,
                     builder: (context, _) => WorkspaceSidebar(
-                          subtitle: '企业客服平台',
-                          leading: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(widget.session.tenant?.name ?? '企业工作空间',
-                                  maxLines: 2,
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.w600)),
-                              const SizedBox(height: 5),
-                              Text('企业工作空间',
-                                  style: Theme.of(context).textTheme.bodySmall),
-                            ],
-                          ),
+                          subtitle: widget.session.tenant?.name ?? '企业工作空间',
                           selectedIndex: sections
                               .indexWhere((spec) => spec.section == _section),
                           onSelected: (index) => setState(
@@ -447,27 +487,72 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                                   _section == spec.section
                                       ? spec.selectedIcon
                                       : spec.icon,
-                                  group: spec.group,
+                                  group: '',
                                   count: spec.section ==
                                           WorkbenchSection.conversations
                                       ? _workbench.unread
                                       : 0)
                           ],
-                          footer: InkWell(
+                          footer:
+                              Column(mainAxisSize: MainAxisSize.min, children: [
+                            InkWell(
                               onTap: () => setState(
                                   () => _section = WorkbenchSection.settings),
-                              child:
-                                  _RailLeading(agent: agent, extended: true)),
+                              child: _RailLeading(agent: agent, extended: true),
+                            ),
+                            if (canOpenWebsite)
+                              TextButton.icon(
+                                  onPressed: openDownloads,
+                                  icon:
+                                      const Icon(Icons.phone_android, size: 18),
+                                  label: const Text('手机客户端下载')),
+                            const SizedBox(height: 10),
+                            Row(children: [
+                              _ConnectionBadge(workbench: _workbench),
+                              const Spacer(),
+                              NotificationCenter(
+                                  api: widget.session.api,
+                                  onConversation:
+                                      _openNotificationConversation),
+                              messageSoundButton(),
+                            ]),
+                          ]),
                         )),
                 Expanded(
                     child: Column(children: [
-                  _WorkbenchChromeBar(
-                    tenantName: widget.session.tenant?.name ?? '企业工作空间',
-                    sectionTitle: _section == WorkbenchSection.conversations
-                        ? '客服工作台'
-                        : _sectionTitle(_section),
-                    workbench: _workbench,
-                  ),
+                  Container(
+                      height: 62,
+                      padding: const EdgeInsets.symmetric(horizontal: 28),
+                      decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surface,
+                          border: Border(
+                              bottom: BorderSide(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .outlineVariant))),
+                      child: Row(children: [
+                        Text('工作空间',
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant)),
+                        const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 12),
+                            child: Text('/')),
+                        Expanded(
+                            child: Text(
+                                sections
+                                    .firstWhere((s) => s.section == _section)
+                                    .label,
+                                style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600))),
+                        const Icon(Icons.verified_user_outlined, size: 16),
+                        const SizedBox(width: 7),
+                        Text(agent?.displayName ?? '',
+                            style: const TextStyle(fontSize: 12))
+                      ])),
                   Expanded(child: body),
                 ])),
               ]),
@@ -481,7 +566,18 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
   Widget _bodyFor(double width) {
     switch (_section) {
       case WorkbenchSection.groups:
-        return GroupsPage(session: widget.session);
+        return LayoutBuilder(builder: (context, box) {
+          final groups = GroupsPage(session: widget.session);
+          return box.maxWidth < 760
+              ? groups
+              : Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: ColoredBox(
+                          color: Theme.of(context).colorScheme.surface,
+                          child: groups)));
+        });
       case WorkbenchSection.overview:
         final admin = widget.session.agent?.role == 'SUPERVISOR';
         return OverviewPage(
@@ -535,13 +631,13 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     );
     // Three panes need genuine room. Below this the customer record is pushed on
     // top of the thread instead of shrinking it into uselessness.
-    final inlineProfile = width >= 1120 && !_profileOpen;
+    final inlineProfile = width >= 1040 && !_profileOpen;
     final sideBySide = width >= 760;
 
     if (!sideBySide) {
       // Phone: the queue and the thread take turns, which is what the back
       // affordance in the thread's own app bar is for.
-      return _CompactSwitch(
+      return MobileConversationFlow(
         workbench: _workbench,
         list: list,
         picker: _picker,
@@ -563,7 +659,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     return Row(
       children: <Widget>[
         SizedBox(
-          width: width >= 1200 ? 294 : 260,
+          width: width >= 1200 ? 278 : 260,
           child: DecoratedBox(
             decoration: BoxDecoration(
               color: Theme.of(context).brightness == Brightness.dark
@@ -599,11 +695,11 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
               ),
             ),
             child: SizedBox(
-              width: 292,
-              child: VisitorSidebar(
+              width: width >= 1200 ? 326 : 310,
+              child: ConversationContextPanel(
                 workbench: _workbench,
                 onAdopt: (text) {
-                  _assistDraft.value = '';
+                  _assistDraft.value = null;
                   _assistDraft.value = text;
                 },
               ),
@@ -634,6 +730,9 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                 ),
               const Spacer(),
               _ConnectionBadge(workbench: _workbench),
+              NotificationCenter(
+                  api: widget.session.api,
+                  onConversation: _openNotificationConversation),
               messageSoundButton(),
             ],
           ),
@@ -649,7 +748,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
         WorkbenchSection.conversations => '客户会话',
         WorkbenchSection.stats => '数据统计',
         WorkbenchSection.knowledge => '知识库',
-        WorkbenchSection.integrations => '接入渠道',
+        WorkbenchSection.integrations => '接入管理',
         WorkbenchSection.settings => '我的设置',
         WorkbenchSection.enterprise => '企业管理',
       };
@@ -669,63 +768,6 @@ class _SectionSpec {
   final String group;
   final IconData icon;
   final IconData selectedIcon;
-}
-
-/// 非会话页的轻顶栏：企业名 + 当前模块，避免再占一整条沉重 AppBar。
-class _WorkbenchChromeBar extends StatelessWidget {
-  const _WorkbenchChromeBar({
-    required this.tenantName,
-    required this.sectionTitle,
-    required this.workbench,
-  });
-
-  final String tenantName;
-  final String sectionTitle;
-  final WorkbenchController workbench;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return Container(
-      height: 74,
-      padding: const EdgeInsets.symmetric(horizontal: 28),
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
-      ),
-      child: Row(
-        children: [
-          Flexible(
-            child: Text(
-              sectionTitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-                fontSize: 18,
-              ),
-            ),
-          ),
-          const SizedBox(width: 16),
-          Flexible(
-            child: Text(
-              tenantName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-          const Spacer(),
-          _ConnectionBadge(workbench: workbench),
-          const SizedBox(width: 12),
-          messageSoundButton(),
-        ],
-      ),
-    );
-  }
 }
 
 /// The avatar and tenant name at the top of the rail.
@@ -842,44 +884,80 @@ class _ConnectionBadge extends StatelessWidget {
 }
 
 /// On a phone, shows the queue until a conversation is opened, then the thread.
-class _CompactSwitch extends StatelessWidget {
-  const _CompactSwitch({
-    required this.workbench,
-    required this.list,
-    required this.picker,
-    required this.session,
-  });
-
+class MobileConversationFlow extends StatefulWidget {
+  const MobileConversationFlow(
+      {required this.workbench,
+      required this.list,
+      required this.picker,
+      required this.session});
   final WorkbenchController workbench;
   final Widget list;
   final AttachmentPicker picker;
   final SessionController session;
+  @override
+  State<MobileConversationFlow> createState() => MobileConversationFlowState();
+}
+
+class MobileConversationFlowState extends State<MobileConversationFlow> {
+  bool _scheduled = false;
+  Route<void>? _threadRoute;
+  @override
+  void initState() {
+    super.initState();
+    widget.workbench.addListener(_selectionChanged);
+    _selectionChanged();
+  }
 
   @override
-  Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: workbench,
-      builder: (context, _) {
-        final selected = workbench.selected;
-        if (selected == null) {
-          return list;
-        }
-        return ChatPanel(
-          workbench: workbench,
-          picker: picker,
-          showInlineAssist: !isHostedConsole,
-          onOpenProfile: () => Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (context) => Scaffold(
-                appBar: AppBar(title: const Text('客户资料')),
-                body: VisitorSidebar(workbench: workbench),
-              ),
-            ),
-          ),
-        );
-      },
-    );
+  void dispose() {
+    widget.workbench.removeListener(_selectionChanged);
+    final route = _threadRoute;
+    if (route != null) WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (route.isActive) route.navigator?.removeRoute(route);
+    });
+    super.dispose();
   }
+
+  void _selectionChanged() {
+    if (_scheduled || !mounted) return;
+    _scheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scheduled = false;
+      if (!mounted) return;
+      if (widget.workbench.selectedId == null) {
+        if (_threadRoute?.isCurrent == true) Navigator.of(context).pop();
+        return;
+      }
+      if (_threadRoute != null) return;
+      final route = MaterialPageRoute<void>(
+          settings: RouteSettings(
+              name: '/conversation/${widget.workbench.selectedId}'),
+          builder: (routeContext) => Scaffold(
+                body: ChatPanel(
+                  workbench: widget.workbench,
+                  picker: widget.picker,
+                  showInlineAssist: false,
+                  onBack: () => Navigator.of(routeContext).maybePop(),
+                  onOpenProfile: () => Navigator.of(routeContext).push(
+                      MaterialPageRoute<void>(
+                          builder: (_) => Scaffold(
+                              appBar: AppBar(title: const Text('客户资料')),
+                              body: VisitorSidebar(
+                                  workbench: widget.workbench)))),
+                ),
+              ));
+      _threadRoute = route;
+      // 真正的导航路由让系统返回、浏览器返回与页面返回具有同一行为。
+      Navigator.of(context).push(route);
+      route.completed.whenComplete(() {
+        _threadRoute = null;
+        if (mounted) widget.workbench.clearSelection();
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.list;
 }
 
 /// Wraps the thread so the customer record can slide in over it on a medium

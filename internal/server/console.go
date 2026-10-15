@@ -55,6 +55,8 @@ func (a *API) registerConsole(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/console/assist", a.limit(a.aiAssistRate, a.requireAgent(a.consoleAssist)))
 	mux.HandleFunc("POST /api/v1/console/assist/stream", a.limit(a.aiAssistRate, a.requireAgent(a.consoleAssistStream)))
 	mux.HandleFunc("GET /api/v1/console/ai/usage", a.requireAgent(a.consoleAIUsage))
+	mux.HandleFunc("POST /api/v1/console/assist/{id}/feedback", a.requireAgent(a.consoleAssistFeedback))
+	mux.HandleFunc("GET /api/v1/console/assist/feedback-summary", a.requireAgent(a.consoleAssistFeedbackSummary))
 
 	// Customer data
 	mux.HandleFunc("GET /api/v1/console/visitors/{id}", a.requireAgent(a.consoleVisitor))
@@ -303,7 +305,11 @@ func (a *API) consoleConversations(w http.ResponseWriter, r *http.Request, p aut
 		conditions = append(conditions, "c.assignee_id = $"+itoa(len(args)))
 	case "unassigned":
 		conditions = append(conditions, "c.assignee_id is null")
-	case "all":
+	case "reception":
+		// 待接待包含公共队列和派给自己的待确认会话，不能引导客服抢接他人的单。
+		args = append(args, p.AgentID)
+		conditions = append(conditions, "(c.assignee_id is null or (c.assignee_id = $"+itoa(len(args))+" and c.accepted_at is null and c.assignment_expires_at is not null))")
+	case "all", "team":
 	default:
 		args = append(args, p.AgentID)
 		conditions = append(conditions, "c.assignee_id = $"+itoa(len(args)))
@@ -327,7 +333,7 @@ func (a *API) consoleConversations(w http.ResponseWriter, r *http.Request, p aut
 	}
 	// Agents only see conversations from inboxes they belong to.
 	args = append(args, p.AgentID)
-	conditions = append(conditions, "exists (select 1 from agent_inbox ai where ai.inbox_id = c.inbox_id and ai.agent_id = $"+itoa(len(args))+")")
+	conditions = append(conditions, conversationVisibility("c", "$"+itoa(len(args)), auth.CanViewReports(p.Role) && filter == "team"))
 	args = append(args, limit)
 
 	query := `
@@ -365,9 +371,18 @@ func (a *API) consoleConversations(w http.ResponseWriter, r *http.Request, p aut
 		and exists (select 1 from agent_inbox ai where ai.inbox_id=conversation.inbox_id and ai.agent_id=$2)`, p.TenantID, p.AgentID).Scan(&queued)
 	var unread int
 	_ = a.db.QueryRow(r.Context(), `select coalesce(sum(agent_unread),0)::int from conversation
-		where tenant_id=$1 and status <> 'RESOLVED'
+		where tenant_id=$1 and status <> 'RESOLVED' and `+conversationVisibility("conversation", "$2", auth.CanViewReports(p.Role) && filter == "team")+`
 		and exists (select 1 from agent_inbox ai where ai.inbox_id=conversation.inbox_id and ai.agent_id=$2)`, p.TenantID, p.AgentID).Scan(&unread)
-	respond(w, 200, map[string]any{"items": items, "queued": queued, "unread": unread})
+	var receptionWaiting int
+	err = a.db.QueryRow(r.Context(), `select count(*)::int from conversation c
+		where c.tenant_id=$1 and c.status <> 'RESOLVED'
+		and (c.assignee_id is null or (c.assignee_id=$2 and c.accepted_at is null and c.assignment_expires_at is not null))
+		and exists (select 1 from agent_inbox ai where ai.inbox_id=c.inbox_id and ai.agent_id=$2)`, p.TenantID, p.AgentID).Scan(&receptionWaiting)
+	if err != nil {
+		fail(w, 500, "查询待接待人数失败")
+		return
+	}
+	respond(w, 200, map[string]any{"items": items, "queued": queued, "unread": unread, "receptionWaiting": receptionWaiting})
 }
 
 func (a *API) consoleConversation(w http.ResponseWriter, r *http.Request, p auth.Principal) {
@@ -809,14 +824,7 @@ func (a *API) consoleConversationScope(w http.ResponseWriter, r *http.Request, p
 		fail(w, 400, "会话 ID 不合法")
 		return uuid.Nil, false
 	}
-	var allowed bool
-	err = a.db.QueryRow(r.Context(), `
-		select exists(
-			select 1 from conversation c
-			 where c.id = $1 and c.tenant_id = $2
-			   and (exists (select 1 from agent_inbox ai where ai.inbox_id = c.inbox_id and ai.agent_id = $3)
-			        or c.assignee_id = $3))`, id, p.TenantID, p.AgentID).Scan(&allowed)
-	if err != nil || !allowed {
+	if !a.agentConversationAccess(r.Context(), p, id) {
 		failCode(w, 404, "CONVERSATION_NOT_FOUND", "会话不存在或你没有该客服入口的权限")
 		return uuid.Nil, false
 	}
@@ -829,6 +837,9 @@ func (a *API) consoleVisitor(w http.ResponseWriter, r *http.Request, p auth.Prin
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		fail(w, 400, "访客 ID 不合法")
+		return
+	}
+	if !a.agentVisitorAccess(w, r, p, id) {
 		return
 	}
 	var displayName, externalID, email, phone string
@@ -862,6 +873,9 @@ func (a *API) consoleUpdateVisitor(w http.ResponseWriter, r *http.Request, p aut
 		fail(w, 400, "访客 ID 不合法")
 		return
 	}
+	if !a.agentVisitorAccess(w, r, p, id) {
+		return
+	}
 	var in struct {
 		DisplayName string         `json:"displayName"`
 		Attributes  map[string]any `json:"attributes"`
@@ -892,6 +906,9 @@ func (a *API) consoleVisitorConversations(w http.ResponseWriter, r *http.Request
 		fail(w, 400, "访客 ID 不合法")
 		return
 	}
+	if !a.agentVisitorAccess(w, r, p, id) {
+		return
+	}
 	rows, err := a.db.Query(r.Context(), `
 		select c.id, c.tenant_id, c.inbox_id, c.visitor_id, coalesce(c.subject,''), c.status, c.assignee_id,
 		       coalesce(ag.display_name,''), c.priority, c.source, c.last_sequence,
@@ -900,9 +917,9 @@ func (a *API) consoleVisitorConversations(w http.ResponseWriter, r *http.Request
 		  from conversation c
 		  join visitor v on v.id = c.visitor_id
 		  left join agent ag on ag.id = c.assignee_id
-		 where c.visitor_id = $1 and c.tenant_id = $2
+		 where c.visitor_id = $1 and c.tenant_id = $2 and `+conversationVisibility("c", "$3", auth.CanViewReports(p.Role))+`
 		 order by coalesce(c.last_message_at, c.created_at) desc
-		 limit 50`, id, p.TenantID)
+		 limit 50`, id, p.TenantID, p.AgentID)
 	if err != nil {
 		fail(w, 500, "查询会话失败")
 		return
@@ -924,6 +941,9 @@ func (a *API) consoleAddNote(w http.ResponseWriter, r *http.Request, p auth.Prin
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		fail(w, 400, "访客 ID 不合法")
+		return
+	}
+	if !a.agentVisitorAccess(w, r, p, id) {
 		return
 	}
 	var in struct {
@@ -951,6 +971,9 @@ func (a *API) consoleNotes(w http.ResponseWriter, r *http.Request, p auth.Princi
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		fail(w, 400, "访客 ID 不合法")
+		return
+	}
+	if !a.agentVisitorAccess(w, r, p, id) {
 		return
 	}
 	rows, err := a.db.Query(r.Context(), `select n.id, n.content, coalesce(ag.display_name,'系统'), n.created_at

@@ -1,3 +1,5 @@
+import 'src/ui/app_safe_area.dart';
+import 'src/util/browser_theme.dart';
 import 'dart:async';
 import 'package:relaydesk_agent_console/src/util/host_session.dart';
 import 'package:relaydesk_agent_console/src/util/console_surface.dart';
@@ -41,6 +43,7 @@ class _RelayDeskConsoleAppState extends State<RelayDeskConsoleApp> {
   late final SessionController _session;
   late final PlatformController _platform;
 
+  bool _startupComplete = false;
   ThemeMode _themeMode = ThemeMode.system;
   ConsoleSurface _surface = ConsoleSurface.agent;
 
@@ -158,6 +161,20 @@ class _RelayDeskConsoleAppState extends State<RelayDeskConsoleApp> {
       theme: RelayTheme.light(),
       darkTheme: RelayTheme.dark(),
       themeMode: _themeMode,
+      builder: (context, child) {
+        final theme = Theme.of(context);
+        if (!_startupComplete && _surfaceRestored &&
+            _session.phase != SessionPhase.booting &&
+            (isHostedConsole || _platform.phase != PlatformPhase.booting)) {
+          _startupComplete = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) => markAppReady());
+        }
+        syncBrowserTheme(theme.colorScheme.surface.value,
+            theme.brightness == Brightness.dark);
+        return ColoredBox(color: theme.colorScheme.surface,
+            child: AppSafeArea(browserBottom: isHostedConsole ? 0 : browserSafeBottom,
+                child: child ?? const SizedBox.shrink()));
+      },
       home: isHostedConsole
           ? Scaffold(
               appBar: AppBar(

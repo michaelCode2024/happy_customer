@@ -1,7 +1,8 @@
+import 'package:relaydesk_agent_console/src/ui/design_a.dart';
+import 'package:relaydesk_agent_console/src/ui/brand.dart';
 import 'manual_quota_page.dart';
 import 'platform_plans_page.dart';
 import 'package:relaydesk_agent_console/src/ui/product_brand.dart';
-import 'package:relaydesk_agent_console/src/ui/brand.dart';
 import 'package:flutter/material.dart';
 import 'package:relaydesk_agent_console/src/api/api_exception.dart';
 import 'package:relaydesk_agent_console/src/platform/platform_models.dart';
@@ -105,80 +106,46 @@ class _PlatformPageState extends State<PlatformPage> {
                 child: Row(
                   children: <Widget>[
                     if (wide)
-                      Theme(
-                          data: Theme.of(context).copyWith(
-                              colorScheme: Theme.of(context)
-                                  .colorScheme
-                                  .copyWith(
-                                      brightness: Brightness.dark,
-                                      surface: const Color(0xFF182334),
-                                      onSurface: Colors.white,
-                                      onSurfaceVariant: const Color(0xFF9CAAC0),
-                                      primary: const Color(0xFF9AABFF),
-                                      primaryContainer: const Color(0xFF314CB0),
-                                      onPrimaryContainer: Colors.white,
-                                      outlineVariant: const Color(0xFF324158))),
-                          child: WorkspaceSidebar(
-                            subtitle: controller.isSuperAdmin
-                                ? '超级管理员 · 手动额度管理'
-                                : '平台管理员 · 仅可查看',
-                            selectedIndex: _navIndex(controller.section),
-                            onSelected: (index) =>
-                                controller.selectSection(_nav[index]),
-                            items: const [
-                              WorkspaceNavItem(
-                                  '平台概览', Icons.dashboard_outlined),
-                              WorkspaceNavItem(
-                                  '企业与账号', Icons.apartment_outlined),
-                              WorkspaceNavItem(
-                                  '套餐与额度', Icons.workspace_premium_outlined),
-                              WorkspaceNavItem(
-                                  '操作记录', Icons.receipt_long_outlined),
-                              WorkspaceNavItem('平台设置', Icons.settings_outlined),
-                            ],
-                            footer: _PlatformSessionFooter(
-                              server: controller.server,
-                              onRefresh:
-                                  controller.busy ? null : _refreshCurrent,
-                              onSignOut: _signOut,
-                              onAgentLogin: widget.onAgentLogin,
-                            ),
-                          )),
-                    Expanded(
-                      child: Padding(
-                        padding: EdgeInsets.fromLTRB(wide ? 10 : 0, 10, 10, 10),
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).scaffoldBackgroundColor,
-                            borderRadius: BorderRadius.circular(0),
-                            border: Border.all(
-                              color:
-                                  Theme.of(context).colorScheme.outlineVariant,
-                            ),
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(18),
-                            child: Column(
-                              children: [
-                                _PlatformTopBar(
-                                  title: _sectionTitles[controller.section] ??
-                                      '平台管理后台',
-                                  server: controller.server,
-                                  showBrand: !wide,
-                                  busy: controller.busy,
-                                  onRefresh: _refreshCurrent,
-                                  onCreateTenant: controller.isSuperAdmin
-                                      ? () => _TenantsSection(
-                                              controller: controller)
-                                          ._create(context)
-                                      : null,
-                                  onSignOut: wide ? null : _signOut,
-                                ),
-                                Expanded(child: _section(context)),
-                              ],
-                            ),
-                          ),
+                      WorkspaceSidebar(
+                        subtitle: controller.isSuperAdmin
+                            ? '平台管理 · 超级管理员'
+                            : '平台管理员 · 仅可查看',
+                        selectedIndex: _navIndex(controller.section),
+                        onSelected: (index) =>
+                            controller.selectSection(_nav[index]),
+                        items: const [
+                          WorkspaceNavItem('平台概览', Icons.dashboard_outlined),
+                          WorkspaceNavItem('企业与账号', Icons.apartment_outlined),
+                          WorkspaceNavItem(
+                              '套餐与额度', Icons.workspace_premium_outlined),
+                          WorkspaceNavItem('操作记录', Icons.receipt_long_outlined),
+                          WorkspaceNavItem('平台设置', Icons.settings_outlined),
+                        ],
+                        footer: _PlatformSessionFooter(
+                          server: controller.server,
+                          onRefresh: controller.busy ? null : _refreshCurrent,
+                          onSignOut: _signOut,
+                          onAgentLogin: widget.onAgentLogin,
                         ),
+                      ),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          _PlatformTopBar(
+                            title:
+                                _sectionTitles[controller.section] ?? '平台管理后台',
+                            server: controller.server,
+                            showBrand: !wide,
+                            busy: controller.busy,
+                            onRefresh: _refreshCurrent,
+                            onCreateTenant: controller.isSuperAdmin
+                                ? () => _TenantsSection(controller: controller)
+                                    ._create(context)
+                                : null,
+                            onSignOut: wide ? null : _signOut,
+                          ),
+                          Expanded(child: _section(context)),
+                        ],
                       ),
                     ),
                   ],
@@ -241,7 +208,10 @@ class _PlatformPageState extends State<PlatformPage> {
             controller: widget.controller,
             history: true);
       case PlatformSection.account:
-        return _PlatformSettings(controller: widget.controller, index: 2);
+        return _PlatformSettings(
+            key: const ValueKey('account'),
+            controller: widget.controller,
+            index: 2);
       case PlatformSection.overview:
         return ManualQuotaPage(
             key: const ValueKey('overview'),
@@ -251,13 +221,29 @@ class _PlatformPageState extends State<PlatformPage> {
         return _TenantsSection(controller: widget.controller);
       case PlatformSection.plans:
         return Column(children: [
-          Padding(padding: const EdgeInsets.all(12), child: Align(alignment: Alignment.centerRight, child: OutlinedButton(onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => Scaffold(appBar: AppBar(title: const Text('套餐详情与年费')), body: PlatformPlansPage(controller: widget.controller)))), child: const Text('套餐详情与年费')))),
-          Expanded(child: ManualQuotaPage(key: const ValueKey('quotas'), controller: widget.controller)),
+          Padding(
+              padding: const EdgeInsets.all(12),
+              child: Align(
+                  alignment: Alignment.centerRight,
+                  child: OutlinedButton(
+                      onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (_) => Scaffold(
+                                  appBar: AppBar(title: const Text('套餐详情与年费')),
+                                  body: PlatformPlansPage(
+                                      controller: widget.controller)))),
+                      child: const Text('套餐详情与年费')))),
+          Expanded(
+              child: ManualQuotaPage(
+                  key: const ValueKey('quotas'),
+                  controller: widget.controller)),
         ]);
       case PlatformSection.ai:
-        return _PlatformSettings(controller: widget.controller, index: 1);
+        return _PlatformSettings(
+            key: const ValueKey('ai'), controller: widget.controller, index: 1);
       case PlatformSection.about:
-        return _PlatformSettings(controller: widget.controller);
+        return _PlatformSettings(
+            key: const ValueKey('about'), controller: widget.controller);
     }
   }
 }
@@ -283,6 +269,12 @@ class _OverviewSection extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
       children: <Widget>[
         const WorkspaceHeading('工作概览', '查看企业服务、会话负载与平台运行情况'),
+        const TongYuHero(
+            compact: true,
+            title: '看见服务全貌，让团队稳步前行。',
+            description: '企业、账号、套餐与智能服务，统一在一个清晰的工作空间。',
+            eyebrow: 'PLATFORM / 平台运营'),
+        const SizedBox(height: 24),
         Wrap(
           spacing: 12,
           runSpacing: 12,
@@ -431,7 +423,7 @@ class _OverviewSection extends StatelessWidget {
                                 color: tenant.isSuspended
                                     ? const Color(0xFFFFF2E5)
                                     : const Color(0xFFE8F8ED),
-                                borderRadius: BorderRadius.circular(6)),
+                                borderRadius: BorderRadius.circular(10)),
                             child: Text(tenantStatusLabel(tenant.status),
                                 style: TextStyle(
                                     fontSize: 12,
@@ -902,7 +894,7 @@ class _AboutSection extends StatelessWidget {
       children: <Widget>[
         const WorkspaceHeading('平台设置', '查看当前实例配置与服务能力'),
         _Panel(
-          title: meta.product,
+          title: ProductBrand.nameZh,
           child: Wrap(
             spacing: 32,
             runSpacing: 14,
@@ -998,7 +990,7 @@ class _Panel extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: theme.dividerColor.withAlpha(80)),
       ),
       child: Column(
@@ -1119,65 +1111,49 @@ class _PlatformTopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      height: 56,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      color: theme.colorScheme.surface,
-      child: Row(
-        children: [
-          if (showBrand) ...[
-            const LiaoQiaoBrand(compact: true),
-            const SizedBox(width: 12),
-          ],
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                Text(
-                  ProductBrand.platformTitle,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          IconButton(
+    const descriptions = {
+      '平台概览': '查看企业服务、平台用量与近期运营动态',
+      '企业与账号': '管理企业工作空间、客服账号与服务状态',
+      '套餐与额度': '查看企业套餐、可用额度与服务期限',
+      '操作记录': '追溯平台操作、额度变更与调整原因',
+      '平台设置': '管理服务配置、智能服务与账号安全',
+      '账号安全': '管理平台管理员资料与登录安全',
+    };
+    const icons = {
+      '平台概览': Icons.dashboard_outlined,
+      '企业与账号': Icons.apartment_outlined,
+      '套餐与额度': Icons.workspace_premium_outlined,
+      '操作记录': Icons.receipt_long_outlined,
+      '平台设置': Icons.settings_outlined,
+      '账号安全': Icons.security_outlined,
+    };
+    return WorkspacePageHeader(
+      title: title,
+      description: descriptions[title] ?? ProductBrand.platformTitle,
+      icon: icons[title] ?? Icons.admin_panel_settings_outlined,
+      actions: [
+        IconButton(
             tooltip: '刷新',
             onPressed: busy ? null : onRefresh,
-            icon: const Icon(Icons.refresh),
-          ),
+            icon: const Icon(Icons.refresh)),
+        if (onCreateTenant != null)
           FilledButton.icon(
-            onPressed: busy ? null : onCreateTenant,
-            icon: const Icon(Icons.add, size: 18),
-            label: Text(
-              MediaQuery.sizeOf(context).width < 900 ? '开通' : '开通企业',
-            ),
-          ),
-          if (onSignOut != null)
-            IconButton(
+              onPressed: busy ? null : onCreateTenant,
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('开通企业')),
+        if (onSignOut != null)
+          IconButton(
               tooltip: '退出登录',
               onPressed: onSignOut,
-              icon: const Icon(Icons.logout),
-            ),
-        ],
-      ),
+              icon: const Icon(Icons.logout)),
+      ],
     );
   }
 }
 
 class _PlatformSettings extends StatelessWidget {
-  const _PlatformSettings({required this.controller, this.index = 0});
+  const _PlatformSettings(
+      {super.key, required this.controller, this.index = 0});
   final PlatformController controller;
   final int index;
   @override
@@ -1185,8 +1161,17 @@ class _PlatformSettings extends StatelessWidget {
       length: 3,
       initialIndex: index,
       child: Column(children: [
-        const TabBar(
-            tabs: [Tab(text: '服务配置'), Tab(text: '智能服务'), Tab(text: '账号安全')]),
+        Container(
+            color: Theme.of(context).colorScheme.surface,
+            alignment: Alignment.centerLeft,
+            child: const TabBar(
+                isScrollable: true,
+                tabAlignment: TabAlignment.start,
+                tabs: [
+                  Tab(text: '服务配置'),
+                  Tab(text: '智能服务'),
+                  Tab(text: '账号安全')
+                ])),
         Expanded(
             child: TabBarView(children: [
           _AboutSection(controller: controller),
@@ -1195,4 +1180,3 @@ class _PlatformSettings extends StatelessWidget {
         ]))
       ]));
 }
-

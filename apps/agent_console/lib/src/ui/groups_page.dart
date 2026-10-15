@@ -136,10 +136,17 @@ class _GroupsPageState extends State<GroupsPage> {
 
   Future<void> older() async {
     if (selected == null || messages.isEmpty) return;
+    final id = selected;
+    final gen = generation;
+    final query = search.text;
     try {
       final data = await widget.session.api.groupRequest(
-          'GET', '/$selected/messages?before=${messages.first['sequence']}');
-      if (!mounted) return;
+          'GET', '/$id/messages?before=${messages.first['sequence']}');
+      // 历史分页属于发起请求时的群与搜索条件，切换后必须丢弃迟到回包。
+      if (!mounted ||
+          selected != id ||
+          generation != gen ||
+          search.text != query) return;
       final combined = {
         for (final m in [
           ...(data['items'] as List).cast<Map<String, dynamic>>(),
@@ -151,7 +158,12 @@ class _GroupsPageState extends State<GroupsPage> {
         ..sort(
             (a, b) => (a['sequence'] as int).compareTo(b['sequence'] as int)));
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      if (mounted &&
+          selected == id &&
+          generation == gen &&
+          search.text == query) {
+        setState(() => error = e.toString());
+      }
     }
   }
 
@@ -764,17 +776,38 @@ class _GroupsPageState extends State<GroupsPage> {
                     child: Text(sending ? '发送中' : '发送'))
               ]))
       ]);
-      if (narrow) return selected == null ? list : thread;
+      if (narrow)
+        return ColoredBox(
+            color: Theme.of(context).colorScheme.surface,
+            child: selected == null ? list : thread);
       return Row(children: [
-        SizedBox(width: 300, child: list),
+        SizedBox(
+            width: 294,
+            child: ColoredBox(
+                color: Theme.of(context).colorScheme.surface, child: list)),
         const VerticalDivider(width: 1),
         Expanded(
             child: selected == null
-                ? const Center(child: Text('选择群聊，开始协作'))
-                : thread),
+                ? Center(
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.forum_outlined,
+                        size: 44, color: Theme.of(context).colorScheme.outline),
+                    const SizedBox(height: 16),
+                    const Text('选择群聊，开始协作'),
+                    const SizedBox(height: 8),
+                    Text('与同事协作，或为客户提供群服务',
+                        style: Theme.of(context).textTheme.bodySmall),
+                  ]))
+                : ColoredBox(
+                    color: Theme.of(context).colorScheme.surface,
+                    child: thread)),
         if (box.maxWidth >= 1040 && selected != null) ...[
           const VerticalDivider(width: 1),
-          SizedBox(width: 260, child: _memberSidebar(context)),
+          SizedBox(
+              width: 280,
+              child: ColoredBox(
+                  color: Theme.of(context).colorScheme.surface,
+                  child: _memberSidebar(context))),
         ],
       ]);
     });

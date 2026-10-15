@@ -246,6 +246,22 @@ func (a *API) appendMessage(ctx context.Context, tenantID, conversationID uuid.U
 		return messageView{}, err
 	}
 
+	// 与消息提交在同一事务内，只有真实发送成功才计入采纳发送；租户、会话和作者必须同时匹配。
+	if raw, ok := in.Metadata["assistInteractionId"].(string); ok && in.SenderType == "AGENT" && !in.Private && messageType == "TEXT" {
+		interactionID, parseErr := uuid.Parse(raw)
+		if parseErr != nil {
+			return messageView{}, serviceError{"INVALID_ASSIST_DRAFT", "AI 草稿标识不合法"}
+		}
+		tag, updateErr := tx.Exec(ctx, `update ai_interaction set sent_message_id=$1, edited_before_send=(btrim(draft_text)<>btrim($2))
+		 where id=$3 and tenant_id=$4 and conversation_id=$5 and agent_id=$6 and adopted_at is not null
+		 and task in ('SUGGEST','POLISH') and sent_message_id is null`, view.ID, in.Content, interactionID, tenantID, conversationID, in.SenderID)
+		if updateErr != nil {
+			return messageView{}, updateErr
+		}
+		if tag.RowsAffected() != 1 {
+			return messageView{}, serviceError{"INVALID_ASSIST_DRAFT", "AI 草稿已发送或不属于当前会话，请重新生成"}
+		}
+	}
 	if len(in.AttachmentIDs) > 0 {
 		for _, raw := range in.AttachmentIDs {
 			attachmentID, parseErr := uuid.Parse(raw)
@@ -264,6 +280,11 @@ func (a *API) appendMessage(ctx context.Context, tenantID, conversationID uuid.U
 		return messageView{}, err
 	}
 
+	if in.SenderType == "VISITOR" && !in.Private && messageType != "EVENT" && messageType != "SYSTEM" && messageType != "RATING" {
+		if err := enqueueMessageNotifications(ctx, tx, tenantID, conversationID, view.ID); err != nil {
+			return messageView{}, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return messageView{}, err
 	}
@@ -1120,10 +1141,14 @@ func (a *API) maybeAIReply(ctx context.Context, tenantID, conversationID uuid.UU
 // human to take over. It is the single handoff write path shared by the streaming
 // and one-shot answer flows.
 func (a *API) storeAIHandoff(ctx context.Context, tenantID, conversationID uuid.UUID, question messageView, interactionID uuid.UUID, reply ai.Reply, handoffMessage string, latency int64) {
-	_, _ = a.db.Exec(ctx, `insert into ai_interaction(id, tenant_id, conversation_id, question_message_id, provider, score, answered, reason, latency_ms, sources)
-		values($1,$2,$3,$4,$5,$6,false,$7,$8,$9)`,
+	// 没有命中知识时来源为空数组，不能把 nil 写成 SQL NULL 导致缺口记录丢失。
+	_, recordErr := a.db.Exec(ctx, `insert into ai_interaction(id, tenant_id, conversation_id, question_message_id, provider, score, answered, reason, latency_ms, sources)
+		values($1,$2,$3,$4,$5,$6,false,$7,$8,coalesce($9,'{}'::text[]))`,
 		interactionID, tenantID, conversationID, question.ID, reply.Provider, reply.Score,
 		string(reply.Reason), latency, reply.Sources)
+	if recordErr != nil {
+		a.logger.Error("record AI handoff failed", "error", recordErr)
+	}
 	a.bumpDailyStat(ctx, tenantID, "ai_handoff")
 	// AI 低置信度转人工以前只落一句提示、不暂停机器人也不分配，访客会一直停在「请稍候」。
 	if _, _, err := a.completeHandoff(ctx, tenantID, conversationID); err != nil {
@@ -1162,6 +1187,10 @@ func (a *API) storeAIMessage(ctx context.Context, tenantID, conversationID, ques
 // like "那要多久？" without the previous question is impossible, which is why the
 // stateless single-turn prompt produced nonsense on multi-message conversations.
 func (a *API) recentTranscript(ctx context.Context, conversationID uuid.UUID, before int64, limit int) []ai.Turn {
+	// 助手传 0 表示读取最新记录；不能按 sequence < 0 过滤掉整段对话。
+	if before <= 0 {
+		before = 1<<63 - 1
+	}
 	rows, err := a.db.Query(ctx, `select * from (
 			select m.sender_type, m.content, m.sequence
 			  from message m
@@ -1236,6 +1265,9 @@ func (a *API) botAgentID(ctx context.Context, tenantID uuid.UUID) *uuid.UUID {
 }
 
 func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
 	var pgErr interface{ SQLState() string }
 	if errors.As(err, &pgErr) {
 		return pgErr.SQLState() == "23505"

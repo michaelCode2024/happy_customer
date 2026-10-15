@@ -33,6 +33,23 @@ func (a *API) registerStatic(mux *http.ServeMux) {
 	}
 	// 官网与控制台各有入口；精确匹配根路径，避免吞掉未知 API 和资源的 404。
 	website := filepath.Join(a.cfg.StaticDir, "website")
+	mux.HandleFunc("GET /downloads/{$}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		http.ServeFile(w, r, filepath.Join(website, "downloads.html"))
+	})
+	// 安装包独立存放，更新客户端无需覆盖网站和业务数据。
+	downloadDir := os.Getenv("DOWNLOAD_DIR")
+	if downloadDir == "" {
+		downloadDir = filepath.Join(a.cfg.StaticDir, "downloads")
+	}
+	// 描述文件保留苹果识别类型，同时让桌面浏览器明确按文件下载。
+	mux.HandleFunc("GET /downloads/tongyu-ios.mobileconfig", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-apple-aspen-config")
+		w.Header().Set("Content-Disposition", `attachment; filename="tongyu-ios.mobileconfig"`)
+		w.Header().Set("Cache-Control", "no-cache")
+		http.ServeFile(w, r, filepath.Join(downloadDir, "tongyu-ios.mobileconfig"))
+	})
+	mux.Handle("GET /downloads/", http.StripPrefix("/downloads/", http.FileServer(http.Dir(downloadDir))))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache")
 		http.ServeFile(w, r, filepath.Join(website, "index.html"))

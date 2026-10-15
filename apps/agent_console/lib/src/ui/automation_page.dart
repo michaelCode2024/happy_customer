@@ -1,3 +1,4 @@
+import 'package:relaydesk_agent_console/src/ui/workspace_layout.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
@@ -767,8 +768,10 @@ class _AutomationPageState extends State<AutomationPage> {
       LayoutBuilder(builder: (context, constraints) {
         final wide = constraints.maxWidth >= 780;
         return Scaffold(
-            appBar: AppBar(
-                title: Text(widget.channels ? '渠道管理' : '自动回复'),
+            appBar: WorkspaceAppBar(
+                title: widget.channels ? '渠道管理' : '自动回复',
+                description: '按客服入口配置接待规则与 AI 应答边界',
+                icon: Icons.auto_awesome_outlined,
                 actions: [
                   TextButton.icon(
                       onPressed: _loading || _saving ? null : _save,

@@ -11,17 +11,17 @@ class RelayTheme {
   static const Color seed = Color(0xFF4263EB);
 
   /// 会话列表选中行。
-  static const Color listSelectedLight = Color(0xFFEDF1FF);
+  static const Color listSelectedLight = Color(0xFFEEF2FF);
   static const Color listSelectedDark = Color(0xFF1A2A40);
 
   /// 消息区画布（微信/腾讯 IM 常见浅灰）。
-  static const Color chatCanvasLight = Color(0xFFFFFFFF);
+  static const Color chatCanvasLight = Color(0xFFF4F6F9);
   static const Color chatCanvasDark = Color(0xFF111418);
 
   /// 浅色模式坐席气泡为浅蓝，访客气泡为浅灰。
-  static const Color agentBubbleLight = Color(0xFFEDF1FF);
+  static const Color agentBubbleLight = Color(0xFFDDEBFF);
   static const Color agentBubbleDark = Color(0xFF3B82F6);
-  static const Color visitorBubbleLight = Color(0xFFF4F5F8);
+  static const Color visitorBubbleLight = Color(0xFFFFFFFF);
   static const Color success = Color(0xFF31977C);
   static const Color warning = Color(0xFFFF7D00);
   static const Color tertiary = Color(0xFF8992A3);
@@ -44,13 +44,13 @@ class RelayTheme {
     );
     return _base(scheme.copyWith(
       primary: seed,
-      primaryContainer: const Color(0xFFEDF1FF),
+      primaryContainer: const Color(0xFFEEF2FF),
       onPrimary: Colors.white,
       onPrimaryContainer: const Color(0xFF0B4DB8),
       secondary: const Color(0xFF5B6B7C),
       surface: Colors.white,
-      surfaceContainerHighest: const Color(0xFFF6F8FB),
-      outlineVariant: const Color(0xFFE9EDF3),
+      surfaceContainerHighest: const Color(0xFFF5F7FC),
+      outlineVariant: const Color(0xFFE7ECF4),
       outline: tertiary,
       onSurface: const Color(0xFF202B3D),
       onSurfaceVariant: const Color(0xFF637186),
@@ -90,7 +90,7 @@ class RelayTheme {
       colorScheme: scheme,
     ).textTheme.apply(fontFamilyFallback: _cjkFallback);
 
-    final radius = BorderRadius.circular(12);
+    final radius = BorderRadius.circular(16);
 
     return ThemeData(
       useMaterial3: true,
@@ -113,7 +113,8 @@ class RelayTheme {
         style: TextButton.styleFrom(
           minimumSize: const Size(64, 34),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
@@ -121,7 +122,8 @@ class RelayTheme {
           foregroundColor: scheme.onSurface,
           minimumSize: const Size(80, 36),
           side: BorderSide(color: scheme.outlineVariant),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         ),
       ),
       checkboxTheme: CheckboxThemeData(
@@ -139,16 +141,18 @@ class RelayTheme {
       fontFamilyFallback: _cjkFallback,
       // 国内 IM 控制台：整页浅灰底，三栏贴边，少「浮卡片」。
       scaffoldBackgroundColor:
-          isDark ? const Color(0xFF0F1218) : const Color(0xFFF6F8FB),
+          isDark ? const Color(0xFF0F1218) : const Color(0xFFF5F7FC),
       appBarTheme: AppBarTheme(
-        toolbarHeight: 56,
+        toolbarHeight: 68,
+        titleSpacing: 24,
+        shape: Border(bottom: BorderSide(color: scheme.outlineVariant)),
         scrolledUnderElevation: 0,
         backgroundColor: isDark ? const Color(0xFF171B22) : Colors.white,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         titleTextStyle: TextStyle(
           color: scheme.onSurface,
-          fontSize: 16,
+          fontSize: 20,
           fontWeight: FontWeight.w600,
           fontFamilyFallback: _cjkFallback,
         ),
@@ -174,7 +178,8 @@ class RelayTheme {
           minimumSize: const Size(72, 36),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         ),
       ),
       cardTheme: CardTheme(
@@ -218,7 +223,7 @@ class RelayTheme {
       segmentedButtonTheme: SegmentedButtonThemeData(
         style: ButtonStyle(
           shape: WidgetStatePropertyAll(
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           ),
           side:
               WidgetStatePropertyAll(BorderSide(color: scheme.outlineVariant)),
@@ -247,15 +252,15 @@ class RelayTheme {
         filled: true,
         fillColor: isDark ? const Color(0xFF1F2430) : Colors.white,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide(color: scheme.outlineVariant),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide(color: scheme.outlineVariant),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide(color: scheme.primary, width: 1.2),
         ),
       ),

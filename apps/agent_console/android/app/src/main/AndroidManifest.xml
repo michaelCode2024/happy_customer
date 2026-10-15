@@ -1,9 +1,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
     <application
-        android:label="连语客服"
+        android:allowBackup="false"
+        android:label="通语客服"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <service android:name=".ReceptionService" android:exported="false" android:foregroundServiceType="remoteMessaging" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -38,6 +43,7 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
+        <intent><action android:name="android.intent.action.TTS_SERVICE"/></intent>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>

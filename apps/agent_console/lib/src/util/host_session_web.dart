@@ -57,9 +57,8 @@ Stream<String> hostSessions() {
 
 // 仅定位业务宿主指定的会话；详情及消息仍由服务端校验租户和渠道权限。
 String? get hostConversationId {
-  final id = Uri.base.queryParameters['conversationId'];
-  return isHostedConsole &&
-          id != null &&
+  final id = Uri.base.queryParameters['conversationId'] ?? Uri.base.queryParameters['conversation'];
+  return id != null &&
           RegExp(r'^[0-9a-fA-F-]{36}$').hasMatch(id)
       ? id
       : null;

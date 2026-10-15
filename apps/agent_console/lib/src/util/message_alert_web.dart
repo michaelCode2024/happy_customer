@@ -1,3 +1,4 @@
+import 'package:relaydesk_agent_console/src/util/message_sound_card.dart';
 import 'dart:async';
 import 'dart:html' as html;
 import 'dart:js_util' as js_util;
@@ -26,8 +27,13 @@ const _soundChoices = {
 String _soundChoice = _soundChoices
         .containsKey(html.window.localStorage['tongyu.messageSoundStyle'])
     ? html.window.localStorage['tongyu.messageSoundStyle']!
-    : 'tone';
+    : 'sender';
 String _pendingSender = '';
+DateTime? _quietUntil;
+void setMessageQuietUntil(DateTime? until) {
+  _quietUntil = until;
+}
+
 int _speechGeneration = 0;
 bool _initialized = false;
 bool _ready = false;
@@ -78,7 +84,7 @@ Future<void> _unlockAudio() async {
   }
 }
 
-// 语音由浏览器/操作系统提供，不向语音服务发送客户名称或消息内容。
+// 语音由浏览器/操作系统提供，优先本机中文声音；不播报客户消息正文。
 // 连续消息替换旧播报，避免后台累积一长串语音；不可用时回退现有铃声。
 Future<void> _playSound() async {
   if (_soundChoice == 'tone') return _playTone();
@@ -117,8 +123,14 @@ Future<void> _playSound() async {
     ..lang = 'zh-CN'
     ..rate = 1
     ..volume = 0.65;
-  final voices = synthesis.getVoices().where((v) => v.lang?.startsWith('zh') == true);
-  if (voices.isNotEmpty) utterance.voice = voices.first;
+  final voices =
+      synthesis.getVoices().where((v) => v.lang?.startsWith('zh') == true);
+  final localVoices = voices.where((v) => v.localService == true);
+  if (localVoices.isNotEmpty) {
+    utterance.voice = localVoices.first;
+  } else if (voices.isNotEmpty) {
+    utterance.voice = voices.first;
+  }
   final completed = Completer<void>();
   void finish() {
     if (!completed.isCompleted) completed.complete();
@@ -191,8 +203,21 @@ void _setSoundEnabled(bool enabled) {
 }
 
 void messageAlert(String name, String body, {String senderName = ''}) {
+  unawaited(_dispatchMessageAlert(name, body, senderName: senderName));
+}
+
+Future<void> _dispatchMessageAlert(String name, String body,
+    {String senderName = ''}) async {
+  if (_quietUntil?.isAfter(DateTime.now()) == true) return;
   initializeMessageAlerts();
   if (name.isNotEmpty) {
+    if (js_util.hasProperty(html.window, 'tongyuClaimMessageAlert')) {
+      try {
+        final claimed = await js_util.promiseToFuture<bool>(
+            js_util.callMethod(html.window, 'tongyuClaimMessageAlert', [name]));
+        if (!claimed) return;
+      } catch (_) {/* 老页面缺少桥接时沿用原去重。 */}
+    }
     if (html.window.localStorage['tongyu.lastMessageAlert'] == name) return;
     html.window.localStorage['tongyu.lastMessageAlert'] = name;
   }
@@ -217,11 +242,26 @@ void messageAlert(String name, String body, {String senderName = ''}) {
 Widget messageSoundButton() => ValueListenableBuilder<bool>(
       valueListenable: _soundEnabled,
       builder: (context, enabled, _) => IconButton(
-        tooltip: enabled ? '新消息提示音已开启（点击关闭）' : '新消息提示音已关闭（点击开启）',
+        tooltip: enabled
+            ? '声音提醒：${_soundChoices[_soundChoice]}（点击设置）'
+            : '声音提醒已关闭（点击设置）',
         icon: Icon(
             enabled ? Icons.volume_up_outlined : Icons.volume_off_outlined,
             size: 20),
-        onPressed: () => _setSoundEnabled(!enabled),
+        onPressed: () => showDialog<void>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+                  title: const Text('消息与声音提醒'),
+                  content: SizedBox(
+                      width: 430,
+                      child:
+                          SingleChildScrollView(child: messageAlertSettings())),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('完成'))
+                  ],
+                )),
       ),
     );
 
@@ -240,37 +280,32 @@ class _AlertSettingsState extends State<_AlertSettings> {
   Widget build(BuildContext context) => ValueListenableBuilder<bool>(
       valueListenable: _soundEnabled,
       builder: (context, enabled, _) => Column(children: [
-            SwitchListTile(
-                title: const Text('新消息提示音'),
-                subtitle: const Text('首次与页面交互后可播放，短时间连续消息合并提醒'),
-                value: enabled,
-                onChanged: _setSoundEnabled),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: DropdownButtonFormField<String>(
-                value: _soundChoice,
-                decoration: const InputDecoration(
-                    labelText: '通知声音', helperText: '语音不可用时回退铃声；发送者未知时播报通用提示'),
-                items: _soundChoices.entries
-                    .map((entry) => DropdownMenuItem(
-                        value: entry.key, child: Text(entry.value)))
-                    .toList(),
-                onChanged: (value) {
-                  if (value == null) return;
-                  _speechGeneration++;
-                  _playRequested = false;
-                  _pendingSound = false;
-                  html.window.speechSynthesis?.cancel();
-                  _audio.pause();
-                  setState(() {
-                    _soundChoice = value;
-                    _soundStatus = null;
-                    html.window.localStorage['tongyu.messageSoundStyle'] =
-                        value;
-                  });
-                },
-              ),
+            MessageSoundCard(
+              enabled: enabled,
+              choice: _soundChoice,
+              onEnabled: _setSoundEnabled,
+              onChoice: (value) {
+                _speechGeneration++;
+                _playRequested = false;
+                _pendingSound = false;
+                html.window.speechSynthesis?.cancel();
+                _audio.pause();
+                setState(() {
+                  _soundChoice = value;
+                  _soundStatus = null;
+                  html.window.localStorage['tongyu.messageSoundStyle'] = value;
+                });
+              },
+              onTest: () async {
+                _pendingSender = '张先生';
+                await _playSound();
+                if (mounted)
+                  setState(() => _soundStatus =
+                      _ready ? '试听已触发，请确认是否听到声音' : '浏览器暂未允许声音，请点击页面后重试');
+              },
+              status: _soundStatus,
             ),
+            const SizedBox(height: 12),
             SwitchListTile(
                 title: const Text('桌面通知'),
                 subtitle: Text(_status ?? '离开当前页面时提醒；不展示客户消息内容'),
@@ -299,15 +334,5 @@ class _AlertSettingsState extends State<_AlertSettings> {
                         : '浏览器未允许通知；提示音和未读角标仍可使用';
                   });
                 }),
-            TextButton(
-                onPressed: () async {
-                  _pendingSender = '张先生';
-                  await _playSound();
-                  if (mounted)
-                    setState(() => _soundStatus =
-                        _ready ? '提示音已播放' : '浏览器暂未允许声音，请点击页面后重试');
-                },
-                child: const Text('测试提示音')),
-            if (_soundStatus != null) Text(_soundStatus!),
           ]));
 }

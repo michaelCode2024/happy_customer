@@ -27,13 +27,14 @@ const (
 
 // Reply is the outcome of one automatic answer attempt.
 type Reply struct {
-	Content  string
-	Score    float64
-	Provider string
-	Handoff  bool
-	Reason   NullReason
-	Sources  []string
-	Usage    Usage
+	Content       string
+	Score         float64
+	Provider      string
+	Handoff       bool
+	Reason        NullReason
+	Sources       []string
+	SourceDetails []AssistSource
+	Usage         Usage
 }
 
 // Turn is one prior exchange handed to the model. The bot used to be strictly
@@ -152,7 +153,7 @@ func (s *Service) AnswerWith(ctx context.Context, request Request) (Reply, error
 	if threshold := s.effectiveThreshold(request.Threshold); best < threshold {
 		return Reply{
 			Score: best, Provider: s.ProviderName(), Handoff: true,
-			Reason: ReasonLowScore, Sources: titles(entries),
+			Reason: ReasonLowScore, Sources: titles(entries), SourceDetails: assistSources(entries),
 		}, nil
 	}
 
@@ -172,15 +173,16 @@ func (s *Service) AnswerWith(ctx context.Context, request Request) (Reply, error
 	if looksInjected(answer) {
 		return Reply{
 			Score: best, Provider: s.ProviderName(), Handoff: true,
-			Reason: ReasonInjection, Sources: titles(entries), Usage: usage,
+			Reason: ReasonInjection, Sources: titles(entries), SourceDetails: assistSources(entries), Usage: usage,
 		}, nil
 	}
 	return Reply{
-		Content:  answer,
-		Score:    best,
-		Provider: s.ProviderName(),
-		Sources:  titles(entries),
-		Usage:    usage,
+		Content:       answer,
+		Score:         best,
+		Provider:      s.ProviderName(),
+		Sources:       titles(entries),
+		SourceDetails: assistSources(entries),
+		Usage:         usage,
 	}, nil
 }
 
@@ -360,10 +362,16 @@ func (s *Service) SearchHybrid(ctx context.Context, tenantID uuid.UUID, question
 	ids := make([]uuid.UUID, 0, len(lexMap)+len(semMap))
 	seen := map[uuid.UUID]bool{}
 	for id := range lexMap {
-		if !seen[id] { ids = append(ids, id); seen[id] = true }
+		if !seen[id] {
+			ids = append(ids, id)
+			seen[id] = true
+		}
 	}
 	for id := range semMap {
-		if !seen[id] { ids = append(ids, id); seen[id] = true }
+		if !seen[id] {
+			ids = append(ids, id)
+			seen[id] = true
+		}
 	}
 	merged := make([]knowledgeEntry, 0, len(ids))
 	for _, id := range ids {
@@ -376,11 +384,17 @@ func (s *Service) SearchHybrid(ctx context.Context, tenantID uuid.UUID, question
 		// Find the full entry to carry title/content/examples.
 		var entry knowledgeEntry
 		for _, e := range lexical {
-			if e.id == id { entry = e; break }
+			if e.id == id {
+				entry = e
+				break
+			}
 		}
 		if entry.id == uuid.Nil {
 			for _, e := range semantic {
-				if e.id == id { entry = e; break }
+				if e.id == id {
+					entry = e
+					break
+				}
 			}
 		}
 		entry.score = combined

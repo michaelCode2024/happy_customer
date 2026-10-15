@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
+import '../state/offline_store.dart';
+import '../util/pwa_bridge.dart';
 
 import 'package:http/http.dart' as http;
 
@@ -82,12 +85,14 @@ class ConversationPage {
     required this.items,
     required this.queued,
     this.unread = 0,
+    this.receptionWaiting = 0,
   });
 
   final List<Conversation> items;
 
   /// 待接待（未分配）会话数；与未读消息数无关。
   final int queued;
+  final int receptionWaiting;
 
   /// 当前坐席可见入口下，所有未解决会话的 agent_unread 合计。
   final int unread;
@@ -106,6 +111,28 @@ class RelayDeskApi {
 
   final String _server;
   final http.Client _client;
+  OfflineStore? offlineStore;
+  final offline = ValueNotifier<bool>(false);
+  VoidCallback? onSessionRejected;
+  void configureOffline({required String tenant, required String agent}) {
+    if (tenant.isNotEmpty && agent.isNotEmpty) {
+      offlineStore = OfflineStore(server, tenant, agent);
+    }
+  }
+
+  Future<void> clearOfflineData() async => offlineStore?.clear();
+  bool get isOffline => browserOffline || offline.value;
+
+  bool _canCache(String path) =>
+      const [
+        '/api/v1/console/inboxes',
+        '/api/v1/console/agents',
+        '/api/v1/console/canned-responses',
+        '/api/v1/console/tags',
+        '/api/v1/console/entitlements'
+      ].contains(path) ||
+      RegExp(r'^/api/v1/console/conversations(?:/[a-zA-Z0-9-]+(?:/(?:messages|pins))?)?$')
+          .hasMatch(path);
 
   static const Duration _timeout = Duration(seconds: 20);
   static const Duration _uploadTimeout = Duration(minutes: 5);
@@ -121,6 +148,13 @@ class RelayDeskApi {
       _send(method, '/api/v1/groups$path', body: body);
 
   bool get hasToken => token.isNotEmpty;
+
+  Future<Map<String, dynamic>> notificationRequest(String method, String path,
+          {Map<String, dynamic>? body}) =>
+      _send(method, '/api/v1/console/notifications$path', body: body);
+  Future<Map<String, dynamic>> pushRequest(String method, String path,
+          {Map<String, dynamic>? body}) =>
+      _send(method, '/api/v1/console/push$path', body: body);
 
   /// Accepts what a human types: `chat.example.com`, `http://localhost:8080/`,
   /// or a full URL with a path. A bare host gets `https://`, except localhost,
@@ -324,6 +358,7 @@ class RelayDeskApi {
       items: asMapList(body['items']).map(Conversation.fromJson).toList(),
       queued: asInt(body['queued']),
       unread: asInt(body['unread']),
+      receptionWaiting: asInt(body['receptionWaiting'] ?? body['queued']),
     );
   }
 
@@ -479,22 +514,48 @@ class RelayDeskApi {
   /// The draft this agent left in a conversation, so switching threads does not
   /// lose a half-written answer.
   Future<String> draft(String conversationId) async {
-    final body = await _send(
-      'GET',
-      '/api/v1/console/conversations/$conversationId/draft',
-    );
-    return asString(body['content']);
+    return asString((await draftData(conversationId))['content']);
   }
 
-  /// Saves the draft, or clears it when [content] is blank — which is what the
-  /// server does with an empty body, rather than keeping a row every console
-  /// would have to filter out.
-  Future<void> saveDraft(String conversationId, String content) async {
-    await _send(
-      'PUT',
-      '/api/v1/console/conversations/$conversationId/draft',
-      body: <String, dynamic>{'content': content},
-    );
+  Future<Map<String, dynamic>> draftData(String conversationId) async {
+    final local = await offlineStore?.read('draft/$conversationId');
+    if (local != null &&
+        (local['pending'] == true || local['localPrivate'] == true))
+      return local;
+    try {
+      return await _send(
+          'GET', '/api/v1/console/conversations/$conversationId/draft');
+    } on ApiException catch (failure) {
+      if (failure.isNetworkFailure && local != null) return local;
+      rethrow;
+    }
+  }
+
+  /// 先落本地，再同步服务端草稿。离线仅保存草稿，绝不自动补发客户消息。
+  Future<void> saveDraft(String conversationId, String content,
+      {String? assistInteractionId, bool localPrivate = false}) async {
+    final data = <String, dynamic>{
+      'content': content,
+      if (assistInteractionId != null)
+        'assistInteractionId': assistInteractionId
+    };
+    await offlineStore?.write('draft/$conversationId',
+        {...data, 'pending': true, 'localPrivate': localPrivate});
+    // 内部备注草稿只留在本机，避免其他设备按公开回复草稿恢复。
+    if (localPrivate) return;
+    try {
+      await _send('PUT', '/api/v1/console/conversations/$conversationId/draft',
+          body: data);
+      // 请求期间用户可能继续输入；旧请求不能覆盖新的本地草稿。
+      final current = await offlineStore?.read('draft/$conversationId');
+      if (current?['content'] == content &&
+          current?['assistInteractionId'] == assistInteractionId) {
+        await offlineStore?.write('draft/$conversationId',
+            {...data, 'pending': false, 'localPrivate': localPrivate});
+      }
+    } on ApiException catch (failure) {
+      if (!failure.isNetworkFailure) rethrow;
+    }
   }
 
   /// Reports the highest sequence this console holds, which lets the agent's
@@ -781,6 +842,7 @@ class RelayDeskApi {
     String categoryId = '',
     required String content,
     List<String> questionExamples = const <String>[],
+    String sourceQuestion = '',
   }) async {
     final body = await _send(
       'POST',
@@ -790,6 +852,7 @@ class RelayDeskApi {
         'categoryId': categoryId,
         'content': content,
         'questionExamples': joinExamples(questionExamples),
+        if (sourceQuestion.isNotEmpty) 'sourceQuestion': sourceQuestion,
       },
     );
     return asString(body['id']);
@@ -846,6 +909,14 @@ class RelayDeskApi {
   /// 调用坐席 AI 助手。task 取 SUGGEST / SUMMARIZE / SENTIMENT / TRANSLATE /
   /// POLISH / NEXT_ACTION；conversationId 用于让服务端拉取上下文，question 为
   /// 建议/翻译/润色的素材文本。返回结果均为草稿，需坐席手动采纳后才发送。
+  Future<void> assistFeedback(String id, String action) async {
+    await _send('POST', '/api/v1/console/assist/$id/feedback',
+        body: {'action': action});
+  }
+
+  Future<Map<String, dynamic>> assistFeedbackSummary() =>
+      _send('GET', '/api/v1/console/assist/feedback-summary');
+
   Future<AssistResult> assist({
     required String task,
     required String conversationId,
@@ -872,6 +943,55 @@ class RelayDeskApi {
   /// ---------------------------------------------------------------- transport
 
   Future<Map<String, dynamic>> _send(
+    String method,
+    String path, {
+    Map<String, dynamic>? body,
+    Map<String, String>? query,
+    String? origin,
+    bool authorized = true,
+  }) async {
+    final store = offlineStore;
+    final key = Uri(path: path, queryParameters: query).toString();
+    final cacheable = authorized &&
+        hasToken &&
+        store != null &&
+        method == 'GET' &&
+        _canCache(path);
+    try {
+      if (browserOffline) {
+        throw const ApiException(
+            statusCode: 0, code: 'OFFLINE', message: '当前离线，请联网后重试；文字草稿会保存在本机');
+      }
+      final data = await _sendOnline(method, path,
+          body: body, query: query, origin: origin, authorized: authorized);
+      offline.value = false;
+      if (cacheable) await store.write(key, data);
+      return data;
+    } on ApiException catch (failure) {
+      if (authorized &&
+          (failure.isUnauthorized ||
+              failure.statusCode == 403 ||
+              failure.code == 'CONVERSATION_NOT_FOUND')) {
+        await clearOfflineData();
+        // 单个资源被拒绝时清除旧快照，但后续有权访问的会话仍可重新缓存。
+        // 旧请求持有的 store 已退役，不能把被清除的数据写回。
+        if (!failure.isUnauthorized && identical(offlineStore, store)) {
+          offlineStore = store?.fresh();
+        }
+        if (failure.isUnauthorized) onSessionRejected?.call();
+      }
+      if (failure.isNetworkFailure) {
+        offline.value = true;
+        if (cacheable) {
+          final saved = await store.read(key);
+          if (saved != null) return saved;
+        }
+      }
+      rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> _sendOnline(
     String method,
     String path, {
     Map<String, dynamic>? body,

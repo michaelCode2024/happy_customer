@@ -1,3 +1,4 @@
+import 'package:relaydesk_agent_console/src/ui/design_a.dart';
 import 'package:flutter/material.dart';
 import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
 import 'package:relaydesk_agent_console/src/ui/workspace_layout.dart';
@@ -42,21 +43,15 @@ class OverviewPage extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    '今天，也让服务更近一步。',
-                    style: theme.textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -0.2,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '$greeting，关注客户体验，也关注团队的每一次回应。',
-                    style: TextStyle(
-                      color: scheme.onSurfaceVariant,
-                      height: 1.45,
-                    ),
-                  ),
+                  WorkspaceHeading('工作概览', '$greeting，查看当前接待情况与团队工作状态。'),
+                  const SizedBox(height: 20),
+                  TongYuHero(
+                      title: '有温度的服务，\n从一次好好回应开始。',
+                      description: '把客户、团队与知识连接起来。专注每一次对话，也看见服务的全貌。',
+                      action: FilledButton.icon(
+                          onPressed: onInbox,
+                          icon: const Icon(Icons.chat_bubble_outline, size: 17),
+                          label: const Text('进入消息工作台'))),
                   const SizedBox(height: 20),
                   _PrimaryActionCard(
                     title: workbench.queued > 0
@@ -168,13 +163,12 @@ class OverviewPage extends StatelessWidget {
                           vertical: 32, horizontal: 16),
                       decoration: BoxDecoration(
                         color: scheme.surface,
-                        borderRadius: BorderRadius.circular(14),
+                        borderRadius: BorderRadius.circular(8),
                         border: Border.all(color: scheme.outlineVariant),
                       ),
                       child: Column(
                         children: [
-                          Icon(Icons.forum_outlined,
-                              size: 32, color: scheme.outline),
+                          const TongYuArtwork(size: 130),
                           const SizedBox(height: 12),
                           Text('还没有客户来过', style: theme.textTheme.titleSmall),
                           const SizedBox(height: 6),
@@ -202,7 +196,7 @@ class OverviewPage extends StatelessWidget {
                     Container(
                       decoration: BoxDecoration(
                         color: scheme.surface,
-                        borderRadius: BorderRadius.circular(14),
+                        borderRadius: BorderRadius.circular(8),
                         border: Border.all(color: scheme.outlineVariant),
                       ),
                       child: Column(
@@ -306,15 +300,15 @@ class _PrimaryActionCard extends StatelessWidget {
     return Material(
       color:
           primary ? scheme.primaryContainer.withOpacity(.45) : scheme.surface,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(8),
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(8),
         onTap: onTap,
         child: Container(
           width: double.infinity,
           padding: const EdgeInsets.fromLTRB(20, 20, 18, 20),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(8),
             border: primary ? null : Border.all(color: scheme.outlineVariant),
           ),
           child: Row(
@@ -326,7 +320,7 @@ class _PrimaryActionCard extends StatelessWidget {
                   color: primary
                       ? Colors.white.withOpacity(0.18)
                       : scheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(8),
                 ),
                 child: Icon(
                   icon,
@@ -392,14 +386,14 @@ class _SecondaryActionChip extends StatelessWidget {
       width: width,
       child: Material(
         color: scheme.surface,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(8),
         child: InkWell(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(8),
           onTap: onTap,
           child: Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(8),
               border: Border.all(color: scheme.outlineVariant),
             ),
             child: Row(

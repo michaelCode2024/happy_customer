@@ -1,3 +1,4 @@
+import 'package:relaydesk_agent_console/src/ui/design_a.dart';
 import 'package:flutter/material.dart';
 import 'package:relaydesk_agent_console/src/ui/console_form_dialog.dart';
 import 'package:relaydesk_agent_console/src/util/channel_preview_stub.dart'
@@ -26,7 +27,8 @@ class IntegrationPage extends StatefulWidget {
 }
 
 class _IntegrationPageState extends State<IntegrationPage> {
-  int _tab = 3;
+  int _tab = 0;
+  int _selectedChannel = 0;
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _inboxes = [];
@@ -37,6 +39,7 @@ class _IntegrationPageState extends State<IntegrationPage> {
   Map<String, dynamic>? _snippet;
   String? _snippetError;
   bool _canIdentity = false;
+
   /// 专业版及以上可走 member-token 进群，不必等企业版 identity。
   bool _canGroups = false;
 
@@ -197,52 +200,92 @@ class _IntegrationPageState extends State<IntegrationPage> {
 
   Future<void> _createHook([Map<String, dynamic>? hook]) async {
     var url = asString(hook?['url']);
-    final selected = <String>{...((hook?['events'] as List<dynamic>?) ?? []).map((e) => '$e')};
+    final selected = <String>{
+      ...((hook?['events'] as List<dynamic>?) ?? []).map((e) => '$e')
+    };
     var busy = false;
     String? error;
     String? secret;
     final saved = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (dialogContext) => StatefulBuilder(builder: (dialogContext, update) => ConsoleFormDialog(
-        title: hook == null ? '新增事件回调' : '编辑事件回调',
-        description: '实时同步消息、已读与送达。正式接入推荐使用 HTTPS。',
-        busy: busy,
-        error: error,
-        submitLabel: hook == null ? '创建' : '保存',
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextFormField(initialValue: url, onChanged: (value) => url = value.trim(),
-            decoration: const InputDecoration(labelText: '回调地址', hintText: 'https://example.com/webhook')),
-          const SizedBox(height: 12),
-          for (final event in _events) CheckboxListTile(dense: true, contentPadding: EdgeInsets.zero,
-            title: Text(event), value: selected.contains(event),
-            onChanged: (value) => update(() { if (value == true) {selected.add(event);} else {selected.remove(event);} })),
-        ]),
-        onSubmit: () async {
-          final parsed = Uri.tryParse(url);
-          if (parsed == null || !['http', 'https'].contains(parsed.scheme) || parsed.host.isEmpty || selected.isEmpty) {
-            update(() => error = '请填写有效的 HTTP/HTTPS 地址并选择至少一个事件');
-            return;
-          }
-          update(() {busy = true; error = null;});
-          try {
-            if (hook == null) {
-              final created = await widget.api.createIntegrationWebhook(url, selected.toList());
-              secret = asString(created['secret']);
-            } else {
-              await widget.api.adminWrite('PATCH', 'webhooks/${asString(hook['id'])}', {'url': url, 'events': selected.toList()});
-            }
-            if (dialogContext.mounted) Navigator.pop(dialogContext, true);
-          } on ApiException catch (e) {
-            if (dialogContext.mounted) update(() {busy = false; error = e.message;});
-          } catch (_) {
-            if (dialogContext.mounted) update(() {busy = false; error = '暂时无法保存，请稍后重试';});
-          }
-        },
-      )),
+      builder: (dialogContext) => StatefulBuilder(
+          builder: (dialogContext, update) => ConsoleFormDialog(
+                title: hook == null ? '新增事件回调' : '编辑事件回调',
+                description: '实时同步消息、已读与送达。正式接入推荐使用 HTTPS。',
+                busy: busy,
+                error: error,
+                submitLabel: hook == null ? '创建' : '保存',
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  TextFormField(
+                      initialValue: url,
+                      onChanged: (value) => url = value.trim(),
+                      decoration: const InputDecoration(
+                          labelText: '回调地址',
+                          hintText: 'https://example.com/webhook')),
+                  const SizedBox(height: 12),
+                  for (final event in _events)
+                    CheckboxListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(event),
+                        value: selected.contains(event),
+                        onChanged: (value) => update(() {
+                              if (value == true) {
+                                selected.add(event);
+                              } else {
+                                selected.remove(event);
+                              }
+                            })),
+                ]),
+                onSubmit: () async {
+                  final parsed = Uri.tryParse(url);
+                  if (parsed == null ||
+                      !['http', 'https'].contains(parsed.scheme) ||
+                      parsed.host.isEmpty ||
+                      selected.isEmpty) {
+                    update(() => error = '请填写有效的 HTTP/HTTPS 地址并选择至少一个事件');
+                    return;
+                  }
+                  update(() {
+                    busy = true;
+                    error = null;
+                  });
+                  try {
+                    if (hook == null) {
+                      final created = await widget.api
+                          .createIntegrationWebhook(url, selected.toList());
+                      secret = asString(created['secret']);
+                    } else {
+                      await widget.api.adminWrite(
+                          'PATCH',
+                          'webhooks/${asString(hook['id'])}',
+                          {'url': url, 'events': selected.toList()});
+                    }
+                    if (dialogContext.mounted)
+                      Navigator.pop(dialogContext, true);
+                  } on ApiException catch (e) {
+                    if (dialogContext.mounted)
+                      update(() {
+                        busy = false;
+                        error = e.message;
+                      });
+                  } catch (_) {
+                    if (dialogContext.mounted)
+                      update(() {
+                        busy = false;
+                        error = '暂时无法保存，请稍后重试';
+                      });
+                  }
+                },
+              )),
     );
     if (saved != true || !mounted) return;
-    if (secret != null) {await _showSecret('回调签名密钥', secret!);} else {_notice('回调配置已保存');}
+    if (secret != null) {
+      await _showSecret('回调签名密钥', secret!);
+    } else {
+      _notice('回调配置已保存');
+    }
     await _load();
   }
 
@@ -275,33 +318,22 @@ class _IntegrationPageState extends State<IntegrationPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('渠道与接入'), actions: [
-        IconButton(
-            tooltip: '刷新',
-            onPressed: _loading ? null : _load,
-            icon: const Icon(Icons.refresh))
-      ]),
-      body: Column(children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Align(
-              alignment: Alignment.centerLeft,
-              child: Wrap(spacing: 8, runSpacing: 8, children: [
-                for (final item in const [
-                  (3, '接入指南', Icons.route_outlined),
-                  (0, '接入入口', Icons.apps_outlined),
-                  (1, '服务端密钥', Icons.key_outlined),
-                  (2, '事件回调', Icons.webhook_outlined)
-                ])
-                  ChoiceChip(
-                      label: Text(item.$2),
-                      avatar: Icon(item.$3, size: 18),
-                      selected: _tab == item.$1,
-                      showCheckmark: false,
-                      onSelected: (_) => setState(() => _tab = item.$1)),
-              ])),
-        ),
-        const Divider(height: 16),
+      body: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        WorkspacePageHeader(
+            title: '接入管理',
+            description: '连接你的网站、H5 与 App，让客户随时找到你',
+            icon: Icons.link_rounded,
+            actions: [
+              OutlinedButton.icon(
+                  onPressed: _loading ? null : _load,
+                  icon: const Icon(Icons.refresh, size: 16),
+                  label: const Text('刷新'))
+            ]),
+        WorkspaceTabs(
+            labels: const ['接入渠道', '接入指南', '服务端密钥', '事件回调'],
+            selectedIndex: const [0, 3, 1, 2].indexOf(_tab),
+            onSelected: (index) =>
+                setState(() => _tab = const [0, 3, 1, 2][index])),
         Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
@@ -312,37 +344,42 @@ class _IntegrationPageState extends State<IntegrationPage> {
                         Text(_error!),
                         TextButton(onPressed: _load, child: const Text('重试'))
                       ]))
-                    : ListView(
-                        padding: const EdgeInsets.fromLTRB(20, 8, 20, 36),
-                        children: [
-                            Center(
-                                child: ConstrainedBox(
-                                    constraints:
-                                        const BoxConstraints(maxWidth: 1200),
-                                    child: switch (_tab) {
-                                      0 => _inboxTab(theme),
-                                      1 => _keyTab(theme),
-                                      3 => _guide(theme),
-                                      _ => _hookTab(theme),
-                                    })),
-                          ])),
+                    : ListView(padding: const EdgeInsets.all(24), children: [
+                        if (_tab == 0) ...[
+                          const TongYuHero(
+                              title: '连接你的业务，让服务触手可及。',
+                              description:
+                                  '选择适合网站、H5 或 App 的接入方式，让每一次咨询都有清晰的入口。',
+                              eyebrow: 'CONNECT / 连接与服务'),
+                          const SizedBox(height: 24)
+                        ],
+                        Container(
+                            padding: const EdgeInsets.all(22),
+                            decoration: BoxDecoration(
+                                color: theme.colorScheme.surface,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                    color: theme.colorScheme.outlineVariant)),
+                            child: switch (_tab) {
+                              0 => _inboxTab(theme),
+                              1 => _keyTab(theme),
+                              3 => _guide(theme),
+                              _ => _hookTab(theme)
+                            }),
+                      ])),
       ]),
     );
   }
 
   Widget _guide(ThemeData theme) =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const WorkspaceHeading('渠道与接入', '管理通语在不同渠道的接入方式与集成配置'),
-        if (_snippet != null) _channelGrid(theme),
-        Text('让客户从你的产品里直接发起聊天', style: theme.textTheme.headlineSmall),
+        Text('接入指南', style: theme.textTheme.titleLarge),
         const SizedBox(height: 12),
-        const Text(
-            '请先在「同事账号」里建好客服入口并分配成员，再复制安装代码。成员上线后即可接待；无人在线时消息会进待接待。'),
+        const Text('请先在「企业管理」里建好客服入口并分配成员，再复制安装代码。成员上线后即可接待；无人在线时消息会进待接待。'),
         const SizedBox(height: 24),
         Text('1. 安装匿名聊天（所有套餐）', style: theme.textTheme.titleMedium),
         const SizedBox(height: 8),
-        const Text(
-            '打开「接入入口」，复制网页安装代码或 iframe。inboxKey 可放在前端；匿名客户不需要业务账号。'),
+        const Text('打开「接入入口」，复制网页安装代码或 iframe。inboxKey 可放在前端；匿名客户不需要业务账号。'),
         const SizedBox(height: 24),
         Text('2. 关联你系统里的已登录客户', style: theme.textTheme.titleMedium),
         const SizedBox(height: 8),
@@ -388,8 +425,7 @@ X-RelayDesk-Key: <APIKey>
               '''POST ${widget.api.server}/api/v1/open/groups/<groupId>/members
 X-RelayDesk-Key: <仅保存在你的后端的 APIKey>
 {"members":[{"externalId":"<客户ID>","displayName":"<昵称>"}]}'''),
-          _copyRow(
-              '签发群会话并打开群页', '''// 你的后端校验本站登录后调用：
+          _copyRow('签发群会话并打开群页', '''// 你的后端校验本站登录后调用：
 // POST /api/v1/open/groups/<groupId>/member-token
 // {"externalId":"<客户ID>"} → { token, visitorId, groupId }
 const groupId = '<groupId>';
@@ -422,8 +458,7 @@ location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent
         const SizedBox(height: 24),
         Text('各种凭证分别用在哪里', style: theme.textTheme.titleMedium),
         const SizedBox(height: 8),
-        Text(
-            '企业标识 + 用户名 + 密码：团队成员登录后台。\n'
+        Text('企业标识 + 用户名 + 密码：团队成员登录后台。\n'
             'inboxKey：前端安装组件时标识客服入口。\n'
             'APIKey：你的服务器调用开放 API，不能放入网页或 App。\n'
             '${_canIdentity ? 'identityToken：短期客户身份票据（企业版）。\n' : ''}'
@@ -438,12 +473,11 @@ location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent
 
   Widget _inboxTab(ThemeData theme) =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const WorkspaceHeading('渠道与接入', '管理通语在不同渠道的接入方式与集成配置'),
-        const Text('接入入口',
+        const Text('客服入口',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
         const SizedBox(height: 12),
         if (_inboxes.isEmpty)
-          const Text('暂无客服入口，请到「同事账号 → 客服入口」创建。')
+          const Text('暂无客服入口，请到「企业管理 → 客服入口」创建。')
         else ...[
           DropdownButtonFormField<String>(
               value: _selectedInbox,
@@ -466,8 +500,10 @@ location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent
           else ...[
             _copyRow('入口公钥', asString(_snippet!['inboxKey'])),
             _channelGrid(theme),
-            if (asString(_snippet!['iframeHtml']).isNotEmpty)
-              _copyRow('业务系统 iframe 片段', asString(_snippet!['iframeHtml'])),
+            // iframe 是网站内嵌的另一种方式，不应混入 H5 和 App 的接入说明。
+            if (_selectedChannel == 0 &&
+                asString(_snippet!['iframeHtml']).isNotEmpty)
+              _copyRow('网站内嵌 iframe 片段（可选）', asString(_snippet!['iframeHtml'])),
             if (asString(_snippet!['openApiBase']).isNotEmpty)
               _copyRow('开放 API 根路径', asString(_snippet!['openApiBase'])),
           ],
@@ -507,77 +543,155 @@ location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent
   Widget _channelGrid(ThemeData theme) {
     final script = asString(_snippet!['script']);
     final h5 = asString(_snippet!['iframe']);
-    final app = asString(_snippet!['appUrl']).isEmpty
-        ? h5 : asString(_snippet!['appUrl']);
-    final cards = [
-      ('网站组件', '嵌入网站的可对话组件', Icons.language, script, h5),
-      ('H5 链接', '通过 H5 链接访问通语页面', Icons.link, h5, h5),
-      ('App WebView', '在 App WebView 中接入通语', Icons.phone_android, app, app),
+    // 兼容旧接口未返回 appUrl 的情况，仍保留 App 会话来源。
+    final h5Uri = Uri.tryParse(h5);
+    final app = asString(_snippet!['appUrl']).isNotEmpty
+        ? asString(_snippet!['appUrl'])
+        : h5.isEmpty || h5Uri == null
+            ? ''
+            : h5Uri.replace(queryParameters: {
+                ...h5Uri.queryParameters,
+                'source': 'APP',
+              }).toString();
+    final channels = [
+      ('网站组件', '将聊天窗口嵌入你的网站', Icons.language_outlined, script, h5),
+      ('H5 链接', '发送链接，即可发起在线咨询', Icons.link_rounded, h5, h5),
+      ('App WebView', '在 App 中打开客服页面', Icons.phone_android_outlined, app, app),
     ];
-    final scheme = theme.colorScheme;
-    return LayoutBuilder(builder: (context, box) {
-      final wide = box.maxWidth >= 860;
-      final channels = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('接入渠道', style: theme.textTheme.titleMedium),
-        const SizedBox(height: 8),
-        const Text('选择并管理通语的接入渠道'),
-        const SizedBox(height: 16),
-        LayoutBuilder(builder: (context, grid) {
-          final columns = grid.maxWidth >= 620 ? 3 : grid.maxWidth >= 420 ? 2 : 1;
-          return Wrap(spacing: 12, runSpacing: 12, children: [
-            for (final item in cards)
-              SizedBox(width: (grid.maxWidth - 12 * (columns - 1)) / columns,
-                child: Card(child: Padding(padding: const EdgeInsets.all(16),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Container(width: 44, height: 44,
-                      decoration: BoxDecoration(color: scheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(10)),
-                      child: Icon(item.$3, color: scheme.primary)),
-                    const SizedBox(height: 14),
-                    Text(item.$1, style: theme.textTheme.titleMedium),
-                    const SizedBox(height: 8),
-                    SizedBox(height: 44, child: Text(item.$2,
-                      style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant))),
-                    const SizedBox(height: 12),
-                    Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: item.$4.isEmpty ? const Color(0xFFFFF2E5) : const Color(0xFFE8F8ED),
-                        borderRadius: BorderRadius.circular(20)),
-                      child: Text(item.$4.isEmpty ? '未开通' : '可接入', style: TextStyle(fontSize: 12,
-                        color: item.$4.isEmpty ? const Color(0xFFFF7D00) : const Color(0xFF00B42A)))),
-                    const SizedBox(height: 18),
-                    Wrap(spacing: 8, runSpacing: 8, children: [
-                      OutlinedButton.icon(onPressed: item.$4.isEmpty ? null : () => _copy(item.$4),
-                        icon: const Icon(Icons.copy_outlined, size: 16), label: const Text('复制代码')),
-                      FilledButton(onPressed: item.$5.isEmpty ? null : () {
-                        if (!openChannelPreview(item.$5)) _notice('请在网页版打开渠道预览');
-                      }, child: const Text('预览')),
-                    ]),
-                  ])))),
-          ]);
-        }),
-      ]);
-      final code = Card(child: Padding(padding: const EdgeInsets.all(16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('网站组件接入代码', style: theme.textTheme.titleMedium),
-          const SizedBox(height: 6),
-          const Text('将以下代码嵌入您的网站中即可使用通语组件'),
-          const SizedBox(height: 12),
-          Container(width: double.infinity, padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: const Color(0xFF162131), borderRadius: BorderRadius.circular(10)),
-            child: SelectableText(script, style: const TextStyle(
-              fontFamily: 'monospace', fontSize: 12, height: 1.6, color: Color(0xFFE8F0FF)))),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(onPressed: script.isEmpty ? null : () => _copy(script),
-            icon: const Icon(Icons.copy, size: 16), label: const Text('复制安装代码')),
-        ])));
-      return Padding(padding: const EdgeInsets.only(bottom: 20),
-        child: wide ? Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Expanded(flex: 3, child: channels), const SizedBox(width: 16), Expanded(flex: 2, child: code),
-        ]) : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          channels, const SizedBox(height: 16), code,
-        ]));
-    });
+    final current = channels[_selectedChannel], scheme = theme.colorScheme;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const SizedBox(height: 20),
+      Text('选择接入方式', style: theme.textTheme.titleSmall),
+      const SizedBox(height: 6),
+      Text('选择渠道后，查看对应的接入内容并预览效果。',
+          style: theme.textTheme.bodySmall
+              ?.copyWith(color: scheme.onSurfaceVariant)),
+      const SizedBox(height: 16),
+      LayoutBuilder(builder: (context, box) {
+        final columns = box.maxWidth >= 780
+            ? 3
+            : box.maxWidth >= 480
+                ? 2
+                : 1;
+        return Wrap(spacing: 12, runSpacing: 12, children: [
+          for (var i = 0; i < channels.length; i++)
+            SizedBox(
+                width: (box.maxWidth - 12 * (columns - 1)) / columns,
+                child: Semantics(
+                    button: true,
+                    selected: i == _selectedChannel,
+                    child: Material(
+                        color: i == _selectedChannel
+                            ? scheme.primaryContainer.withOpacity(0.45)
+                            : scheme.surface,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            side: BorderSide(
+                                color: i == _selectedChannel
+                                    ? scheme.primary
+                                    : scheme.outlineVariant)),
+                        child: InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: () => setState(() => _selectedChannel = i),
+                            child: Padding(
+                                padding: const EdgeInsets.all(18),
+                                child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(children: [
+                                        Icon(channels[i].$3,
+                                            color: scheme.primary, size: 26),
+                                        const Spacer(),
+                                        if (i == _selectedChannel)
+                                          Icon(Icons.check_circle,
+                                              color: scheme.primary, size: 18)
+                                      ]),
+                                      const SizedBox(height: 14),
+                                      Text(channels[i].$1,
+                                          style: theme.textTheme.titleSmall),
+                                      const SizedBox(height: 6),
+                                      Text(channels[i].$2,
+                                          style: theme.textTheme.bodySmall),
+                                      const SizedBox(height: 12),
+                                      Text(
+                                          channels[i].$4.isEmpty
+                                              ? '暂无接入内容'
+                                              : '接入内容已就绪',
+                                          style: TextStyle(
+                                              fontSize: 11,
+                                              color: channels[i].$4.isEmpty
+                                                  ? scheme.outline
+                                                  : const Color(0xFF31977C))),
+                                    ]))))))
+        ]);
+      }),
+      const SizedBox(height: 24),
+      Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+              border: Border.all(color: scheme.outlineVariant),
+              borderRadius: BorderRadius.circular(16)),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                spacing: 24,
+                runSpacing: 12,
+                children: [
+                  Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                            '${current.$1} · ${_selectedChannel == 0 ? '安装代码' : '访问链接'}',
+                            style: theme.textTheme.titleSmall),
+                        const SizedBox(height: 6),
+                        Text(
+                            _selectedChannel == 0
+                                ? '将以下代码添加到网站页面，由组件管理访客会话。'
+                                : _selectedChannel == 1
+                                    ? '复制链接用于 H5 页面跳转或分享，客户打开后即可咨询。'
+                                    : '在 App 的 WebView 中加载以下链接，source=APP 用于标识 App 会话来源。',
+                            style: theme.textTheme.bodySmall),
+                      ]),
+                  Wrap(spacing: 8, children: [
+                    OutlinedButton.icon(
+                        onPressed:
+                            current.$4.isEmpty ? null : () => _copy(current.$4),
+                        icon: const Icon(Icons.copy_outlined, size: 16),
+                        label: Text(_selectedChannel == 0 ? '复制安装代码' : '复制链接')),
+                    FilledButton.icon(
+                        onPressed: current.$5.isEmpty
+                            ? null
+                            : () {
+                                if (!openChannelPreview(current.$5))
+                                  _notice('请在网页版打开渠道预览');
+                              },
+                        icon: const Icon(Icons.open_in_new, size: 16),
+                        label: const Text('预览效果')),
+                  ]),
+                ]),
+            const SizedBox(height: 16),
+            Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(10)),
+                child: SelectableText(
+                    current.$4.isEmpty ? '当前入口暂未提供该渠道的接入内容。' : current.$4,
+                    style: TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 12,
+                        height: 1.7,
+                        color: scheme.onSurface))),
+            const SizedBox(height: 12),
+            Text('入口标识可以用于前端接入，服务端密钥仅供你的服务器使用。',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: scheme.onSurfaceVariant)),
+          ])),
+    ]);
   }
 
   Widget _hookTab(ThemeData theme) =>

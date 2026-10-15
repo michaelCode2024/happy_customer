@@ -1,5 +1,7 @@
+import 'package:relaydesk_agent_console/src/ui/design_a.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:relaydesk_agent_console/src/ui/assist_feedback_actions.dart';
 
 import 'package:relaydesk_agent_console/src/api/api_exception.dart';
 import 'package:relaydesk_agent_console/src/api/models.dart';
@@ -16,12 +18,17 @@ class AiAssistPanel extends StatefulWidget {
     required this.conversationId,
     required this.messages,
     required this.onAdopt,
+    this.draftText = '',
+    this.writingOnly = false,
   });
 
+  final bool initiallyExpanded;
   final RelayDeskApi api;
   final String conversationId;
   final List<ChatMessage> messages;
-  final void Function(String) onAdopt;
+  final ValueChanged<AssistResult> onAdopt;
+  final String draftText;
+  final bool writingOnly;
 
   @override
   State<AiAssistPanel> createState() => _AiAssistPanelState();
@@ -29,10 +36,17 @@ class AiAssistPanel extends StatefulWidget {
 
 class _AiAssistPanelState extends State<AiAssistPanel> {
   bool _open = false;
+  @override
+  void initState() {
+    super.initState();
+    _open = widget.initiallyExpanded;
+  }
+
   bool _busy = false;
   String? _activeTask;
   AssistResult? _result;
   String? _error;
+  int _request = 0;
 
   // 中文标签 + 服务端任务名。顺序即按钮顺序。
   static const List<(String, String)> _tasks = <(String, String)>[
@@ -52,17 +66,33 @@ class _AiAssistPanelState extends State<AiAssistPanel> {
     super.didUpdateWidget(oldWidget);
     // 切换到另一个会话时，丢弃上一个会话的草稿结果，避免串台。
     if (oldWidget.conversationId != widget.conversationId) {
+      _request++;
+      _busy = false;
       _result = null;
       _error = null;
       _activeTask = null;
     }
+    if (oldWidget.draftText != widget.draftText ||
+        _messageVersion(oldWidget.messages) !=
+            _messageVersion(widget.messages)) {
+      _result = null;
+      _request++;
+      _busy = false;
+    }
   }
+
+  String _messageVersion(List<ChatMessage> messages) => messages
+      .where((m) => m.messageType == 'TEXT')
+      .map((m) => '${m.id}:${m.content}:${m.deletedAt}')
+      .join('|');
 
   String get _question {
     // 取最后一条访客文本消息作为建议 / 情感 / 翻译的素材。
     for (int i = widget.messages.length - 1; i >= 0; i--) {
       final message = widget.messages[i];
-      if (message.senderType == 'VISITOR' && message.messageType == 'TEXT') {
+      if (message.senderType == 'VISITOR' &&
+          message.messageType == 'TEXT' &&
+          message.deletedAt == null) {
         return message.content;
       }
     }
@@ -71,6 +101,13 @@ class _AiAssistPanelState extends State<AiAssistPanel> {
 
   Future<void> _run(String task) async {
     if (_busy) return;
+    final input = task == 'POLISH' ? widget.draftText.trim() : _question;
+    if (input.isEmpty) {
+      setState(() =>
+          _error = task == 'POLISH' ? '先在输入框写下回复，再进行润色。' : '收到客户文本消息后再使用此功能。');
+      return;
+    }
+    final request = ++_request;
     final conversationId = widget.conversationId;
     setState(() {
       _busy = true;
@@ -81,18 +118,26 @@ class _AiAssistPanelState extends State<AiAssistPanel> {
       final result = await widget.api.assist(
         task: task,
         conversationId: conversationId,
-        question: _question,
+        question: input,
       );
-      if (!mounted || widget.conversationId != conversationId) return;
+      if (!mounted ||
+          request != _request ||
+          widget.conversationId != conversationId) return;
       setState(() => _result = result);
     } on ApiException catch (e) {
-      if (mounted && widget.conversationId == conversationId)
+      if (mounted &&
+          request == _request &&
+          widget.conversationId == conversationId) {
         setState(() => _error = e.message);
+      }
     } catch (e) {
-      if (mounted && widget.conversationId == conversationId)
+      if (mounted &&
+          request == _request &&
+          widget.conversationId == conversationId) {
         setState(() => _error = '请求失败：$e');
+      }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && request == _request) setState(() => _busy = false);
     }
   }
 
@@ -130,10 +175,11 @@ class _AiAssistPanelState extends State<AiAssistPanel> {
         children: <Widget>[
           // 收缩态：单行"AI 助手”触发展开。只在会话有消息时才出现。
           ListTile(
+            leading: const TongYuArtwork(ai: true, size: 42),
             visualDensity: VisualDensity.compact,
             contentPadding: EdgeInsets.zero,
             title: const Text(
-              'AI 助手',
+              'AI 写作助手',
               style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
             ),
             subtitle: _result != null
@@ -160,11 +206,18 @@ class _AiAssistPanelState extends State<AiAssistPanel> {
                 runSpacing: 8,
                 children: [
                   for (final (task, label) in _tasks)
-                    _ActionChip(
-                      label: label,
-                      loading: _busy && _activeTask == task,
-                      onTap: _busy ? null : () => _run(task),
-                    ),
+                    if (!widget.writingOnly ||
+                        task == 'POLISH' ||
+                        task == 'TRANSLATE' ||
+                        task == 'NEXT_ACTION')
+                      _ActionChip(
+                        label: task == 'POLISH'
+                            ? '润色我的草稿'
+                            : task == 'TRANSLATE'
+                                ? '客户消息译为中文'
+                                : label,
+                        onTap: _busy ? null : () => _run(task),
+                      ),
                 ],
               ),
             ),
@@ -189,6 +242,7 @@ class _AiAssistPanelState extends State<AiAssistPanel> {
                   result: _result!,
                   labelOf: labelOf,
                   onAdopt: widget.onAdopt,
+                  api: widget.api,
                   onDismiss: () => setState(() => _result = null),
                   onSentimentColor: _sentimentColor,
                 ),
@@ -204,12 +258,10 @@ class _ActionChip extends StatelessWidget {
   const _ActionChip({
     required this.label,
     required this.onTap,
-    this.loading = false,
   });
 
   final String label;
   final VoidCallback? onTap;
-  final bool loading;
 
   @override
   Widget build(BuildContext context) {
@@ -225,17 +277,9 @@ class _ActionChip extends StatelessWidget {
                 : Theme.of(context).colorScheme.primary.withOpacity(0.5),
           ),
           borderRadius: BorderRadius.circular(16),
-          color: loading
-              ? Theme.of(context).colorScheme.primaryContainer
-              : Theme.of(context).colorScheme.primary.withOpacity(0.08),
+          color: Theme.of(context).colorScheme.primary.withOpacity(0.08),
         ),
-        child: loading
-            ? const SizedBox(
-                width: 12,
-                height: 12,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : Text(label, style: const TextStyle(fontSize: 13)),
+        child: Text(label, style: const TextStyle(fontSize: 13)),
       ),
     );
   }
@@ -248,11 +292,13 @@ class _ResultCard extends StatelessWidget {
     required this.onAdopt,
     required this.onDismiss,
     required this.onSentimentColor,
+    required this.api,
   });
 
   final AssistResult result;
   final Map<String, String> labelOf;
-  final void Function(String) onAdopt;
+  final ValueChanged<AssistResult> onAdopt;
+  final RelayDeskApi api;
   final VoidCallback onDismiss;
   final Color Function(String) onSentimentColor;
 
@@ -326,13 +372,34 @@ class _ResultCard extends StatelessWidget {
             const SizedBox(height: 6),
             SelectableText(result.text,
                 style: const TextStyle(fontSize: 13, height: 1.5)),
-            if (result.sources.isNotEmpty) ...<Widget>[
+            if (result.sourceDetails.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 6),
+              for (final source in result.sourceDetails)
+                TextButton.icon(
+                  icon: const Icon(Icons.description_outlined, size: 15),
+                  label: Text(source.title),
+                  onPressed: () => showDialog<void>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                            title: Text(source.title),
+                            content: SizedBox(
+                                width: 520,
+                                child: SingleChildScrollView(
+                                    child: SelectableText(source.content))),
+                            actions: [
+                              TextButton(
+                                  onPressed: () => Navigator.pop(context),
+                                  child: const Text('关闭'))
+                            ],
+                          )),
+                ),
+            ] else if (result.sources.isNotEmpty) ...<Widget>[
               const SizedBox(height: 6),
               Text('参考：${result.sources.join('、')}',
                   style: Theme.of(context).textTheme.bodySmall),
             ],
             const SizedBox(height: 8),
-            Row(
+            Wrap(
               children: <Widget>[
                 TextButton.icon(
                   icon: const Icon(Icons.copy, size: 16),
@@ -344,13 +411,11 @@ class _ResultCard extends StatelessWidget {
                   },
                 ),
                 if (_AiAssistPanelState._adoptable.contains(result.task))
-                  TextButton.icon(
-                    icon: const Icon(Icons.arrow_downward, size: 16),
-                    label: const Text('采纳到输入框'),
-                    style: TextButton.styleFrom(
-                        visualDensity: VisualDensity.compact),
-                    onPressed: () => onAdopt(result.text),
-                  ),
+                  AssistFeedbackActions(
+                      key: ValueKey(result),
+                      api: api,
+                      result: result,
+                      onAdopt: onAdopt),
               ],
             ),
           ],

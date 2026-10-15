@@ -1,0 +1,23 @@
+<!doctype html><html lang="zh-CN"><head><base href="/console/desktop/"><meta charset="utf-8"><meta name="tongyu-desktop" content="1"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#ffffff"><link rel="manifest" href="/console/manifest.json"><title>通语客服</title><link rel="stylesheet" href="style.css"><style>    #mobile-loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--tongyu-page-bg,#fff);color:inherit;z-index:99999;opacity:1;transition:opacity .22s ease;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif}
+    #mobile-loading.leaving{opacity:0;pointer-events:none}
+    .tongyu-start-identity{text-align:center;padding:24px;transform:translateY(-20px)}
+    .tongyu-start-icon{position:relative;display:grid;place-items:center;width:108px;height:108px;margin:0 auto 18px}
+    .tongyu-start-icon:before{content:'';position:absolute;inset:7px;border-radius:30px;background:#f8f9fc;transform:rotate(-9deg)}
+    [data-tongyu-theme="dark"] .tongyu-start-icon:before{background:#202632}
+    .tongyu-start-icon svg{position:relative;animation:tongyu-breathe 2.8s ease-in-out infinite}
+    .tongyu-start-title{font-size:28px;letter-spacing:4px;line-height:1.4;margin:0 0 9px;font-weight:650}
+    .tongyu-start-english{font-size:10px;letter-spacing:4px;opacity:.55;margin:0 0 29px;padding-left:4px}
+    .tongyu-start-tagline{font-size:13px;letter-spacing:1px;opacity:.65;margin:0}
+    .tongyu-start-activity{position:relative;overflow:hidden;width:70px;height:3px;background:#edf0f6;border-radius:8px;margin:34px auto 0}
+    .tongyu-start-activity:after{content:'';display:block;width:26px;height:100%;border-radius:8px;background:#4263eb;animation:tongyu-travel 1.7s ease-in-out infinite}
+    .tongyu-start-foot{position:absolute;bottom:calc(24px + env(safe-area-inset-bottom,0px));left:20px;right:20px;text-align:center;font-size:10px;letter-spacing:2px;opacity:.45}
+    .tongyu-start-status{font-size:12px;line-height:1.9;opacity:.7;max-width:280px;margin:22px auto 0}
+    #relaydesk-load-retry{display:block;margin:16px auto 0;border:0;border-radius:9px;background:#4263eb;color:#fff;font:14px inherit;padding:12px 28px;cursor:pointer}
+    @keyframes tongyu-breathe{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+    @keyframes tongyu-travel{0%,100%{transform:translateX(-28px)}50%{transform:translateX(44px)}}
+    @media(prefers-reduced-motion:reduce){#mobile-loading,.tongyu-start-icon svg,.tongyu-start-activity:after{animation:none;transition:none}}
+</style></head><body>  <div id="mobile-loading" role="status" aria-label="正在打开通语">
+    <div class="tongyu-start-identity"><div class="tongyu-start-icon"><svg xmlns="http://www.w3.org/2000/svg" width="76" height="76" viewBox="0 0 36 36"><rect x="2" y="3" width="25" height="23" rx="9" fill="#4263eb"/><path d="M8 23v8l9-7" fill="#4263eb"/><path d="M14 12h16v15l-6-3H14" fill="none" stroke="#fff" stroke-width="2.5" stroke-linejoin="round"/></svg>
+</div><h1 class="tongyu-start-title">通语</h1><p class="tongyu-start-english">TONGYU</p><p class="tongyu-start-tagline">让每一次咨询，都有回应。</p><div class="tongyu-start-activity" aria-hidden="true"></div><div class="tongyu-start-status" id="tongyu-start-status"></div></div><div class="tongyu-start-foot">客户服务 · 从容有序</div>
+  </div>
+<div id="app"><div id="network"></div><div id="workspace"><aside id="sidebar"></aside><section id="main"><header id="topbar"></header><main id="screen"></main></section></div><nav id="nav" hidden></nav><div id="shade" hidden></div><section id="sheet" hidden></section><div id="toast" role="status"></div></div><input id="file-input" type="file" hidden><script src="/console/mobile/visual.js"></script><script src="/console/pwa-client.js"></script><script src="/console/push-client.js"></script><script src="/console/mobile/core.js"></script><script src="/console/mobile/messaging.js"></script><script src="/console/mobile/message-actions.js"></script><script src="/console/mobile/app.js"></script><script src="desktop.js"></script><script src="pages.js"></script><script src="platform.js"></script></body></html>

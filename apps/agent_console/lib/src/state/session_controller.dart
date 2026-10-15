@@ -1,4 +1,6 @@
 import 'dart:async';
+import '../util/push_bridge_stub.dart'
+    if (dart.library.html) '../util/push_bridge_web.dart';
 
 import 'package:flutter/foundation.dart';
 
@@ -92,6 +94,7 @@ class SessionController extends ChangeNotifier {
       return;
     }
     final api = _apiFactory(stored.server)..token = stored.token;
+    api.configureOffline(tenant: stored.tenant.id, agent: stored.agent.id);
     _api = api;
     _session = stored;
     try {
@@ -108,6 +111,8 @@ class SessionController extends ChangeNotifier {
       if (failure.isUnauthorized) {
         // The stored session is no longer valid; start clean but keep the
         // server address so the form is only missing credentials.
+        await api.clearOfflineData();
+        await disableBackgroundAlerts();
         await _store.clear();
         _api?.close();
         _api = null;
@@ -151,6 +156,8 @@ class SessionController extends ChangeNotifier {
       // The stored expiry is deliberately generous: the server is the authority
       // on whether the token is still valid, and re-checking on every launch
       // (in bootstrap) is cheaper than forcing a re-login mid-shift.
+      api.configureOffline(
+          tenant: signedIn.tenant.id, agent: signedIn.agent.id);
       await _store.save(signedIn, sessionWindowSeconds);
       await _store.saveServer(origin);
       _lastServer = origin;
@@ -205,6 +212,7 @@ class SessionController extends ChangeNotifier {
   /// Signs out. The socket is closed by [WorkbenchController] before this runs,
   /// so a presence event does not race the revocation.
   Future<void> logout() async {
+    await disableBackgroundAlerts();
     _presenceRefresh?.cancel();
     final api = _api;
     if (api != null) {
@@ -215,6 +223,7 @@ class SessionController extends ChangeNotifier {
       }
       api.close();
     }
+    await api?.clearOfflineData();
     await _store.clear();
     _api = null;
     _session = null;
@@ -289,7 +298,28 @@ class SessionController extends ChangeNotifier {
 
   void _setPhase(SessionPhase phase) {
     _phase = phase;
+    if (phase == SessionPhase.loggedIn) {
+      final current = _api;
+      current?.onSessionRejected = () {
+        if (_api == current && !_disposed)
+          unawaited(_clearRejectedSession(current));
+      };
+    }
     _notify();
+  }
+
+  Future<void> _clearRejectedSession(RelayDeskApi api) async {
+    api.onSessionRejected = null;
+    await disableBackgroundAlerts();
+    await api.clearOfflineData();
+    await _store.clear();
+    if (_api != api || _disposed) return;
+    _presenceRefresh?.cancel();
+    _api = null;
+    _session = null;
+    api.close();
+    _error = '登录已失效，请重新登录';
+    _setPhase(SessionPhase.loggedOut);
   }
 
   void _notify() {
