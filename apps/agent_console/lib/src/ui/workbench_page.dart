@@ -376,10 +376,8 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
           builder: (context, constraints) {
             final width = constraints.maxWidth;
             final useRail = width >= 900;
-            // 图标轨固定 76。剩余宽度才用来决定要不要并排客户资料，避免按整屏硬塞第三栏。
-            const railWidth = 76.0;
-            final body = _bodyFor(useRail ? width - railWidth : width,
-                wideShell: useRail);
+            // 传递实际剩余宽度，避免展开侧栏后仍按整屏宽度强行显示客户资料。
+            final body = _bodyFor(useRail ? width - 220 : width);
             if (!useRail) {
               // 彩站宿主已有消息页和底部导航；打开会话时让出空间显示消息历史。
               final hostedThread = isHostedConsole &&
@@ -421,11 +419,23 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
               );
             }
             return Scaffold(
-              // 宽屏走国内在线客服的深色图标轨，不再用 220px 管理后台侧栏占掉聊天宽度。
               body: Row(children: [
                 ListenableBuilder(
                     listenable: _workbench,
-                    builder: (context, _) => ConsoleIconRail(
+                    builder: (context, _) => WorkspaceSidebar(
+                          subtitle: '企业客服平台',
+                          leading: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(widget.session.tenant?.name ?? '企业工作空间',
+                                  maxLines: 2,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w600)),
+                              const SizedBox(height: 5),
+                              Text('企业工作空间',
+                                  style: Theme.of(context).textTheme.bodySmall),
+                            ],
+                          ),
                           selectedIndex: sections
                               .indexWhere((spec) => spec.section == _section),
                           onSelected: (index) => setState(
@@ -437,27 +447,27 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                                   _section == spec.section
                                       ? spec.selectedIcon
                                       : spec.icon,
+                                  group: spec.group,
                                   count: spec.section ==
                                           WorkbenchSection.conversations
                                       ? _workbench.unread
                                       : 0)
                           ],
-                          avatar: _RailStatusButton(
-                            agent: agent,
-                            onOpenSettings: () => setState(() =>
-                                _section = WorkbenchSection.settings),
-                            onPresence: widget.session.setPresence,
-                          ),
+                          footer: InkWell(
+                              onTap: () => setState(
+                                  () => _section = WorkbenchSection.settings),
+                              child:
+                                  _RailLeading(agent: agent, extended: true)),
                         )),
                 Expanded(
                     child: Column(children: [
-                  // 会话页本身就是三栏，不再叠一条「客服工作台」标题。其它模块仍要模块名。
-                  if (_section != WorkbenchSection.conversations)
-                    _WorkbenchChromeBar(
-                      tenantName: widget.session.tenant?.name ?? '企业工作空间',
-                      sectionTitle: _sectionTitle(_section),
-                      workbench: _workbench,
-                    ),
+                  _WorkbenchChromeBar(
+                    tenantName: widget.session.tenant?.name ?? '企业工作空间',
+                    sectionTitle: _section == WorkbenchSection.conversations
+                        ? '客服工作台'
+                        : _sectionTitle(_section),
+                    workbench: _workbench,
+                  ),
                   Expanded(child: body),
                 ])),
               ]),
@@ -468,7 +478,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     );
   }
 
-  Widget _bodyFor(double width, {required bool wideShell}) {
+  Widget _bodyFor(double width) {
     switch (_section) {
       case WorkbenchSection.groups:
         return GroupsPage(session: widget.session);
@@ -514,32 +524,14 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
               await _workbench.loadAgents();
             });
       case WorkbenchSection.conversations:
-        return _conversations(width, showListStatus: wideShell);
+        return _conversations(width);
     }
   }
 
-  Widget _conversations(double width, {required bool showListStatus}) {
+  Widget _conversations(double width) {
     final list = ConversationListPanel(
       workbench: _workbench,
       session: widget.session,
-      // 窄屏状态在底栏上方的 AppBar；宽屏没有那条标题，状态改放到会话列表顶上。
-      headerActions: showListStatus
-          ? IconButtonTheme(
-              data: IconButtonThemeData(
-                style: IconButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _ConnectionBadge(workbench: _workbench, compact: true),
-                  messageSoundButton(),
-                ],
-              ),
-            )
-          : null,
     );
     // Three panes need genuine room. Below this the customer record is pushed on
     // top of the thread instead of shrinking it into uselessness.
@@ -696,8 +688,8 @@ class _WorkbenchChromeBar extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     return Container(
-      height: 52,
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      height: 74,
+      padding: const EdgeInsets.symmetric(horizontal: 28),
       decoration: BoxDecoration(
         color: scheme.surface,
         border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
@@ -736,135 +728,67 @@ class _WorkbenchChromeBar extends StatelessWidget {
   }
 }
 
-/// 图标轨底部的本人头像。点开可切在线 / 忙碌 / 离线，国内客服台都把接待状态放在这里，而不是藏进设置页。
-class _RailStatusButton extends StatelessWidget {
-  const _RailStatusButton({
-    required this.agent,
-    required this.onOpenSettings,
-    required this.onPresence,
-  });
+/// The avatar and tenant name at the top of the rail.
+class _RailLeading extends StatelessWidget {
+  const _RailLeading({required this.agent, required this.extended});
 
   final AgentProfile? agent;
-  final VoidCallback onOpenSettings;
-  final ValueChanged<String> onPresence;
+  final bool extended;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final name = agent?.displayName ?? '';
-    final presence = agent?.presence ?? 'ONLINE';
-    final dot = switch (presence) {
-      'AWAY' => const Color(0xFFFF7D00),
-      'OFFLINE' => const Color(0xFF8A93A3),
-      _ => const Color(0xFF22C55E),
-    };
-    final label = switch (presence) {
-      'AWAY' => '忙碌',
-      'OFFLINE' => '离线',
-      _ => '在线',
-    };
-    return PopupMenuButton<String>(
-      tooltip: '$label · ${name.isEmpty ? '未登录' : name}',
-      offset: const Offset(64, -8),
-      onSelected: (value) {
-        if (value == 'settings') {
-          onOpenSettings();
-          return;
-        }
-        onPresence(value);
-      },
-      itemBuilder: (context) => [
-        PopupMenuItem(
-          value: 'ONLINE',
-          child: _PresenceMenuRow(
-              color: const Color(0xFF22C55E),
-              label: '在线',
-              selected: presence != 'AWAY' && presence != 'OFFLINE'),
-        ),
-        PopupMenuItem(
-          value: 'AWAY',
-          child: _PresenceMenuRow(
-              color: const Color(0xFFFF7D00),
-              label: '忙碌',
-              selected: presence == 'AWAY'),
-        ),
-        PopupMenuItem(
-          value: 'OFFLINE',
-          child: _PresenceMenuRow(
-              color: const Color(0xFF8A93A3),
-              label: '离线',
-              selected: presence == 'OFFLINE'),
-        ),
-        const PopupMenuDivider(),
-        const PopupMenuItem(
-          value: 'settings',
-          child: Text('个人设置'),
-        ),
-      ],
-      child: SizedBox(
-        width: 40,
-        height: 40,
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: const Color(0xFF2C3A52),
-              child: Text(
-                name.isEmpty ? '?' : String.fromCharCode(name.runes.first),
-                style: const TextStyle(
-                  color: Color(0xFFDCE5FF),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-            Positioned(
-              right: 2,
-              bottom: 2,
-              child: Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  color: dot,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0xFF182334), width: 1.5),
-                ),
-              ),
-            ),
-          ],
+    final avatar = CircleAvatar(
+      radius: 18,
+      backgroundColor: theme.colorScheme.primaryContainer,
+      child: Text(
+        name.isEmpty ? '?' : String.fromCharCode(name.runes.first),
+        style: theme.textTheme.labelLarge?.copyWith(
+          color: theme.colorScheme.onPrimaryContainer,
         ),
       ),
     );
-  }
-}
-
-class _PresenceMenuRow extends StatelessWidget {
-  const _PresenceMenuRow({
-    required this.color,
-    required this.label,
-    required this.selected,
-  });
-
-  final Color color;
-  final String label;
-  final bool selected;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        ),
-        const SizedBox(width: 8),
-        Text(label,
-            style: TextStyle(
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w400)),
-      ],
+    if (!extended) {
+      return Tooltip(message: name.isEmpty ? '未登录' : name, child: avatar);
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Row(
+        children: <Widget>[
+          avatar,
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Text(
+                  name.isEmpty ? '未登录' : name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelLarge,
+                ),
+                if (agent != null)
+                  Text(
+                    _roleLabel(agent!.role),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
+
+  static String _roleLabel(String role) => switch (role) {
+        'SUPERVISOR' => '客服主管',
+        'AGENT' => '客服坐席',
+        _ => role,
+      };
 }
 
 /// A small dot plus label describing the realtime channel.
@@ -873,12 +797,9 @@ class _PresenceMenuRow extends StatelessWidget {
 /// whether the console is live *before* they wonder why a message has not
 /// arrived, and "connected" is information too.
 class _ConnectionBadge extends StatelessWidget {
-  const _ConnectionBadge({required this.workbench, this.compact = false});
+  const _ConnectionBadge({required this.workbench});
 
   final WorkbenchController workbench;
-
-  /// 会话列表顶栏空间紧，只留图标；模块页顶栏仍显示「已连接」文案。
-  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -906,13 +827,11 @@ class _ConnectionBadge extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 Icon(icon, size: 14, color: color),
-                if (!compact) ...[
-                  const SizedBox(width: 5),
-                  Text(
-                    label,
-                    style: theme.textTheme.labelSmall?.copyWith(color: color),
-                  ),
-                ],
+                const SizedBox(width: 5),
+                Text(
+                  label,
+                  style: theme.textTheme.labelSmall?.copyWith(color: color),
+                ),
               ],
             ),
           ),

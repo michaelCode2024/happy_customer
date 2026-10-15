@@ -917,10 +917,10 @@ class _ThreadHeader extends StatelessWidget {
               MediaQuery.sizeOf(context).width >= 760)
             Padding(
                 padding: const EdgeInsets.only(left: 8),
-                child: OutlinedButton(
+                child: FilledButton(
                   onPressed: () => workbench
                       .setStatus(conversation.isResolved ? 'OPEN' : 'RESOLVED'),
-                  child: Text(conversation.isResolved ? '重新接待' : '结束会话'),
+                  child: Text(conversation.isResolved ? '重新接待' : '完成会话'),
                 )),
           // 仅未领取或「派给自己、待确认」才显示接单；他人会话只可转派，避免点了也失败。
           if (conversation.canClaim(workbench.selfId))

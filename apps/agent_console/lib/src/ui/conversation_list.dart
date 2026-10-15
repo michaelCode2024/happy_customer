@@ -19,14 +19,10 @@ class ConversationListPanel extends StatefulWidget {
     super.key,
     required this.workbench,
     required this.session,
-    this.headerActions,
   });
 
   final WorkbenchController workbench;
   final SessionController session;
-
-  /// 宽屏工作台没有顶栏时，把连接状态和提示音放进列表头。窄屏为 null，避免和 AppBar 重复。
-  final Widget? headerActions;
 
   @override
   State<ConversationListPanel> createState() => _ConversationListPanelState();
@@ -78,14 +74,13 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
           children: <Widget>[
             // 对齐腾讯 IM：顶栏「会话」+ 筛选 Tab + 搜索，列表信息密度更高。
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 4, 2),
+              padding: const EdgeInsets.fromLTRB(20, 20, 12, 6),
               child: Row(
                 children: [
                   Text(
-                    '会话',
+                    '客户消息',
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w700,
-                      fontSize: 16,
                     ),
                   ),
                   const Spacer(),
@@ -110,7 +105,6 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
                         child: _CountPill(count: workbench.unread),
                       ),
                     ),
-                  if (widget.headerActions != null) widget.headerActions!,
                   IconButton(
                     tooltip: '刷新',
                     iconSize: 20,
@@ -157,7 +151,7 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 18),
               child: TextField(
                 controller: _search,
                 textInputAction: TextInputAction.search,
@@ -285,23 +279,25 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
       child: ListView.builder(
         controller: _scroll,
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 18),
         itemCount: workbench.conversations.length,
         itemBuilder: (context, index) {
           final conversation = workbench.conversations[index];
-          return _ConversationRow(
-            conversation: conversation,
-            selected: conversation.id == workbench.selectedId,
-            agentId: widget.session.agent?.id ?? '',
-            onTap: () => workbench.select(conversation.id),
-          );
+          return Padding(
+              padding: const EdgeInsets.only(bottom: 5),
+              child: _ConversationRow(
+                conversation: conversation,
+                selected: conversation.id == workbench.selectedId,
+                agentId: widget.session.agent?.id ?? '',
+                onTap: () => workbench.select(conversation.id),
+              ));
         },
       ),
     );
   }
 }
 
-/// 会话行：头像、名称与时间、预览与未读。选中整行铺底，不再做成带圆角的小卡片。
+/// 腾讯 IM 会话 cell：圆角方头像 + 名/时间一行 + 预览/未读一行，少 chip。
 class _ConversationRow extends StatelessWidget {
   const _ConversationRow({
     required this.conversation,
@@ -323,32 +319,29 @@ class _ConversationRow extends StatelessWidget {
     final preview = conversation.lastMessagePreview.isEmpty
         ? '暂无消息'
         : conversation.lastMessagePreview;
-    // 第二行前缀只留一个状态：待接待优先，其次已解决，再是同事名或渠道。避免再占一行标签。
-    final status = conversation.isUnassigned
-        ? '待接待'
-        : conversation.isResolved
-            ? '已解决'
-            : conversation.assigneeId != agentId &&
-                    conversation.assigneeName.isNotEmpty
-                ? conversation.assigneeName
-                : conversation.tags.isNotEmpty
-                    ? conversation.tags.first
-                    : conversationSourceLabel(conversation.source);
+    final sub = [
+      if (conversation.isUnassigned)
+        '待接待'
+      else if (conversation.assigneeId != agentId &&
+          conversation.assigneeName.isNotEmpty)
+        conversation.assigneeName,
+      if (conversation.isResolved) '已解决',
+      preview,
+    ].join(' · ');
 
     return Material(
       color: selected ? RelayTheme.listSelected(scheme) : Colors.transparent,
+      borderRadius: BorderRadius.circular(10),
       child: InkWell(
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          padding: const EdgeInsets.fromLTRB(12, 15, 12, 15),
           decoration: BoxDecoration(
-            border: Border(
-              left: BorderSide(
-                color: selected ? scheme.primary : Colors.transparent,
-                width: 3,
-              ),
-              bottom: BorderSide(color: scheme.outlineVariant.withOpacity(0.7)),
-            ),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+                color: selected
+                    ? scheme.primary.withOpacity(0.12)
+                    : Colors.transparent),
           ),
           child: Row(
             children: <Widget>[
@@ -356,7 +349,7 @@ class _ConversationRow extends StatelessWidget {
                 name: conversation.visitorName,
                 seed: conversation.visitorId,
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -381,7 +374,7 @@ class _ConversationRow extends StatelessWidget {
                             style: theme.textTheme.bodyMedium?.copyWith(
                               fontWeight:
                                   unread ? FontWeight.w700 : FontWeight.w500,
-                              fontSize: 14,
+                              fontSize: 13,
                               color: scheme.onSurface,
                             ),
                           ),
@@ -397,28 +390,40 @@ class _ConversationRow extends StatelessWidget {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 3),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            '$status · $preview',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: conversation.isUnassigned
-                                  ? const Color(0xFFD46B08)
-                                  : scheme.onSurfaceVariant,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                        if (unread) ...[
-                          const SizedBox(width: 8),
-                          _CountPill(count: conversation.agentUnread),
-                        ],
-                      ],
-                    ),
+                    const SizedBox(height: 4),
+                    Text(sub,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant, fontSize: 11)),
+                    const SizedBox(height: 9),
+                    Row(children: [
+                      Flexible(
+                          child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 7, vertical: 3),
+                              decoration: BoxDecoration(
+                                  color: conversation.isUnassigned
+                                      ? scheme.tertiaryContainer
+                                          .withOpacity(.35)
+                                      : scheme.surfaceContainerHighest,
+                                  borderRadius: BorderRadius.circular(5)),
+                              child: Text(
+                                  conversation.isUnassigned
+                                      ? '待接待'
+                                      : conversation.isResolved
+                                          ? '已解决'
+                                          : conversation.tags.isNotEmpty
+                                              ? conversation.tags.first
+                                              : conversationSourceLabel(
+                                                  conversation.source),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.labelSmall
+                                      ?.copyWith(fontSize: 10)))),
+                      const Spacer(),
+                      if (unread) _CountPill(count: conversation.agentUnread),
+                    ]),
                   ],
                 ),
               ),
@@ -477,14 +482,14 @@ class _CountPill extends StatelessWidget {
       alignment: Alignment.center,
       padding: const EdgeInsets.symmetric(horizontal: 5),
       decoration: BoxDecoration(
-        color: const Color(0xFFF53F3F),
+        color: theme.colorScheme.primary,
         borderRadius: BorderRadius.circular(9),
       ),
       child: Text(
         count > 99 ? '99+' : '$count',
         textAlign: TextAlign.center,
         style: theme.textTheme.labelSmall?.copyWith(
-          color: Colors.white,
+          color: theme.colorScheme.onError,
           fontWeight: FontWeight.w600,
         ),
       ),

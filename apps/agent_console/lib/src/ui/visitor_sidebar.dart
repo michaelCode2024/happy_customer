@@ -30,9 +30,6 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
   VisitorProfile? _profile;
   int _loadRevision = 0;
   bool _loading = false;
-
-  /// 右侧资料栏分页：0 客户资料，1 快捷回复，2 服务记录。和七鱼右栏一样，避免一屏从上滚到下。
-  int _sideTab = 0;
   bool _savingNote = false;
   String? _loadedVisitorId;
   String? _error;
@@ -167,158 +164,42 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Container(
-              height: 44,
+              height: 56,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              alignment: Alignment.centerLeft,
               decoration: BoxDecoration(
                 border:
                     Border(bottom: BorderSide(color: scheme.outlineVariant)),
               ),
-              child: Row(
-                children: [
-                  for (final entry in const [
-                    (0, '资料'),
-                    (1, '快捷'),
-                    (2, '记录'),
-                  ])
-                    Expanded(
-                      child: InkWell(
-                        onTap: () => setState(() => _sideTab = entry.$1),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            Text(
-                              entry.$2,
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: _sideTab == entry.$1
-                                    ? FontWeight.w700
-                                    : FontWeight.w500,
-                                color: _sideTab == entry.$1
-                                    ? scheme.primary
-                                    : scheme.onSurfaceVariant,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Container(
-                              height: 2,
-                              width: _sideTab == entry.$1 ? 28 : 0,
-                              color: scheme.primary,
-                            ),
-                          ],
-                        ),
-                      ),
+              child: Text(
+                '客户资料',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
                     ),
-                ],
               ),
             ),
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(22, 24, 22, 24),
                 children: <Widget>[
-                  if (_sideTab == 0) ...[
-                    _header(context, visitor),
-                    if (widget.workbench.selected?.tags.isNotEmpty ??
-                        false) ...[
-                      const SizedBox(height: 12),
-                      Wrap(spacing: 6, runSpacing: 6, children: [
-                        for (final tag in widget.workbench.selected!.tags)
-                          Chip(
-                              label: Text(tag),
-                              visualDensity: VisualDensity.compact),
-                      ]),
-                    ],
-                    const SizedBox(height: 16),
-                    _facts(context, visitor),
-                    if (visitor.attributes.isNotEmpty) ...<Widget>[
-                      const SizedBox(height: 18),
-                      _sectionTitle(context, '自定义属性'),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: <Widget>[
-                          for (final entry in visitor.attributes.entries)
-                            Chip(
-                              label: Text(
-                                '${entry.key}: ${_renderValue(entry.value)}',
-                                style: Theme.of(context).textTheme.labelSmall,
-                              ),
-                              visualDensity: VisualDensity.compact,
-                            ),
-                        ],
-                      ),
-                    ],
-                    const SizedBox(height: 18),
-                    _sectionTitle(context, '显示名称'),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _displayName,
-                      decoration: InputDecoration(
-                        labelText: '昵称',
-                        suffixIcon: IconButton(
-                          tooltip: '保存',
-                          icon: const Icon(Icons.check),
-                          onPressed: _saveDisplayName,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    _sectionTitle(context, '内部备注', count: _notes.length),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _note,
-                      minLines: 2,
-                      maxLines: 4,
-                      decoration: InputDecoration(
-                        hintText: '记录只有同事可见的信息：订单号、承诺、投诉背景…',
-                        suffixIcon: IconButton(
-                          tooltip: '添加备注',
-                          icon: _savingNote
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child:
-                                      CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.add_comment_outlined),
-                          onPressed: _addNote,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    if (_error != null)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Text(
-                          _error!,
-                          style:
-                              Theme.of(context).textTheme.labelSmall?.copyWith(
-                                    color: Theme.of(context).colorScheme.error,
-                                  ),
-                        ),
-                      ),
-                    if (_loading && _notes.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 12),
-                        child: Center(
-                          child: SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                        ),
-                      ),
-                    for (final note in _notes) _NoteRow(note: note),
+                  _header(context, visitor),
+                  if (widget.workbench.selected?.tags.isNotEmpty ?? false) ...[
+                    const SizedBox(height: 12),
+                    Wrap(spacing: 6, runSpacing: 6, children: [
+                      for (final tag in widget.workbench.selected!.tags)
+                        Chip(
+                            label: Text(tag),
+                            visualDensity: VisualDensity.compact),
+                    ]),
                   ],
-                  if (_sideTab == 1) ...[
-                    if (widget.workbench.cannedForSelection.isEmpty &&
-                        (widget.onAdopt == null ||
-                            widget.workbench.messages.isEmpty))
-                      Text(
-                        '暂无快捷回复',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                      ),
+                  const SizedBox(height: 16),
+                  _facts(context, visitor),
+                  if (widget.workbench.cannedForSelection.isNotEmpty) ...[
+                    const SizedBox(height: 18),
+                    const Divider(),
+                    const SizedBox(height: 14),
+                    _sectionTitle(context, '快捷回复'),
+                    const SizedBox(height: 8),
                     for (final reply in widget.workbench.cannedForSelection)
                       Card(
                           margin: const EdgeInsets.only(bottom: 8),
@@ -333,49 +214,120 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
                                 onPressed: () => copyToClipboard(
                                     context, reply.content, '快捷回复')),
                           )),
-                    if (widget.onAdopt != null &&
-                        widget.workbench.messages.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: AiAssistPanel(
-                          api: widget.workbench.api,
-                          conversationId: widget.workbench.selected!.id,
-                          messages: widget.workbench.messages,
-                          onAdopt: widget.onAdopt!,
-                        ),
-                      ),
                   ],
-                  if (_sideTab == 2) ...[
-                    _sectionTitle(context, '历史会话', count: _history.length),
+                  const SizedBox(height: 18),
+                  if (visitor.attributes.isNotEmpty) ...<Widget>[
+                    _sectionTitle(context, '自定义属性'),
                     const SizedBox(height: 8),
-                    if (_history.isEmpty)
-                      Text(
-                        '暂无历史会话',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: <Widget>[
+                        for (final entry in visitor.attributes.entries)
+                          Chip(
+                            label: Text(
+                              '${entry.key}: ${_renderValue(entry.value)}',
+                              style: Theme.of(context).textTheme.labelSmall,
+                            ),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                  ],
+                  _sectionTitle(context, '显示名称'),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _displayName,
+                    decoration: InputDecoration(
+                      labelText: '昵称',
+                      suffixIcon: IconButton(
+                        tooltip: '保存',
+                        icon: const Icon(Icons.check),
+                        onPressed: _saveDisplayName,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  _sectionTitle(context, '内部备注', count: _notes.length),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _note,
+                    minLines: 2,
+                    maxLines: 4,
+                    decoration: InputDecoration(
+                      hintText: '记录只有同事可见的信息：订单号、承诺、投诉背景…',
+                      suffixIcon: IconButton(
+                        tooltip: '添加备注',
+                        icon: _savingNote
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.add_comment_outlined),
+                        onPressed: _addNote,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  if (_error != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        _error!,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: Theme.of(context).colorScheme.error,
                             ),
                       ),
-                    for (final conversation in _history)
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        dense: true,
-                        title: Text(
-                          conversation.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                    ),
+                  if (_loading && _notes.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Center(
+                        child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
                         ),
-                        subtitle: Text(
-                          '${relativeTime(conversation.lastMessageAt ?? conversation.createdAt)} · '
-                          '${_statusLabel(conversation.status)}',
-                        ),
-                        onTap: conversation.id == widget.workbench.selectedId
-                            ? null
-                            : () => widget.workbench.select(conversation.id),
-                        trailing: conversation.id == widget.workbench.selectedId
-                            ? const Icon(Icons.arrow_left, size: 16)
-                            : null,
                       ),
-                  ],
+                    ),
+                  for (final note in _notes) _NoteRow(note: note),
+                  const SizedBox(height: 18),
+                  if (widget.onAdopt != null &&
+                      widget.workbench.messages.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: AiAssistPanel(
+                        api: widget.workbench.api,
+                        conversationId: widget.workbench.selected!.id,
+                        messages: widget.workbench.messages,
+                        onAdopt: widget.onAdopt!,
+                      ),
+                    ),
+                  _sectionTitle(context, '历史会话', count: _history.length),
+                  const SizedBox(height: 8),
+                  for (final conversation in _history)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: Text(
+                        conversation.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        '${relativeTime(conversation.lastMessageAt ?? conversation.createdAt)} · '
+                        '${_statusLabel(conversation.status)}',
+                      ),
+                      onTap: conversation.id == widget.workbench.selectedId
+                          ? null
+                          : () => widget.workbench.select(conversation.id),
+                      trailing: conversation.id == widget.workbench.selectedId
+                          ? const Icon(Icons.arrow_left, size: 16)
+                          : null,
+                    ),
                 ],
               ),
             ),
