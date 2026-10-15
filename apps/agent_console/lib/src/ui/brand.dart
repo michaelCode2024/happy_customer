@@ -438,6 +438,20 @@ class ConsoleIconRail extends StatelessWidget {
                                                         : const Color(
                                                             0xFF8593A9))),
                                           ]),
+                                      if (i == selectedIndex)
+                                        const Positioned(
+                                          left: 0,
+                                          top: 16,
+                                          bottom: 16,
+                                          child: DecoratedBox(
+                                            decoration: BoxDecoration(
+                                              color: Color(0xFF7C97FF),
+                                              borderRadius: BorderRadius.all(
+                                                  Radius.circular(2)),
+                                            ),
+                                            child: SizedBox(width: 3),
+                                          ),
+                                        ),
                                       if (items[i].count > 0)
                                         Positioned(
                                             top: 2,
@@ -483,7 +497,13 @@ String _railLabel(String label) {
     case '今天待办':
       return '概览';
     case '客户消息':
-      return '工作台';
+      return '会话';
+    case '客户会话':
+      return '会话';
+    case '接入渠道':
+      return '接入';
+    case '数据统计':
+      return '数据';
     case '我的设置':
       return '设置';
     case '接入网站':
@@ -497,9 +517,7 @@ String _railLabel(String label) {
     case '工作概览':
       return '概览';
     case '收件箱':
-      return '工作台';
-    case '数据统计':
-      return '统计';
+      return '会话';
     case '知识库':
       return '知识库';
     case '应用接入':

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
-/// 通语控制台主题：紧凑的中文企业工作台。
+/// 通语控制台主题：按国内在线客服工作台（七鱼 / 智齿）的密度来。
 ///
-/// 特征：蓝色主色、会话选中浅蓝、白色聊天画布、
-/// 浅蓝坐席气泡、浅灰访客气泡、紧凑的信息密度。
+/// 消息区用浅灰画布，访客白气泡、坐席浅蓝气泡，列表选中用浅蓝整行。
+/// 主色保持品牌蓝，避免做成微信绿或后台紫。
 class RelayTheme {
   const RelayTheme._();
 
@@ -14,14 +14,14 @@ class RelayTheme {
   static const Color listSelectedLight = Color(0xFFEDF1FF);
   static const Color listSelectedDark = Color(0xFF1A2A40);
 
-  /// 消息区画布（微信/腾讯 IM 常见浅灰）。
-  static const Color chatCanvasLight = Color(0xFFFFFFFF);
+  /// 消息区画布：浅灰，白气泡和浅蓝气泡才能分开。
+  static const Color chatCanvasLight = Color(0xFFF2F3F5);
   static const Color chatCanvasDark = Color(0xFF111418);
 
-  /// 浅色模式坐席气泡为浅蓝，访客气泡为浅灰。
-  static const Color agentBubbleLight = Color(0xFFEDF1FF);
+  /// 浅色模式坐席气泡为浅蓝，访客气泡为白。
+  static const Color agentBubbleLight = Color(0xFFD6E4FF);
   static const Color agentBubbleDark = Color(0xFF3B82F6);
-  static const Color visitorBubbleLight = Color(0xFFF4F5F8);
+  static const Color visitorBubbleLight = Color(0xFFFFFFFF);
   static const Color success = Color(0xFF31977C);
   static const Color warning = Color(0xFFFF7D00);
   static const Color tertiary = Color(0xFF8992A3);
