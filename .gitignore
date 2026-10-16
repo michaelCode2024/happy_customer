@@ -72,3 +72,15 @@ data/
 /对外资料/02_平台专属/
 /对外资料/04_打包文件/
 /彩站客服开通说明.txt
+
+# Cursor / Claude 本机记忆（含本机知识库绝对路径），勿提交
+AGENTS.md
+CLAUDE.md
+
+# 本机设计截图与验收产物，勿提交
+/UI/
+/outputs/
+
+# 本机代理切换与通知联调脚本（会读本机 Clash 与 .env），勿提交
+/scripts/local-tun-session.py
+/scripts/configure-local-notifications-ai.py
