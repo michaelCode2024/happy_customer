@@ -17,9 +17,9 @@ async function api(method, path, body, credential = token) {
 function showError(e) {
   byId('errorText').textContent = e.message; byId('error').hidden = false;
   // 聊天票据失效后请宿主重新取身份，不绕过业务登录，也不永久停在关闭占位页。
-  if(e.status===401 && !renewing){renewing=true;token='';clearInterval(timer);const event={source:'relaydesk',type:'close'};
+  if(e.status===401 && !renewing){renewing=true;token='';clearInterval(timer);const event={source:'tongyu',type:'close'};
     if(parent!==window && parentOrigin)parent.postMessage(event,parentOrigin);
-    else window.flutter_inappwebview?.callHandler('relaydeskHost',JSON.stringify(event));}
+    else window.flutter_inappwebview?.callHandler('tongyuHost',JSON.stringify(event));}
 }
 function applyBrand(config) {
   inbox = config;
@@ -69,7 +69,7 @@ async function refresh() {
   }
 }
 function back() {
-  ++generation; window.RelayDesk?.unmount(); byId('thread').src='about:blank'; byId('thread').hidden=true;
+  ++generation; window.TongYu?.unmount(); byId('thread').src='about:blank'; byId('thread').hidden=true;
   byId('detail').hidden=true; byId('widget').hidden=true; selectedGroup=''; void refresh();
 }
 function openRow(row,name) {
@@ -77,7 +77,7 @@ function openRow(row,name) {
   const frame=byId('thread');
   if(row.isGroup){selectedGroup=row.id;frame.hidden=false;frame.src='/groups.html?embed=1&groupId='+encodeURIComponent(row.id)+'&parentOrigin='+encodeURIComponent(location.origin);}
   else if(staff){frame.hidden=false;frame.src='/console/?embedded=1&conversationId='+encodeURIComponent(row.id)+'&parentOrigin='+encodeURIComponent(location.origin);}
-  else {byId('widget').hidden=false;window.RelayDesk.mount({endpoint:location.origin,inboxKey,identityToken:identity,conversationId:row.id,embedded:true,launcher:'none',autoOpen:true,source:'APP',storage:'',parentOrigin:location.origin,onEvent:event=>{if(event.type==='close')back();}});}
+  else {byId('widget').hidden=false;window.TongYu.mount({endpoint:location.origin,inboxKey,identityToken:identity,conversationId:row.id,embedded:true,launcher:'none',autoOpen:true,source:'APP',storage:'',parentOrigin:location.origin,onEvent:event=>{if(event.type==='close')back();}});}
 }
 async function authenticate(value) {
   if(starting || token || !value)return;
@@ -87,16 +87,20 @@ async function authenticate(value) {
     if(staff){token=identity;try{applyBrand(await api('GET','/api/v1/admin/inboxes/'+encodeURIComponent(inboxId)));}catch{ /* 普通店员仍可读取其接待列表。 */ }}
     else{const result=await api('POST','/api/v1/widget/bootstrap',{inboxKey,identityToken:identity},'');token=result.token;applyBrand(result.inbox);}
     await refresh();timer=setInterval(()=>void refresh().catch(showError),5000);
+    // App WebView 宿主依赖 tongyuHost 的 ready 才能撤掉连接遮罩；iframe 宿主已靠 host-ready。
+    const ready={source:'tongyu',type:'ready'};
+    if(parent!==window && parentOrigin)parent.postMessage(ready,parentOrigin);
+    else window.flutter_inappwebview?.callHandler('tongyuHost',JSON.stringify(ready));
   }catch(e){token='';showError(e);byId('state').textContent='加载失败，请重新打开消息页';}finally{starting=false;}
 }
 window.addEventListener('message', async event=>{
   const frame=byId('thread');
   if(event.source===frame.contentWindow && event.origin===location.origin){
     let data;try{data=typeof event.data==='string'?JSON.parse(event.data):event.data;}catch{return;}
-    if(data?.type==='relaydesk.group.ready' && data.groupId===selectedGroup)frame.contentWindow.postMessage({type:'relaydesk.group.authenticate',groupId:selectedGroup,token},location.origin);
-    if(data?.source==='relaydesk' && data.type==='host-ready')frame.contentWindow.postMessage({type:'authenticate',identityToken:token},location.origin);
-    if(data?.source==='relaydesk' && data.type==='close')back();
-    if(data?.type==='relaydesk.group.authenticated' && inbox?.customCss){const style=frame.contentDocument.createElement('style');style.textContent=inbox.customCss;frame.contentDocument.head.append(style);}
+    if(data?.type==='tongyu.group.ready' && data.groupId===selectedGroup)frame.contentWindow.postMessage({type:'tongyu.group.authenticate',groupId:selectedGroup,token},location.origin);
+    if(data?.source==='tongyu' && data.type==='host-ready')frame.contentWindow.postMessage({type:'authenticate',identityToken:token},location.origin);
+    if(data?.source==='tongyu' && data.type==='close')back();
+    if(data?.type==='tongyu.group.authenticated' && inbox?.customCss){const style=frame.contentDocument.createElement('style');style.textContent=inbox.customCss;frame.contentDocument.head.append(style);}
     return;
   }
   if(event.source!==parent || event.origin!==parentOrigin || starting || token) return;
@@ -106,6 +110,6 @@ window.addEventListener('message', async event=>{
 });
 byId('back').onclick=back;byId('retry').onclick=()=>void (token?refresh():authenticate(identity)).catch(showError);
 window.addEventListener('pagehide',()=>clearInterval(timer));
-if(window.__relaydeskHostIdentity?.identityToken)void authenticate(window.__relaydeskHostIdentity.identityToken);
-else if(parentOrigin && parentOrigin!=='*')parent.postMessage({source:'relaydesk',type:'host-ready'},parentOrigin);
+if(window.__tongyuHostIdentity?.identityToken)void authenticate(window.__tongyuHostIdentity.identityToken);
+else if(parentOrigin && parentOrigin!=='*')parent.postMessage({source:'tongyu',type:'host-ready'},parentOrigin);
 else {byId('state').textContent='请从已登录的客户端打开消息页';}

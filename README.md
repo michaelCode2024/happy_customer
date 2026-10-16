@@ -1,4 +1,4 @@
-# 聊桥（RelayDesk）
+# 通语（TongYuDesk）
 
 **先看 [中文使用指南](docs/使用指南.md)：登录账号、创建企业与客服、接待消息、自动回复、H5/App 和 Token 接入。当前本机服务运行后也可打开 http://127.0.0.1:8080/console/help.html 。**
 
@@ -38,7 +38,7 @@ docs/                   # 架构、API 与部署文档
 - 消息持久化、幂等 ID 和会话内严格递增序号
 - WebSocket 实时事件和断线增量补拉
 - Flutter 响应式工作台基础界面
-- 无框架依赖的 `<relaydesk-widget>` 基础组件
+- 无框架依赖的 `<tongyu-widget>` 基础组件
 
 ## 本地启动
 
@@ -46,8 +46,8 @@ docs/                   # 架构、API 与部署文档
 
 ```bash
 docker compose -f deploy/docker-compose.yml up -d
-docker build -t relaydesk .
-docker run --rm -p 8080:8080 --env-file .env --network deploy_default relaydesk
+docker build -t tongyu .
+docker run --rm -p 8080:8080 --env-file .env --network deploy_default tongyu
 ```
 
 首次运行：复制 `.env.example` 为 `.env`，并替换 Token 密钥。本地演示 Inbox Key 为 `demo-web`。

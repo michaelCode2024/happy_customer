@@ -1,4 +1,4 @@
-# 聊桥：企业开通与聊天接入
+# 通语：企业开通与聊天接入
 
 ## 两种后台
 
@@ -13,11 +13,11 @@
 ## 登录客户
 
 1. 在「应用接入 → 服务端密钥」创建带 write 权限的 APIKey，只保存到业务后端。
-2. 业务后端验证当前登录客户，从登录会话读取真实客户 ID，再向 RelayDesk 请求票据：
+2. 业务后端验证当前登录客户，从登录会话读取真实客户 ID，再向 TongYu 请求票据：
 
 ```http
 POST /api/v1/open/visitor-identity
-X-RelayDesk-Key: <业务后端 APIKey>
+X-TongYu-Key: <业务后端 APIKey>
 Content-Type: application/json
 
 {"inboxKey":"入口公钥","externalId":"当前登录客户ID","displayName":"客户昵称"}
@@ -27,7 +27,7 @@ Content-Type: application/json
 
 ```js
 const identity = await fetch('/api/customer-chat-identity').then(r => r.json());
-window.RelayDeskSettings = {
+window.TongYuSettings = {
   endpoint: 'https://chat.example.com',
   inboxKey: identity.inboxKey,
   identityToken: identity.identityToken
@@ -47,7 +47,7 @@ iframe 接入须指定准确 parentOrigin，在 ready 事件后发送 authentica
 
 ## 群聊与本站用户
 
-客户服务群可按本站用户 ID 加人，不必把用户目录同步进聊桥：
+客户服务群可按本站用户 ID 加人，不必把用户目录同步进通语：
 
 1. 工作台建好 `SERVICE` 群（或记录群 ID）。
 2. 业务后端 `POST /api/v1/open/groups/{groupId}/members`，body 带 `externalId` / `displayName`。
@@ -61,7 +61,7 @@ iframe 接入须指定准确 parentOrigin，在 ready 事件后发送 authentica
 
 ## 品牌与接入兼容
 
-产品展示名称为「聊桥」，中文后台以消息接待、企业管理和应用接入为核心。蓝白主题、轻侧栏和多行编辑区用于日常协作。RelayDesk 是既有项目与接入协议名，`window.RelayDeskSettings`、`X-RelayDesk-Key`、API 路径和已接入企业的数据保持兼容。
+产品展示名称为「通语」，工程与交付目录名称为 TongYuDesk。中文后台以消息接待、企业管理和应用接入为核心。蓝白主题、轻侧栏和多行编辑区用于日常协作。TongYu 是接入协议名，`window.TongYuSettings`、`X-TongYu-Key`、postMessage `source: tongyu`、API 路径和已接入企业的数据保持兼容。
 
 
 ## 2026-10-11 本地验收记录
