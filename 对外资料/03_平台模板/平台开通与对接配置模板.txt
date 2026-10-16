@@ -19,8 +19,8 @@
 服务端 API Key 名称：待填写
 服务端 API Key：通过受控渠道提供
 密钥权限：按实际开通填写
-普通企业密钥请求头：X-RelayDesk-Key
-商城集成密钥请求头：X-RelayDesk-Marketplace-Key（仅商城集成需要）
+普通企业密钥请求头：X-TongYu-Key
+商城集成密钥请求头：X-TongYu-Marketplace-Key（仅商城集成需要）
 
 已登录客户身份签发接口：{BASE_URL}/api/v1/open/visitor-identity
 身份票据有效期：300 秒

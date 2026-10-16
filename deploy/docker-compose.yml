@@ -2,15 +2,15 @@ services:
   postgres:
     image: postgres:18.6-alpine
     environment:
-      POSTGRES_DB: relaydesk
-      POSTGRES_USER: relaydesk
-      POSTGRES_PASSWORD: relaydesk
+      POSTGRES_DB: tongyu
+      POSTGRES_USER: tongyu
+      POSTGRES_PASSWORD: tongyu
     ports:
       - "5432:5432"
     volumes:
-      - relaydesk-postgres18:/var/lib/postgresql
+      - tongyu-postgres18:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U relaydesk"]
+      test: ["CMD-SHELL", "pg_isready -U tongyu"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -21,18 +21,18 @@ services:
       context: ..
       dockerfile: Dockerfile
     environment:
-      DATABASE_URL: postgres://relaydesk:relaydesk@postgres:5432/relaydesk?sslmode=disable
+      DATABASE_URL: postgres://tongyu:tongyu@postgres:5432/tongyu?sslmode=disable
       PUBLIC_BASE_URL: http://localhost:8080
       WIDGET_TOKEN_SECRET: local-only-change-this-secret-before-production
       WIDGET_TOKEN_TTL: 12h
       ALLOWED_ORIGIN: "*"
       DEMO_ENABLED: "true"
-      PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-admin@relaydesk.local}
-      PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:-RelayDesk@2026}
+      PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-admin@tongyu.local}
+      PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:-TongYu@2026}
       STORAGE_DRIVER: local
       STORAGE_LOCAL_DIR: /data/uploads
     volumes:
-      - relaydesk-uploads:/data/uploads
+      - tongyu-uploads:/data/uploads
     ports:
       - "8080:8080"
     depends_on:
@@ -40,5 +40,5 @@ services:
         condition: service_healthy
 
 volumes:
-  relaydesk-postgres18:
-  relaydesk-uploads:
+  tongyu-postgres18:
+  tongyu-uploads:

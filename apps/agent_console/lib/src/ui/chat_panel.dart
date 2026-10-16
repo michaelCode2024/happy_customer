@@ -1,22 +1,22 @@
-import 'package:relaydesk_agent_console/src/ui/design_a.dart';
-import 'package:relaydesk_agent_console/src/ui/error_banner.dart';
-import 'package:relaydesk_agent_console/src/ui/ai_assist_panel.dart';
+import 'package:tongyu_agent_console/src/ui/design_a.dart';
+import 'package:tongyu_agent_console/src/ui/error_banner.dart';
+import 'package:tongyu_agent_console/src/ui/ai_assist_panel.dart';
 import 'dart:async';
-import 'package:relaydesk_agent_console/src/ui/reception_guidance.dart';
+import 'package:tongyu_agent_console/src/ui/reception_guidance.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
 
-import 'package:relaydesk_agent_console/src/api/models.dart';
-import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
-import 'package:relaydesk_agent_console/src/theme.dart';
-import 'package:relaydesk_agent_console/src/util/attachment_picker.dart';
-import 'package:relaydesk_agent_console/src/util/voice_recording.dart';
-import 'package:relaydesk_agent_console/src/ui/voice_recorder_button.dart';
-import 'package:relaydesk_agent_console/src/util/format.dart';
-import 'package:relaydesk_agent_console/src/util/labels.dart';
-import 'package:relaydesk_agent_console/src/util/voice_player.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
+import 'package:tongyu_agent_console/src/theme.dart';
+import 'package:tongyu_agent_console/src/util/attachment_picker.dart';
+import 'package:tongyu_agent_console/src/util/voice_recording.dart';
+import 'package:tongyu_agent_console/src/ui/voice_recorder_button.dart';
+import 'package:tongyu_agent_console/src/util/format.dart';
+import 'package:tongyu_agent_console/src/util/labels.dart';
+import 'package:tongyu_agent_console/src/util/voice_player.dart';
 
 /// The middle pane: the conversation itself.
 ///

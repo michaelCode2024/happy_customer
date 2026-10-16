@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:relaydesk_agent_console/src/platform/platform_controller.dart';
-import 'package:relaydesk_agent_console/src/ui/workspace_layout.dart';
+import 'package:tongyu_agent_console/src/platform/platform_controller.dart';
+import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
 
 class PlatformAccountPage extends StatefulWidget {
   const PlatformAccountPage({super.key, required this.controller});

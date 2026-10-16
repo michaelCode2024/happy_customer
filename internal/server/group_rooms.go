@@ -9,7 +9,7 @@ import (
 	"strconv"
 
 	"github.com/google/uuid"
-	"github.com/relaydesk/relaydesk/internal/auth"
+	"github.com/tongyu/tongyu/internal/auth"
 )
 
 // All room mutations lock the group first, matching membership and dissolve.
@@ -55,7 +55,7 @@ func (a *API) groupRooms(w http.ResponseWriter, r *http.Request, p auth.Principa
 	var kind, ck string
 	e = tx.QueryRow(r.Context(), `select id,media_kind,creator_kind,creator_id from chat_group_room where group_id=$1 and state='ACTIVE'`, gid).Scan(&rid, &kind, &ck, &creator)
 	ice := []any{}
-	if raw := os.Getenv("RELAYDESK_RTC_ICE_SERVERS"); raw != "" {
+	if raw := os.Getenv("TONGYU_RTC_ICE_SERVERS"); raw != "" {
 		json.Unmarshal([]byte(raw), &ice)
 	}
 	if e != nil {

@@ -7,7 +7,7 @@ import (
 	"errors"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/relaydesk/relaydesk/internal/auth"
+	"github.com/tongyu/tongyu/internal/auth"
 	"net/http"
 	"strings"
 	"time"
@@ -45,7 +45,7 @@ func readQuota(ctx context.Context, db quotaReader, id uuid.UUID) (quotaView, er
 	err := db.QueryRow(ctx, `select t.name,t.slug,t.status,coalesce((select display_name from agent where tenant_id=t.id and role='SUPERVISOR' order by created_at limit 1),''),
  s.plan,s.status,s.seat_limit,s.monthly_message_limit,s.monthly_ai_limit,s.service_starts_at,s.service_ends_at,s.trial_ends_at,s.updated_at,
  coalesce(b.messages,0),coalesce(b.ai,0),coalesce(u.used,0),
- (select count(*) from agent where tenant_id=t.id and status='ACTIVE' and email<>'bot@relaydesk.local'),to_char(now(),'YYYY-MM')
+ (select count(*) from agent where tenant_id=t.id and status='ACTIVE' and email<>'bot@tongyu.local'),to_char(now(),'YYYY-MM')
  from tenant t join tenant_subscription s on s.tenant_id=t.id
  left join tenant_quota_bonus b on b.tenant_id=t.id and b.month=date_trunc('month',now())::date
  left join tenant_ai_quota_usage u on u.tenant_id=t.id and u.month=date_trunc('month',now())::date where t.id=$1`, id).Scan(&q.Name, &q.Slug, &q.TenantStatus, &q.Owner, &q.Plan, &q.Status, &q.SeatLimit, &q.MessageLimit, &q.AILimit, &q.Starts, &q.Ends, &q.TrialEnds, &q.Version, &q.MessageBonus, &q.AIBonus, &q.UsedAI, &q.UsedSeats, &q.Month)

@@ -1,11 +1,11 @@
-import 'package:relaydesk_agent_console/src/ui/design_a.dart';
+import 'package:tongyu_agent_console/src/ui/design_a.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:relaydesk_agent_console/src/ui/assist_feedback_actions.dart';
+import 'package:tongyu_agent_console/src/ui/assist_feedback_actions.dart';
 
-import 'package:relaydesk_agent_console/src/api/api_exception.dart';
-import 'package:relaydesk_agent_console/src/api/models.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
+import 'package:tongyu_agent_console/src/api/api_exception.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
 
 /// 坐席 AI 辅助条：会话摘要、回复建议、翻译、情感、润色、下一步。
 ///
@@ -20,10 +20,11 @@ class AiAssistPanel extends StatefulWidget {
     required this.onAdopt,
     this.draftText = '',
     this.writingOnly = false,
+    this.initiallyExpanded = false,
   });
 
   final bool initiallyExpanded;
-  final RelayDeskApi api;
+  final TongYuApi api;
   final String conversationId;
   final List<ChatMessage> messages;
   final ValueChanged<AssistResult> onAdopt;
@@ -298,7 +299,7 @@ class _ResultCard extends StatelessWidget {
   final AssistResult result;
   final Map<String, String> labelOf;
   final ValueChanged<AssistResult> onAdopt;
-  final RelayDeskApi api;
+  final TongYuApi api;
   final VoidCallback onDismiss;
   final Color Function(String) onSentimentColor;
 

@@ -14,8 +14,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/relaydesk/relaydesk/internal/auth"
-	"github.com/relaydesk/relaydesk/internal/storage"
+	"github.com/tongyu/tongyu/internal/auth"
+	"github.com/tongyu/tongyu/internal/storage"
 )
 
 func (a *API) registerUploads(mux *http.ServeMux) {

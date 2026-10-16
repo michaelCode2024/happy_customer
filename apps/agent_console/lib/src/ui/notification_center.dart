@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import '../api/relaydesk_api.dart';
+import '../api/tongyu_api.dart';
 import '../api/models.dart';
 import '../util/message_alert_stub.dart'
     if (dart.library.html) '../util/message_alert_web.dart';
@@ -12,7 +12,7 @@ import '../util/website.dart';
 class NotificationCenter extends StatefulWidget {
   const NotificationCenter(
       {super.key, required this.api, required this.onConversation});
-  final RelayDeskApi api;
+  final TongYuApi api;
   final ValueChanged<String> onConversation;
   @override
   State<NotificationCenter> createState() => _NotificationCenterState();

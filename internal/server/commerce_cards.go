@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/google/uuid"
-	"github.com/relaydesk/relaydesk/internal/auth"
+	"github.com/tongyu/tongyu/internal/auth"
 	"io"
 	"net/http"
 	"net/url"

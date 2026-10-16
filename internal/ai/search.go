@@ -57,7 +57,7 @@ func (s *Service) search(ctx context.Context, tenantID uuid.UUID, question strin
 		), stats as (
 		    select count(*)::numeric as total from corpus
 		), q as (
-		    select unnest(relaydesk_terms($2)) as term
+		    select unnest(tongyu_terms($2)) as term
 		), freq as (
 		    -- One row per question term. The left join keeps terms that appear
 		    -- in no article: they are the most specific terms of all, and an
@@ -146,7 +146,7 @@ func (s *Service) Retrieve(ctx context.Context, tenantID uuid.UUID, question str
 	return hits, nil
 }
 
-// terms mirrors relaydesk_terms in the database: one term per CJK character,
+// terms mirrors tongyu_terms in the database: one term per CJK character,
 // one term per adjacent CJK pair, and whole lowercased ASCII words. The mirror
 // exists so a question with nothing searchable in it can be rejected before it
 // reaches the database, where an empty tsquery would otherwise match nothing
@@ -223,7 +223,7 @@ func terms(question string) []string {
 
 // isCJK reports whether a rune is a script the 'simple' tokenizer cannot
 // segment: Han, kana, hangul and the compatibility ideographs. It matches the
-// ranges in relaydesk_terms.
+// ranges in tongyu_terms.
 func isCJK(r rune) bool {
 	switch {
 	case r >= 0x3400 && r <= 0x4DBF: // CJK extension A

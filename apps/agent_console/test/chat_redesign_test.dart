@@ -4,12 +4,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
-import 'package:relaydesk_agent_console/src/api/models.dart';
-import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
-import 'package:relaydesk_agent_console/src/theme.dart';
-import 'package:relaydesk_agent_console/src/ui/chat_panel.dart';
-import 'package:relaydesk_agent_console/src/util/attachment_picker.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
+import 'package:tongyu_agent_console/src/theme.dart';
+import 'package:tongyu_agent_console/src/ui/chat_panel.dart';
+import 'package:tongyu_agent_console/src/util/attachment_picker.dart';
 
 class _Picker implements AttachmentPicker {
   @override
@@ -35,7 +35,7 @@ void main() {
       'visitorName': '滚动验收',
       'status': 'OPEN'
     };
-    final api = RelayDeskApi(
+    final api = TongYuApi(
         server: 'http://localhost',
         client: MockClient((request) async {
           Object body = {};
@@ -121,7 +121,7 @@ void main() {
         'status': 'OPEN',
         'updatedAt': '2026-10-12T01:00:00Z',
       };
-      final api = RelayDeskApi(
+      final api = TongYuApi(
           server: 'http://localhost',
           client: MockClient((request) async {
             Object body = {};

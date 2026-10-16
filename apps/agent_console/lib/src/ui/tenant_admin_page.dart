@@ -1,21 +1,21 @@
-import 'package:relaydesk_agent_console/src/ui/design_a.dart';
-import 'package:relaydesk_agent_console/src/util/labels.dart';
-import 'package:relaydesk_agent_console/src/util/format.dart';
-import 'package:relaydesk_agent_console/src/ui/workspace_layout.dart';
-import 'package:relaydesk_agent_console/src/ui/support_assets_page.dart';
-import 'package:relaydesk_agent_console/src/ui/automation_page.dart';
+import 'package:tongyu_agent_console/src/ui/design_a.dart';
+import 'package:tongyu_agent_console/src/util/labels.dart';
+import 'package:tongyu_agent_console/src/util/format.dart';
+import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
+import 'package:tongyu_agent_console/src/ui/support_assets_page.dart';
+import 'package:tongyu_agent_console/src/ui/automation_page.dart';
 import 'package:flutter/material.dart';
-import 'package:relaydesk_agent_console/src/ui/console_form_dialog.dart';
-import 'package:relaydesk_agent_console/src/api/api_exception.dart';
-import 'package:relaydesk_agent_console/src/api/models.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
-import 'package:relaydesk_agent_console/src/ui/error_banner.dart';
+import 'package:tongyu_agent_console/src/ui/console_form_dialog.dart';
+import 'package:tongyu_agent_console/src/api/api_exception.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
+import 'package:tongyu_agent_console/src/ui/error_banner.dart';
 
 /// 企业管理员的自助管理空间；所有数据仍由服务端按当前企业鉴权。
 class TenantAdminPage extends StatefulWidget {
   const TenantAdminPage(
       {super.key, required this.api, this.tenantSlug = '', this.onMemberSaved});
-  final RelayDeskApi api;
+  final TongYuApi api;
   final String tenantSlug;
   final Future<void> Function()? onMemberSaved;
   @override

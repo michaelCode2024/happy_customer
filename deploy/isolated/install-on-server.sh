@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # 在 47.130.172.91 网页终端执行（独立实例，不改旧项目）
 # 用法：把打包文件放到 /tmp 后：
-#   bash install-on-server.sh /tmp/relaydesk-isolated-XXXX.tgz
+#   bash install-on-server.sh /tmp/tongyu-isolated-XXXX.tgz
 set -euo pipefail
 
 TGZ="${1:-}"
 if [[ -z "$TGZ" || ! -f "$TGZ" ]]; then
-  echo "用法: bash install-on-server.sh /tmp/relaydesk-isolated-XXXX.tgz"
+  echo "用法: bash install-on-server.sh /tmp/tongyu-isolated-XXXX.tgz"
   exit 1
 fi
 
-APP_DIR=/opt/relaydesk-isolated
+APP_DIR=/opt/tongyu-isolated
 PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-https://47.130.172.91:41815}"
 WIDGET_TOKEN_SECRET="${WIDGET_TOKEN_SECRET:-$(openssl rand -hex 24)}"
 
@@ -25,9 +25,9 @@ cp -n deploy/isolated/env.example deploy/isolated/.env || true
 sed -i "s|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=$PUBLIC_BASE_URL|" deploy/isolated/.env
 sed -i "s|^WIDGET_TOKEN_SECRET=.*|WIDGET_TOKEN_SECRET=$WIDGET_TOKEN_SECRET|" deploy/isolated/.env
 
-echo "==> 构建并启动（项目名 relaydesk_isolated，宿主机端口 18080）"
+echo "==> 构建并启动（项目名 tongyu_isolated，宿主机端口 18080）"
 cd deploy/isolated
-export COMPOSE_PROJECT_NAME=relaydesk_isolated
+export COMPOSE_PROJECT_NAME=tongyu_isolated
 sudo docker compose --env-file .env -f docker-compose.yml build
 sudo docker compose --env-file .env -f docker-compose.yml up -d
 
@@ -55,13 +55,13 @@ cat <<EOF
 对外 PUBLIC_BASE_URL 已设为: $PUBLIC_BASE_URL
 
 演示账号（DEMO_ENABLED=true 时）见容器日志：
-  sudo docker compose -p relaydesk_isolated -f $APP_DIR/deploy/isolated/docker-compose.yml logs server | tail -50
+  sudo docker compose -p tongyu_isolated -f $APP_DIR/deploy/isolated/docker-compose.yml logs server | tail -50
 
 平台管理员默认:
-  邮箱 admin@relaydesk.local
-  密码 RelayDesk@2026
+  邮箱 admin@tongyu.local
+  密码 TongYu@2026
 
 停止本实例（不动其它项目）:
-  cd $APP_DIR/deploy/isolated && sudo docker compose -p relaydesk_isolated down
+  cd $APP_DIR/deploy/isolated && sudo docker compose -p tongyu_isolated down
 
 EOF

@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:relaydesk_agent_console/src/api/api_exception.dart';
-import 'package:relaydesk_agent_console/src/platform/platform_models.dart';
-import 'package:relaydesk_agent_console/src/platform/tenant_table.dart';
-import 'package:relaydesk_agent_console/src/theme.dart';
+import 'package:tongyu_agent_console/src/api/api_exception.dart';
+import 'package:tongyu_agent_console/src/platform/platform_models.dart';
+import 'package:tongyu_agent_console/src/platform/tenant_table.dart';
+import 'package:tongyu_agent_console/src/theme.dart';
 
 void main() {
   for (final width in [390.0, 1100.0]) {

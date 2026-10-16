@@ -1,22 +1,22 @@
-import 'package:relaydesk_agent_console/src/ui/design_a.dart';
-import 'package:relaydesk_agent_console/src/ui/brand.dart';
+import 'package:tongyu_agent_console/src/ui/design_a.dart';
+import 'package:tongyu_agent_console/src/ui/brand.dart';
 import 'manual_quota_page.dart';
 import 'platform_plans_page.dart';
-import 'package:relaydesk_agent_console/src/ui/product_brand.dart';
+import 'package:tongyu_agent_console/src/ui/product_brand.dart';
 import 'package:flutter/material.dart';
-import 'package:relaydesk_agent_console/src/api/api_exception.dart';
-import 'package:relaydesk_agent_console/src/platform/platform_models.dart';
-import 'package:relaydesk_agent_console/src/ui/workspace_layout.dart';
-import 'package:relaydesk_agent_console/src/ui/platform_account_page.dart';
+import 'package:tongyu_agent_console/src/api/api_exception.dart';
+import 'package:tongyu_agent_console/src/platform/platform_models.dart';
+import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
+import 'package:tongyu_agent_console/src/ui/platform_account_page.dart';
 
-import 'package:relaydesk_agent_console/src/platform/platform_controller.dart';
-import 'package:relaydesk_agent_console/src/platform/tenant_detail.dart';
-import 'package:relaydesk_agent_console/src/platform/tenant_table.dart';
-import 'package:relaydesk_agent_console/src/ui/error_banner.dart';
-import 'package:relaydesk_agent_console/src/util/format.dart';
-import 'package:relaydesk_agent_console/src/util/labels.dart';
+import 'package:tongyu_agent_console/src/platform/platform_controller.dart';
+import 'package:tongyu_agent_console/src/platform/tenant_detail.dart';
+import 'package:tongyu_agent_console/src/platform/tenant_table.dart';
+import 'package:tongyu_agent_console/src/ui/error_banner.dart';
+import 'package:tongyu_agent_console/src/util/format.dart';
+import 'package:tongyu_agent_console/src/util/labels.dart';
 
-/// The RelayDesk operations console.
+/// The TongYu operations console.
 ///
 /// One shell with four sections rather than four windows: an operator moves
 /// between "who is on the platform" and "is the AI working" constantly, and a

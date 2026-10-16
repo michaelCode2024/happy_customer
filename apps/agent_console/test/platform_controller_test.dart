@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:relaydesk_agent_console/src/platform/platform_controller.dart';
-import 'package:relaydesk_agent_console/src/platform/platform_models.dart';
-import 'package:relaydesk_agent_console/src/state/credential_store.dart';
+import 'package:tongyu_agent_console/src/platform/platform_controller.dart';
+import 'package:tongyu_agent_console/src/platform/platform_models.dart';
+import 'package:tongyu_agent_console/src/state/credential_store.dart';
 
 import 'fake_platform_api.dart';
 
@@ -50,7 +50,7 @@ void main() {
 
     final ok = await controller.signIn(
       server: 'relay.example.test',
-      email: 'admin@relaydesk.local',
+      email: 'admin@tongyu.local',
       password: 'good-token',
     );
 
@@ -70,7 +70,7 @@ void main() {
 
     final ok = await controller.signIn(
       server: 'relay.example.test',
-      email: 'admin@relaydesk.local',
+      email: 'admin@tongyu.local',
       password: 'wrong-token',
     );
 
@@ -85,7 +85,7 @@ void main() {
 
     await controller.signIn(
       server: '  relay.example.test/  ',
-      email: 'admin@relaydesk.local',
+      email: 'admin@tongyu.local',
       password: 'good-token',
     );
 
@@ -97,7 +97,7 @@ void main() {
     addTearDown(controller.dispose);
 
     final ok = await controller.signIn(
-        server: '   ', email: 'admin@relaydesk.local', password: 'good-token');
+        server: '   ', email: 'admin@tongyu.local', password: 'good-token');
 
     expect(ok, isFalse);
     expect(controller.error, '请填写服务器地址');
@@ -157,7 +157,7 @@ void main() {
     addTearDown(controller.dispose);
     await controller.signIn(
       server: 'relay.example.test',
-      email: 'admin@relaydesk.local',
+      email: 'admin@tongyu.local',
       password: 'good-token',
     );
 
@@ -174,7 +174,7 @@ void main() {
     addTearDown(controller.dispose);
     await controller.signIn(
       server: 'relay.example.test',
-      email: 'admin@relaydesk.local',
+      email: 'admin@tongyu.local',
       password: 'good-token',
     );
 
@@ -213,7 +213,7 @@ void main() {
     addTearDown(controller.dispose);
     await controller.signIn(
       server: 'relay.example.test',
-      email: 'admin@relaydesk.local',
+      email: 'admin@tongyu.local',
       password: 'good-token',
     );
 
@@ -232,7 +232,7 @@ void main() {
     addTearDown(controller.dispose);
     await controller.signIn(
       server: 'relay.example.test',
-      email: 'admin@relaydesk.local',
+      email: 'admin@tongyu.local',
       password: 'good-token',
     );
     await controller.openTenant(FakePlatformApi.tenantId);
@@ -264,7 +264,7 @@ void main() {
     addTearDown(controller.dispose);
     await controller.signIn(
       server: 'relay.example.test',
-      email: 'admin@relaydesk.local',
+      email: 'admin@tongyu.local',
       password: 'good-token',
     );
 
@@ -290,7 +290,7 @@ void main() {
     addTearDown(controller.dispose);
     await controller.signIn(
       server: 'relay.example.test',
-      email: 'admin@relaydesk.local',
+      email: 'admin@tongyu.local',
       password: 'good-token',
     );
     await controller.openTenant('11111111-1111-1111-1111-111111111111');
@@ -335,7 +335,7 @@ void main() {
     addTearDown(controller.dispose);
     await controller.signIn(
       server: 'relay.example.test',
-      email: 'admin@relaydesk.local',
+      email: 'admin@tongyu.local',
       password: 'good-token',
     );
     await controller.refreshAiUsage(days: 7);
@@ -354,7 +354,7 @@ void main() {
     addTearDown(controller.dispose);
     await controller.signIn(
       server: 'relay.example.test',
-      email: 'admin@relaydesk.local',
+      email: 'admin@tongyu.local',
       password: 'good-token',
     );
     fake.failWith = jsonResponse(401, <String, dynamic>{
@@ -373,7 +373,7 @@ void main() {
     addTearDown(controller.dispose);
     await controller.signIn(
       server: 'relay.example.test',
-      email: 'admin@relaydesk.local',
+      email: 'admin@tongyu.local',
       password: 'good-token',
     );
     await settle();

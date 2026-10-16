@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'fake_platform_api.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:relaydesk_agent_console/main.dart';
-import 'package:relaydesk_agent_console/src/state/credential_store.dart';
+import 'package:tongyu_agent_console/main.dart';
+import 'package:tongyu_agent_console/src/state/credential_store.dart';
 
 /// The console's start-up behaviour, driven through the real [SessionController]
 /// against a store that never touches the platform channel.
@@ -21,7 +21,7 @@ void main() {
       });
       final store = MemoryCredentialStore();
       await store.saveServer('http://localhost');
-      await tester.pumpWidget(RelayDeskConsoleApp(credentials: store));
+      await tester.pumpWidget(TongYuConsoleApp(credentials: store));
       await tester.pumpAndSettle();
       for (var i = 0; i < 3; i++) {
         await tester.ensureVisible(find.text('平台管理员登录'));
@@ -39,7 +39,7 @@ void main() {
   }
 
   Future<void> boot(WidgetTester tester, CredentialStore store) async {
-    await tester.pumpWidget(RelayDeskConsoleApp(credentials: store));
+    await tester.pumpWidget(TongYuConsoleApp(credentials: store));
     await tester.pumpAndSettle();
   }
 
@@ -200,7 +200,7 @@ void main() {
     await store.savePlatformToken('test-token');
     await store.saveConsoleSurface('agent');
     final fake = FakePlatformApi();
-    await tester.pumpWidget(RelayDeskConsoleApp(
+    await tester.pumpWidget(TongYuConsoleApp(
         credentials: store, platformApiFactory: (_) => fake.buildClient()));
     await tester.pumpAndSettle();
     expect(find.text('登录'), findsNothing);

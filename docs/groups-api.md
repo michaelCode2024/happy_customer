@@ -25,12 +25,12 @@
 
 ### 用宿主用户群体进群
 
-不要把对方整库用户同步进聊桥。推荐两步：
+不要把对方整库用户同步进通语。推荐两步：
 
 1. **业务后端加人**：`POST /api/v1/open/groups/{id}/members`，body 为宿主用户的 `externalId` 列表（见 [开放 API](open-api.md)）。
 2. **前端打开群页**：
    - 企业版：后端签发 `identityToken` 后打开 `/groups.html?groupId=<id>&identityToken=<票据>`（页面会立刻换成会话并清掉地址栏中的票据）；或邀请链接同时带 `identityToken`。
-   - 专业版及以上：后端调用 `POST /api/v1/open/groups/{id}/member-token`，把返回的 `token` 写入前端 `sessionStorage`（键名 `liaoqiao-group-<groupId>`，值为 `{token,groupId,actorId,actorKind:"widget"}`），再打开 `/groups.html?groupId=<id>`。
+   - 专业版及以上：后端调用 `POST /api/v1/open/groups/{id}/member-token`，把返回的 `token` 写入前端 `sessionStorage`（键名 `tongyu-group-<groupId>`，值为 `{token,groupId,actorId,actorKind:"widget"}`），再打开 `/groups.html?groupId=<id>`。
 
 未启用requireIdentity的群仍允许匿名邀请链；新建商城福利群默认要求登录身份。登录用户应走externalId映射，避免同一人出现多个匿名visitor。
 
@@ -58,7 +58,7 @@
 
 状态为 RINGING、ACCEPTED、ENDED、DECLINED、MISSED。RINGING 在60秒后超时；ACCEPTED 表示双方完成信令接听，不表示音频已经连通，页面只有在 WebRTC connectionState=connected 后显示「通话中」。浏览器协商失败、拒绝麦克风、授权超时均显示可理解的错误。结束、移出成员、解散或离开页面时释放麦克风；页面关闭时尝试结束服务端通话，异常断网的接听记录最多保留2小时后自动过期。结束后不再保留 SDP。语音不经应用服务器转发、不录音。
 
-上线使用 HTTPS。默认没有外部 ICE 服务，适合本机或可直连的内网；跨公网、不同 NAT 的可靠连通需要部署自己的 STUN/TURN，然后为服务器配置环境变量 RELAYDESK_RTC_ICE_SERVERS（JSON 数组，例如 [{"urls":"stun:your-host:3478"}]；TURN 同时填写 username、credential）。TURN 凭据应使用短期凭据，返回给参与通话的登录成员。没有配置中继时不能承诺所有网络都可以通话。配置示例和 WebRTC 实现依据：[MDN WebRTC 信令说明](https://developer.mozilla.org/en-US/docs/Web/API/WebRTC_API/Signaling_and_video_calling)。
+上线使用 HTTPS。默认没有外部 ICE 服务，适合本机或可直连的内网；跨公网、不同 NAT 的可靠连通需要部署自己的 STUN/TURN，然后为服务器配置环境变量 TONGYU_RTC_ICE_SERVERS（JSON 数组，例如 [{"urls":"stun:your-host:3478"}]；TURN 同时填写 username、credential）。TURN 凭据应使用短期凭据，返回给参与通话的登录成员。没有配置中继时不能承诺所有网络都可以通话。配置示例和 WebRTC 实现依据：[MDN WebRTC 信令说明](https://developer.mozilla.org/en-US/docs/Web/API/WebRTC_API/Signaling_and_video_calling)。
 
 网页/H5 现提供一对一语音和下述多人群音视频，不包含原生 Flutter 手机客户端的通话插件。App WebView 需宿主开放麦克风、摄像头与自动播放权限，并进行实机测试。发布时复制 groups.html、group-interactions.js 和 group-conference.js 到静态目录根部。
 
@@ -75,4 +75,4 @@
 
 45 秒没有心跳的成员会在房间读取/操作时回收；最后一人退出、解散或归档会结束通话并清除 SDP。成员被移出后失去信令权限。页面关闭释放所有设备及 PeerConnection。
 
-浏览器要求 HTTPS 或 localhost；跨公网/NAT 需要配置自有 STUN/TURN（`RELAYDESK_RTC_ICE_SERVERS`）。此版本使用最多 6 人的 WebRTC mesh，尚未提供 SFU、大型会议或原生 App RTC 插件。
+浏览器要求 HTTPS 或 localhost；跨公网/NAT 需要配置自有 STUN/TURN（`TONGYU_RTC_ICE_SERVERS`）。此版本使用最多 6 人的 WebRTC mesh，尚未提供 SFU、大型会议或原生 App RTC 插件。

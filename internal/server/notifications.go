@@ -12,7 +12,7 @@ import (
 	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/relaydesk/relaydesk/internal/auth"
+	"github.com/tongyu/tongyu/internal/auth"
 )
 
 func (a *API) registerNotifications(mux *http.ServeMux) {
@@ -20,6 +20,7 @@ func (a *API) registerNotifications(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/console/notifications/read", a.requireAgent(a.readNotifications))
 	mux.HandleFunc("POST /api/v1/console/notifications/quiet", a.requireAgent(a.quietNotifications))
 	mux.HandleFunc("GET /api/v1/console/push/key", a.requireAgent(a.pushKey))
+	mux.HandleFunc("POST /api/v1/console/push/subscription/status", a.requireAgent(a.pushSubscriptionStatus))
 	mux.HandleFunc("PUT /api/v1/console/push/subscription", a.requireAgent(a.subscribePush))
 	mux.HandleFunc("DELETE /api/v1/console/push/subscription", a.requireAgent(a.unsubscribePush))
 }
@@ -163,6 +164,26 @@ func validPushEndpoint(raw string) bool {
 	}
 	return false
 }
+func (a *API) pushSubscriptionStatus(w http.ResponseWriter, r *http.Request, p auth.Principal) {
+	var in struct {
+		Endpoint string `json:"endpoint"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if !validPushEndpoint(in.Endpoint) {
+		fail(w, 400, "推送订阅无效")
+		return
+	}
+	var enabled bool
+	err := a.db.QueryRow(r.Context(), `select exists(select 1 from push_subscription s join agent_session ss on ss.id=s.session_id where s.tenant_id=$1 and s.agent_id=$2 and s.endpoint=$3 and ss.expires_at>now())`, p.TenantID, p.AgentID, in.Endpoint).Scan(&enabled)
+	if err != nil {
+		fail(w, 500, "读取通知状态失败")
+		return
+	}
+	respond(w, 200, map[string]any{"enabled": enabled})
+}
+
 func (a *API) subscribePush(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 	var in webpush.Subscription
 	if !decode(w, r, &in) {

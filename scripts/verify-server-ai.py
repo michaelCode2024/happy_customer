@@ -14,18 +14,18 @@ db=network+'-db';server=network+'-api'
 work=Path('/tmp')/network;work.mkdir(mode=0o700)
 password=secrets.token_urlsafe(28)
 test=dict(env)
-test.update({'DATABASE_URL':'postgres://relaydesk:'+password+'@'+db+':5432/relaydesk?sslmode=disable',
+test.update({'DATABASE_URL':'postgres://tongyu:'+password+'@'+db+':5432/tongyu?sslmode=disable',
  'PUBLIC_BASE_URL':'http://127.0.0.1','PLATFORM_ADMIN_EMAIL':'ai-config-verifier',
  'PLATFORM_ADMIN_PASSWORD':secrets.token_urlsafe(28),'WIDGET_TOKEN_SECRET':secrets.token_urlsafe(48),'DEMO_ENABLED':'false'})
 (work/'server.env').write_text(''.join(key+'='+value+'\n' for key,value in test.items()))
-(work/'postgres.env').write_text('POSTGRES_USER=relaydesk\nPOSTGRES_DB=relaydesk\nPOSTGRES_PASSWORD='+password+'\n')
+(work/'postgres.env').write_text('POSTGRES_USER=tongyu\nPOSTGRES_DB=tongyu\nPOSTGRES_PASSWORD='+password+'\n')
 report=[]
 def passed(check,**details):report.append({'check':check,**details});print('PASS '+check,flush=True)
 try:
     run('docker','network','create',network)
     run('docker','run','-d','--name',db,'--network',network,'--env-file',str(work/'postgres.env'),'postgres:18.6-alpine')
     for attempt in range(30):
-        if subprocess.run(['docker','exec',db,'pg_isready','-U','relaydesk'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0:break
+        if subprocess.run(['docker','exec',db,'pg_isready','-U','tongyu'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0:break
         time.sleep(1)
     run('docker','run','-d','--name',server,'--network',network,'--env-file',str(work/'server.env'),'-p','127.0.0.1::8080',live['Image'])
     instance=json.loads(run('docker','inspect',server))[0]
@@ -70,7 +70,7 @@ try:
     def substantive(messages):return {m['id'] for m in messages if m.get('messageType') not in ('SYSTEM','EVENT') and m.get('senderType')!='SYSTEM'}
     assert substantive(before)==substantive(after),'Assistant unexpectedly sent a substantive message'
     passed('assistant-remains-draft-no-visitor-message-sent')
-    output=Path('/opt/relaydesk-backups')/('ai-verification-'+stamp+'.json')
+    output=Path('/opt/tongyu-backups')/('ai-verification-'+stamp+'.json')
     output.write_text(json.dumps({'productionModel':env['AI_MODEL'],'verificationScope':'isolated database on production host, same deployed image and AI configuration','checks':report},ensure_ascii=False,indent=2))
     print('Report: '+str(output),flush=True)
 finally:

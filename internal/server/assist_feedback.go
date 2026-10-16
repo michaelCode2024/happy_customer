@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/relaydesk/relaydesk/internal/auth"
+	"github.com/tongyu/tongyu/internal/auth"
 )
 
 // 只允许生成该草稿的坐席反馈；采纳时间保留第一次，重复点击不会重复计数。

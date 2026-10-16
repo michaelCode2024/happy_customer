@@ -9,8 +9,8 @@ import (
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/relaydesk/relaydesk/internal/auth"
-	"github.com/relaydesk/relaydesk/internal/platform/database"
+	"github.com/tongyu/tongyu/internal/auth"
+	"github.com/tongyu/tongyu/internal/platform/database"
 	"net/http"
 	"net/url"
 	"os"
@@ -57,7 +57,7 @@ func main() {
 	for _, base := range bases {
 		u, err := url.Parse(base)
 		must(err)
-		if u.Hostname() != "127.0.0.1" && u.Hostname() != "localhost" && !strings.HasPrefix(u.Hostname(), "relaydesk-commerce-") {
+		if u.Hostname() != "127.0.0.1" && u.Hostname() != "localhost" && !strings.HasPrefix(u.Hostname(), "tongyu-commerce-") {
 			panic("load targets must be isolated local servers")
 		}
 	}

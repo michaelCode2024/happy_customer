@@ -201,7 +201,7 @@ func Load() (Config, error) {
 		ListenAddress:         env("LISTEN_ADDRESS", ":8080"),
 		PublicBaseURL:         strings.TrimSuffix(env("PUBLIC_BASE_URL", "http://localhost:8080"), "/"),
 		StaticDir:             env("STATIC_DIR", ""),
-		DatabaseURL:           env("DATABASE_URL", "postgres://relaydesk:relaydesk@localhost:5432/relaydesk?sslmode=disable"),
+		DatabaseURL:           env("DATABASE_URL", "postgres://tongyu:tongyu@localhost:5432/tongyu?sslmode=disable"),
 		DatabaseMaxConns:      int32(dbMaxConns),
 		WidgetTokenKey:        env("WIDGET_TOKEN_SECRET", "local-only-change-this-secret-before-production"),
 		WidgetTokenTTL:        widgetTTL,
@@ -250,8 +250,8 @@ func Load() (Config, error) {
 		return Config{}, errors.New("WIDGET_TOKEN_SECRET must contain at least 32 characters")
 	}
 	if cfg.DemoEnabled && cfg.PlatformAdminEmail == "" && cfg.PlatformAdminPassword == "" {
-		cfg.PlatformAdminEmail = "admin@relaydesk.local"
-		cfg.PlatformAdminPassword = "RelayDesk@2026"
+		cfg.PlatformAdminEmail = "admin@tongyu.local"
+		cfg.PlatformAdminPassword = "TongYu@2026"
 	}
 	return cfg, nil
 }

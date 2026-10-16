@@ -9,7 +9,7 @@ args = parser.parse_args()
 stage = Path(args.stage).resolve()
 assert str(stage).startswith('/tmp/tongyu-pwa-') and (stage/'console/pwa-assets.json').is_file()
 os.umask(0o077)
-lock = open('/opt/relaydesk-release.lock', 'w')
+lock = open('/opt/tongyu-release.lock', 'w')
 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 def run(*cmd):
@@ -27,19 +27,19 @@ for url in manifest['assets']:
     path = url.split('?', 1)[0].removeprefix('/console/')
     file = (stage/'console'/path).resolve()
     assert file.is_relative_to(stage/'console') and file.is_file()
-downloads = Path('/opt/relaydesk-downloads')
+downloads = Path('/opt/tongyu-downloads')
 assert downloads.is_dir()
-compose = Path('/opt/relaydesk-isolated/deploy/isolated/docker-compose.yml')
+compose = Path('/opt/tongyu-isolated/deploy/isolated/docker-compose.yml')
 override = compose.parent/'client-release.override.json'
 assert override.is_file()
 stamp = time.strftime('%Y%m%d%H%M%S')
-backup = Path('/opt/relaydesk-backups')/('pwa-'+stamp)
+backup = Path('/opt/tongyu-backups')/('pwa-'+stamp)
 backup.mkdir(parents=True, mode=0o700)
 shutil.copy2(override, backup/'previous-override.json')
 for name in ['index.html', 'downloads.css']:
     shutil.copy2(downloads/name, backup/name)
-tag = 'relaydesk-isolated:pwa-'+stamp
-oldtag = 'relaydesk-isolated:before-pwa-'+stamp
+tag = 'tongyu-isolated:pwa-'+stamp
+oldtag = 'tongyu-isolated:before-pwa-'+stamp
 run('docker', 'tag', live['Image'], oldtag)
 for name, image in [('rollback', oldtag), ('release', tag)]:
     (backup/(name+'.json')).write_text(json.dumps({'services': {'server': {'image': image, 'environment': {k:v.replace('$','$$') for k,v in env.items()}}}}))
@@ -50,7 +50,7 @@ for file in (stage/'console').rglob('*'):
 run('docker', 'build', '--pull=false', '-t', tag, str(stage))
 boot = (stage/'console/flutter_bootstrap.js').read_text()
 release = re.search(r'const releaseVersion = "([0-9]+)";', boot).group(1)
-assets = Path('/opt/relaydesk-console-assets')
+assets = Path('/opt/tongyu-console-assets')
 main = (stage/'console/main.dart.js').read_bytes()
 asset = assets/('main.'+release+'.js')
 assert not asset.exists() or asset.read_bytes() == main, 'Immutable version collision'
@@ -93,7 +93,7 @@ try:
     assert now['Mounts'] == live['Mounts'], 'Persistent mounts changed'
     assert dict(x.split('=',1) for x in now['Config']['Env']) == env, 'Runtime environment changed'
     shutil.copy2(backup/'release.json', override)
-    run('docker', 'tag', tag, 'relaydesk-isolated:local')
+    run('docker', 'tag', tag, 'tongyu-isolated:local')
     print(json.dumps({'status': 'READY', 'version': manifest['version'], 'image': tag, 'assetsVerified': len(manifest['assets'])}))
 except Exception:
     for name in ['index.html', 'downloads.css']: shutil.copy2(backup/name, downloads/name)

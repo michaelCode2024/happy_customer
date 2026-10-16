@@ -9,15 +9,15 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/relaydesk/relaydesk/internal/auth"
-	"github.com/relaydesk/relaydesk/internal/realtime"
-	"github.com/relaydesk/relaydesk/internal/webhook"
+	"github.com/tongyu/tongyu/internal/auth"
+	"github.com/tongyu/tongyu/internal/realtime"
+	"github.com/tongyu/tongyu/internal/webhook"
 )
 
 // The open API is what a tenant's own backend talks to: their CRM syncing
 // conversations, their order system pushing a confirmation into a chat, their
 // BI pulling statistics. It authenticates with a tenant API key in the
-// X-RelayDesk-Key header rather than with an agent session, because the caller
+// X-TongYu-Key header rather than with an agent session, because the caller
 // is a server with no human behind it.
 //
 // Everything a key can do is scoped to its own tenant by construction: the
@@ -88,7 +88,7 @@ func (a *API) requireAPIKey(scope string, next func(http.ResponseWriter, *http.R
 	return a.limit(a.openRate, func(w http.ResponseWriter, r *http.Request) {
 		token := apiKeyFrom(r)
 		if token == "" {
-			failCode(w, 401, "API_KEY_REQUIRED", "缺少 X-RelayDesk-Key 请求头")
+			failCode(w, 401, "API_KEY_REQUIRED", "缺少 X-TongYu-Key 请求头")
 			return
 		}
 		var p apiKeyPrincipal
@@ -153,7 +153,7 @@ func scopeAllowed(scopes []string, needed string) bool {
 }
 
 func apiKeyFrom(r *http.Request) string {
-	if key := strings.TrimSpace(r.Header.Get("X-RelayDesk-Key")); key != "" {
+	if key := strings.TrimSpace(r.Header.Get("X-TongYu-Key")); key != "" {
 		return key
 	}
 	// A Bearer header is accepted too so the same client helper works against the
@@ -664,7 +664,7 @@ func (a *API) openListAgents(w http.ResponseWriter, r *http.Request, p apiKeyPri
 		         where c.assignee_id = ag.id and c.status <> 'RESOLVED')
 		  from agent ag
 		  left join agent_presence p on p.agent_id = ag.id
-		 where ag.tenant_id = $1 and ag.email <> 'bot@relaydesk.local'
+		 where ag.tenant_id = $1 and ag.email <> 'bot@tongyu.local'
 		 order by ag.display_name`, p.TenantID)
 	if err != nil {
 		fail(w, 500, "查询坐席失败")
@@ -920,7 +920,7 @@ func (a *API) openReceipt(w http.ResponseWriter, r *http.Request, p apiKeyPrinci
 	if in.ReaderType == "VISITOR" {
 		_ = a.db.QueryRow(r.Context(), `select exists(select 1 from conversation where id=$1 and tenant_id=$2 and visitor_id=$3)`, id, p.TenantID, in.ReaderID).Scan(&valid)
 	} else {
-		_ = a.db.QueryRow(r.Context(), `select exists(select 1 from agent where id=$1 and tenant_id=$2 and status='ACTIVE' and email<>'bot@relaydesk.local')`, in.ReaderID, p.TenantID).Scan(&valid)
+		_ = a.db.QueryRow(r.Context(), `select exists(select 1 from agent where id=$1 and tenant_id=$2 and status='ACTIVE' and email<>'bot@tongyu.local')`, in.ReaderID, p.TenantID).Scan(&valid)
 	}
 	if !valid {
 		fail(w, 404, "读取者不存在或不属于当前会话/企业")

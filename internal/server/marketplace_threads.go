@@ -2,7 +2,7 @@ package server
 
 import (
 	"github.com/google/uuid"
-	"github.com/relaydesk/relaydesk/internal/auth"
+	"github.com/tongyu/tongyu/internal/auth"
 	"net/http"
 	"time"
 )

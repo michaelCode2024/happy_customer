@@ -51,7 +51,7 @@ type Principal struct {
 }
 
 // TokenService issues and verifies the signed, stateless tokens used by every
-// RelayDesk client. Session revocation is handled separately through the
+// TongYu client. Session revocation is handled separately through the
 // agent_session table, which is checked on logout and password change.
 type TokenService struct {
 	key        []byte

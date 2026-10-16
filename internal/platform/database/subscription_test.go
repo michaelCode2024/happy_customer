@@ -19,9 +19,9 @@ import (
 // SQLSTATE 42P08, so every "create tenant" returned 500 while the equivalent
 // hand-typed psql statement worked fine. The plan is therefore bound twice.
 func TestSubscriptionTrialWindow(t *testing.T) {
-	dsn := os.Getenv("RELAYDESK_TEST_DATABASE")
+	dsn := os.Getenv("TONGYU_TEST_DATABASE")
 	if dsn == "" {
-		t.Skip("RELAYDESK_TEST_DATABASE is not set")
+		t.Skip("TONGYU_TEST_DATABASE is not set")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)

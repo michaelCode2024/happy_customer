@@ -1,4 +1,4 @@
-/// Every non-2xx response from the RelayDesk API, carrying the machine-readable
+/// Every non-2xx response from the TongYu API, carrying the machine-readable
 /// code the server sends alongside the human message.
 ///
 /// The console branches on [code] rather than on the message text, so a wording

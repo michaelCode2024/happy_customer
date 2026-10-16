@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/relaydesk/relaydesk/internal/ai"
-	"github.com/relaydesk/relaydesk/internal/auth"
+	"github.com/tongyu/tongyu/internal/ai"
+	"github.com/tongyu/tongyu/internal/auth"
 )
 
 // The assistant endpoints. They are split from console_extra.go because they

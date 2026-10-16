@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>连语客服</string>
+	<string>通语客服</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -13,7 +13,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>连语客服</string>
+	<string>通语客服</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>用于从相册选择图片并发送给访客。</string>
 	<key>CFBundlePackageType</key>

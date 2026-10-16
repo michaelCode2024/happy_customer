@@ -1,11 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
-import 'package:relaydesk_agent_console/src/platform/platform_controller.dart';
-import 'package:relaydesk_agent_console/src/ui/error_banner.dart';
-import 'package:relaydesk_agent_console/src/ui/login_shell.dart';
-import 'package:relaydesk_agent_console/src/util/server_hint.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
+import 'package:tongyu_agent_console/src/platform/platform_controller.dart';
+import 'package:tongyu_agent_console/src/ui/error_banner.dart';
+import 'package:tongyu_agent_console/src/ui/login_shell.dart';
+import 'package:tongyu_agent_console/src/util/server_hint.dart';
 
 /// 平台运营后台登录。
 ///
@@ -183,4 +183,4 @@ class _PlatformLoginPageState extends State<PlatformLoginPage> {
 }
 
 String platformServerHint(String stored) =>
-    stored.isEmpty ? '' : RelayDeskApi.normalizeServer(stored);
+    stored.isEmpty ? '' : TongYuApi.normalizeServer(stored);

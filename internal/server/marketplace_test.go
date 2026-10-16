@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/relaydesk/relaydesk/internal/auth"
-	"github.com/relaydesk/relaydesk/internal/config"
-	"github.com/relaydesk/relaydesk/internal/platform/database"
+	"github.com/tongyu/tongyu/internal/auth"
+	"github.com/tongyu/tongyu/internal/config"
+	"github.com/tongyu/tongyu/internal/platform/database"
 	"io"
 	"log/slog"
 	"net/http"
@@ -19,7 +19,7 @@ import (
 )
 
 func TestMarketplaceShopsStaffUnifiedInboxCardsAndRevocation(t *testing.T) {
-	dsn := os.Getenv("RELAYDESK_TEST_DATABASE")
+	dsn := os.Getenv("TONGYU_TEST_DATABASE")
 	if dsn == "" {
 		t.Skip("database not configured")
 	}
@@ -53,7 +53,7 @@ func TestMarketplaceShopsStaffUnifiedInboxCardsAndRevocation(t *testing.T) {
 		r, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(string(raw)))
 		r.Header.Set("Content-Type", "application/json")
 		if key != "" {
-			r.Header.Set("X-RelayDesk-Marketplace-Key", key)
+			r.Header.Set("X-TongYu-Marketplace-Key", key)
 		}
 		if token != "" {
 			r.Header.Set("Authorization", "Bearer "+token)

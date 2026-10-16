@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:relaydesk_agent_console/src/util/document_picker_stub.dart'
-    if (dart.library.html) 'package:relaydesk_agent_console/src/util/document_picker_web.dart'
+import 'package:tongyu_agent_console/src/util/document_picker_stub.dart'
+    if (dart.library.html) 'package:tongyu_agent_console/src/util/document_picker_web.dart'
     as documents;
 
 /// A file the agent chose, already read into memory.

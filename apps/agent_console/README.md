@@ -1,4 +1,4 @@
-# 连语客服工作台
+# 通语客服工作台
 
 同一个 Flutter 程序提供客服工作台与平台运营后台。Web、Windows、Android、iOS、macOS 工程已生成；本机验证了 Web 和 Windows 正式构建。iOS、macOS 需要在 macOS 上用 Xcode 构建；Android 需要 Android SDK。
 
@@ -8,7 +8,7 @@
 2. 在此目录执行 `flutter pub get`，再执行 `flutter run -d chrome` 或 `flutter run -d windows`。
 3. 登录页填 `http://localhost:8080`；Windows/Android 模拟器访问宿主机地址时，应改为其可访问的网络地址。生产环境必须使用 HTTPS。
 
-本地 Compose 启用演示数据时，服务启动日志会显示演示账号（`docker compose -f deploy/docker-compose.yml --profile app logs server`）。企业标识为 `demo`，企业主邮箱为 `owner@relaydesk.local`，坐席邮箱为 `agent@relaydesk.local`，两者密码均为 `RelayDesk@2026`。仅供本地演示，正式部署必须设置 `DEMO_ENABLED=false`，由平台运营后台开通企业并创建独立凭据。平台管理员使用单独的 `PLATFORM_ADMIN_TOKEN`，不是坐席账号密码。
+本地 Compose 启用演示数据时，服务启动日志会显示演示账号（`docker compose -f deploy/docker-compose.yml --profile app logs server`）。企业标识为 `demo`，企业主邮箱为 `owner@tongyu.local`，坐席邮箱为 `agent@tongyu.local`，两者密码均为 `TongYu@2026`。仅供本地演示，正式部署必须设置 `DEMO_ENABLED=false`，由平台运营后台开通企业并创建独立凭据。平台管理员使用单独的 `PLATFORM_ADMIN_TOKEN`，不是坐席账号密码。
 
 ## 构建
 

@@ -29,7 +29,7 @@ class _GroupCallFrameState extends State<_GroupCallFrame> {
     super.initState();
     _openPanels++;
     final origin = html.window.location.origin;
-    viewType = 'liaoqiao-group-call-${++sequence}';
+    viewType = 'tongyu-group-call-${++sequence}';
     frame = html.IFrameElement()
       ..src = '$origin/groups.html?console=1&embedded=1'
       ..setAttribute('allow', 'microphone; camera; autoplay')
@@ -39,7 +39,7 @@ class _GroupCallFrameState extends State<_GroupCallFrame> {
     loaded = frame.onLoad.listen((_) {
       frame.contentWindow?.postMessage(
           jsonEncode({
-            'type': 'liaoqiao-group-auth',
+            'type': 'tongyu-group-auth',
             'token': widget.token,
             'groupId': widget.groupId,
             'actorId': widget.actorId,

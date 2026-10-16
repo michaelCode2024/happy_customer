@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:relaydesk_agent_console/src/platform/platform_controller.dart';
-import 'package:relaydesk_agent_console/src/state/credential_store.dart';
-import 'package:relaydesk_agent_console/src/ui/manual_quota_page.dart';
+import 'package:tongyu_agent_console/src/platform/platform_controller.dart';
+import 'package:tongyu_agent_console/src/state/credential_store.dart';
+import 'package:tongyu_agent_console/src/ui/manual_quota_page.dart';
 import 'fake_platform_api.dart';
 
 void main() {

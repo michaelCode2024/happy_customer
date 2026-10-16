@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/relaydesk/relaydesk/internal/auth"
+	"github.com/tongyu/tongyu/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,9 +16,9 @@ import (
 
 // 使用独立数据库账号，验证密码、HTTP 会话和实时连接共同采用的撤销边界。
 func TestPlatformPasswordSessions(t *testing.T) {
-	dsn := os.Getenv("RELAYDESK_TEST_DATABASE")
+	dsn := os.Getenv("TONGYU_TEST_DATABASE")
 	if dsn == "" {
-		t.Skip("RELAYDESK_TEST_DATABASE is not set")
+		t.Skip("TONGYU_TEST_DATABASE is not set")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)
@@ -27,7 +27,7 @@ func TestPlatformPasswordSessions(t *testing.T) {
 	}
 	defer pool.Close()
 	id := uuid.New()
-	email := "auth-test-" + id.String() + "@relaydesk.local"
+	email := "auth-test-" + id.String() + "@tongyu.local"
 	hash, err := auth.HashPassword("Before@2026")
 	if err != nil {
 		t.Fatal(err)

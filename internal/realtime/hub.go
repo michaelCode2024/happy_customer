@@ -216,7 +216,7 @@ func AgentChannel(id string) string        { return "agent:" + id }
 func TenantChannel(id string) string       { return "tenant:" + id }
 func ConversationChannel(id string) string { return "conversation:" + id }
 
-// PlatformChannel carries RelayDesk operations events (tenant created,
+// PlatformChannel carries TongYu operations events (tenant created,
 // suspended, plan changed). It is not tenant-scoped, so only sockets holding a
 // platform principal ever subscribe to it.
 const PlatformChannel = "platform:ops"

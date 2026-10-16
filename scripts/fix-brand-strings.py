@@ -5,10 +5,10 @@ from pathlib import Path
 def main() -> None:
     auto = Path("internal/server/automation.go")
     t = auto.read_text(encoding="utf-8")
-    t2 = t.replace("聊桥助手", "通语助手")
+    t2 = t.replace("通语助手", "通语助手")
     if t2 != t:
         auto.write_text(t2, encoding="utf-8")
-        print("automation.go: 聊桥助手 -> 通语助手")
+        print("automation.go: 通语助手 -> 通语助手")
     else:
         print("automation.go: unchanged")
 
@@ -29,7 +29,7 @@ def main() -> None:
         raise SystemExit("demo.go unreadable")
 
     # 统一品牌
-    for old in ("连语", "聊桥"):
+    for old in ("通语", "通语"):
         text = text.replace(old, "通语")
     demo.write_text(text, encoding="utf-8")
     print("demo.go 通语 count", text.count("通语"))

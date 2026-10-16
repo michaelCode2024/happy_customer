@@ -3,12 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
-import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
-import 'package:relaydesk_agent_console/src/state/session_controller.dart';
-import 'package:relaydesk_agent_console/src/ui/workbench_page.dart';
-import 'package:relaydesk_agent_console/src/util/attachment_picker.dart';
-import 'package:relaydesk_agent_console/src/theme.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
+import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
+import 'package:tongyu_agent_console/src/state/session_controller.dart';
+import 'package:tongyu_agent_console/src/ui/workbench_page.dart';
+import 'package:tongyu_agent_console/src/util/attachment_picker.dart';
+import 'package:tongyu_agent_console/src/theme.dart';
 class Picker implements AttachmentPicker {
  bool get supportsArbitraryFiles => true;
  Future<PickedAttachment?> pickImage() async => null;
@@ -21,7 +21,7 @@ void main() {
   addTearDown(tester.view.resetPhysicalSize);addTearDown(tester.view.resetDevicePixelRatio);
   int sent=0, assist=0;
   final conversation={'id':'c1','visitorId':'v1','visitorName':'手机验收客户','status':'OPEN','assigneeId':'a1','acceptedAt':'2026-10-15T00:00:00Z'};
-  final api=RelayDeskApi(server:'http://localhost',client:MockClient((r) async {
+  final api=TongYuApi(server:'http://localhost',client:MockClient((r) async {
    Object body={'items':[]};
    if(r.url.path.endsWith('/entitlements'))body={'plan':'ENTERPRISE','features':{'ai':true}};
    if(r.url.path.endsWith('/conversations'))body={'items':[conversation]};

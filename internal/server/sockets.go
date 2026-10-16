@@ -11,8 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/relaydesk/relaydesk/internal/auth"
-	"github.com/relaydesk/relaydesk/internal/realtime"
+	"github.com/tongyu/tongyu/internal/auth"
+	"github.com/tongyu/tongyu/internal/realtime"
 )
 
 // errWSCapacity is returned when accept refuses a socket; callers only need a

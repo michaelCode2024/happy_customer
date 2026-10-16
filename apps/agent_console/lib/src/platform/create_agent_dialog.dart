@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:relaydesk_agent_console/src/ui/console_form_dialog.dart';
-import 'package:relaydesk_agent_console/src/platform/platform_controller.dart';
-import 'package:relaydesk_agent_console/src/api/api_exception.dart';
+import 'package:tongyu_agent_console/src/ui/console_form_dialog.dart';
+import 'package:tongyu_agent_console/src/platform/platform_controller.dart';
+import 'package:tongyu_agent_console/src/api/api_exception.dart';
 
 /// 平台独有的直接建号入口；密码不写本地存储，也不走邀请邮件。
 class CreateAgentDialog extends StatefulWidget {

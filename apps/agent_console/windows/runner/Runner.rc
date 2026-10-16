@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.relaydesk" "\0"
-            VALUE "FileDescription", "relaydesk_agent_console" "\0"
+            VALUE "CompanyName", "com.tongyu" "\0"
+            VALUE "FileDescription", "tongyu_agent_console" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "relaydesk_agent_console" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.relaydesk. All rights reserved." "\0"
-            VALUE "OriginalFilename", "relaydesk_agent_console.exe" "\0"
-            VALUE "ProductName", "relaydesk_agent_console" "\0"
+            VALUE "InternalName", "tongyu_agent_console" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 com.tongyu. All rights reserved." "\0"
+            VALUE "OriginalFilename", "tongyu_agent_console.exe" "\0"
+            VALUE "ProductName", "tongyu_agent_console" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

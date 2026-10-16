@@ -1,15 +1,15 @@
 import '../util/pwa_bridge.dart';
-import 'package:relaydesk_agent_console/src/util/message_alert_stub.dart'
-    if (dart.library.html) 'package:relaydesk_agent_console/src/util/message_alert_web.dart';
+import 'package:tongyu_agent_console/src/util/message_alert_stub.dart'
+    if (dart.library.html) 'package:tongyu_agent_console/src/util/message_alert_web.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
-import 'package:relaydesk_agent_console/src/api/api_exception.dart';
-import 'package:relaydesk_agent_console/src/api/models.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
-import 'package:relaydesk_agent_console/src/realtime/console_socket.dart';
+import 'package:tongyu_agent_console/src/api/api_exception.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
+import 'package:tongyu_agent_console/src/realtime/console_socket.dart';
 
 /// Which slice of the queue the list is showing.
 ///
@@ -49,7 +49,7 @@ class WorkbenchController extends ChangeNotifier {
   final Set<String> _checkingNotifications = {};
   int _syncTick = 0;
 
-  final RelayDeskApi api;
+  final TongYuApi api;
 
   /// The signed-in agent's id. The server never says "this is yours", so the
   /// console compares `senderId` against this to decide who may edit or recall

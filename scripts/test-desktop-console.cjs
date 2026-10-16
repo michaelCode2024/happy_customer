@@ -3,8 +3,8 @@ const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/st
 const root=__dirname+'/../apps/agent_console/web/mobile/';
 const data={};const store={getItem:k=>data[k]??null,setItem:(k,v)=>data[k]=v,removeItem:k=>delete data[k]};
 const localStorage=new Proxy(store,{ownKeys:()=>Object.keys(data),getOwnPropertyDescriptor:()=>({enumerable:true,configurable:true})});
-const nodes=new Map();const element=()=>({hidden:true,innerHTML:'',textContent:'',value:'',style:{setProperty(){}},classList:{toggle(){}},remove(){},scrollHeight:42,selectionStart:0,selectionEnd:0,setSelectionRange(){}});
-const document={getElementById:k=>{if(!nodes.has(k))nodes.set(k,element());return nodes.get(k)},documentElement:{style:{setProperty(){}},dataset:{}},body:{style:{}},querySelector:()=>({content:''}),addEventListener(){},visibilityState:'visible'};
+const nodes=new Map();const element=()=>({hidden:true,dataset:{},innerHTML:'',textContent:'',value:'',style:{setProperty(){}},classList:{toggle(){}},remove(){},scrollHeight:42,selectionStart:0,selectionEnd:0,setSelectionRange(){}});
+const document={getElementById:k=>{if(k==='notification-preferences')return null;if(!nodes.has(k))nodes.set(k,element());return nodes.get(k)},documentElement:{style:{setProperty(){}},dataset:{}},body:{style:{},dataset:{}},querySelector:()=>({content:''}),addEventListener(){},visibilityState:'visible'};
 let response={ok:true,status:200,json:async()=>({items:[]})},lastRequest;
 const c=vm.createContext({console,document,localStorage,navigator:{onLine:true},location:{origin:'https://test.invalid',href:'https://test.invalid/console/mobile.html',pathname:'/console/mobile.html',search:'',hash:''},history:{pushState(){},replaceState(){}},window:{addEventListener(){}},matchMedia:()=>({matches:false}),innerHeight:844,URL,URLSearchParams,FormData,AbortSignal,crypto:require('node:crypto').webcrypto,setTimeout:()=>0,clearTimeout(){},setInterval:()=>0,clearInterval(){},WebSocket:{CLOSED:3},fetch:async(path,options)=>{lastRequest={path,options};return response}});
 const run=s=>vm.runInContext(s,c);

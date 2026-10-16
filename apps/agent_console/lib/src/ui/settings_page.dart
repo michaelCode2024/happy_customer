@@ -1,11 +1,11 @@
-import 'package:relaydesk_agent_console/src/ui/workspace_layout.dart';
+import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
 import 'pwa_panel.dart';
-import 'package:relaydesk_agent_console/src/util/message_alert_stub.dart'
-    if (dart.library.html) 'package:relaydesk_agent_console/src/util/message_alert_web.dart';
+import 'package:tongyu_agent_console/src/util/message_alert_stub.dart'
+    if (dart.library.html) 'package:tongyu_agent_console/src/util/message_alert_web.dart';
 import 'package:flutter/material.dart';
 
-import 'package:relaydesk_agent_console/src/api/api_exception.dart';
-import 'package:relaydesk_agent_console/src/state/session_controller.dart';
+import 'package:tongyu_agent_console/src/api/api_exception.dart';
+import 'package:tongyu_agent_console/src/state/session_controller.dart';
 
 /// Account and connection settings.
 ///

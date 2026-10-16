@@ -1,12 +1,12 @@
-import 'package:relaydesk_agent_console/src/ui/design_a.dart';
+import 'package:tongyu_agent_console/src/ui/design_a.dart';
 import 'package:flutter/material.dart';
-import 'package:relaydesk_agent_console/src/ui/assist_feedback_actions.dart';
+import 'package:tongyu_agent_console/src/ui/assist_feedback_actions.dart';
 
-import 'package:relaydesk_agent_console/src/api/api_exception.dart';
-import 'package:relaydesk_agent_console/src/api/models.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
-import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
-import 'package:relaydesk_agent_console/src/ui/visitor_sidebar.dart';
+import 'package:tongyu_agent_console/src/api/api_exception.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
+import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
+import 'package:tongyu_agent_console/src/ui/visitor_sidebar.dart';
 
 /// 右侧上下文与当前会话绑定；隐藏的标签页保留结果，切换会话时销毁旧草稿。
 class ConversationContextPanel extends StatefulWidget {
@@ -84,7 +84,7 @@ class AiReceptionPanel extends StatefulWidget {
       required this.conversationId,
       required this.messages,
       required this.onAdopt});
-  final RelayDeskApi api;
+  final TongYuApi api;
   final String conversationId;
   final List<ChatMessage> messages;
   final ValueChanged<AssistResult> onAdopt;

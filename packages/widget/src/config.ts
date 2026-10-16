@@ -1,9 +1,9 @@
 // Everything an embedding page can influence. The embed script turns data-*
-// attributes and window.RelayDeskSettings into this shape, and a page that
+// attributes and window.TongYuSettings into this shape, and a page that
 // imports the module configures the element directly.
 
-export interface RelayDeskWidgetOptions {
-  /** Origin of the RelayDesk server, for example https://chat.example.com. */
+export interface TongYuWidgetOptions {
+  /** Origin of the TongYu server, for example https://chat.example.com. */
   endpoint: string;
   /** Public key of the inbox the conversation belongs to. */
   inboxKey: string;
@@ -104,26 +104,26 @@ export const DEFAULTS = {
   theme: 'light' as const,
   launcher: 'bubble' as const,
   zIndex: 2147483000,
-  storage: 'relaydesk.widget',
+  storage: 'tongyu.widget',
   autoOpen: false,
   embedded: false,
   parentOrigin: '*',
 };
 
-export type ResolvedOptions = Omit<Required<RelayDeskWidgetOptions>, 'onEvent' | 'bridge' | 'attributes'> &
-  Pick<RelayDeskWidgetOptions, 'onEvent' | 'bridge' | 'attributes'>;
+export type ResolvedOptions = Omit<Required<TongYuWidgetOptions>, 'onEvent' | 'bridge' | 'attributes'> &
+  Pick<TongYuWidgetOptions, 'onEvent' | 'bridge' | 'attributes'>;
 
 /** Fills in every optional field so the rest of the code never re-checks. */
-export function resolveOptions(input: RelayDeskWidgetOptions): ResolvedOptions {
+export function resolveOptions(input: TongYuWidgetOptions): ResolvedOptions {
   if (!input.endpoint) {
-    throw new Error('RelayDesk: endpoint is required');
+    throw new Error('TongYu: endpoint is required');
   }
   if (!input.inboxKey) {
-    throw new Error('RelayDesk: inboxKey is required');
+    throw new Error('TongYu: inboxKey is required');
   }
   return {
     ...DEFAULTS,
-    ...(input as RelayDeskWidgetOptions),
+    ...(input as TongYuWidgetOptions),
     endpoint: input.endpoint.replace(/\/+$/, ''),
     inboxKey: input.inboxKey,
   } as ResolvedOptions;

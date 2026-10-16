@@ -5,10 +5,10 @@ import (
 	"testing"
 )
 
-// The Go mirror of relaydesk_terms has to agree with the SQL function exactly:
+// The Go mirror of tongyu_terms has to agree with the SQL function exactly:
 // the overlap test on question_examples is only meaningful if both sides cut the
 // text the same way. The expected values below are the real output of
-// relaydesk_terms in PostgreSQL 18, transcribed rather than derived, so this
+// tongyu_terms in PostgreSQL 18, transcribed rather than derived, so this
 // test fails if either implementation drifts.
 func TestTermsMatchTheDatabaseTokenizer(t *testing.T) {
 	cases := []struct {

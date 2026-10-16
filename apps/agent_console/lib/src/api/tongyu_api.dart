@@ -7,8 +7,8 @@ import '../util/pwa_bridge.dart';
 
 import 'package:http/http.dart' as http;
 
-import 'package:relaydesk_agent_console/src/api/api_exception.dart';
-import 'package:relaydesk_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/api/api_exception.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
 
 /// Result of uploading an attachment.
 class UploadedFile {
@@ -104,8 +104,8 @@ class ConversationPage {
 /// no call site has to thread either through. Requests that mutate state return
 /// the parsed body; requests whose body the UI ignores still return it, so a
 /// future screen can use it without touching this layer.
-class RelayDeskApi {
-  RelayDeskApi({required String server, http.Client? client})
+class TongYuApi {
+  TongYuApi({required String server, http.Client? client})
       : _server = normalizeServer(server),
         _client = client ?? http.Client();
 

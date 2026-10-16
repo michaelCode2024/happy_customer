@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:relaydesk_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
 
 /// 创建规则与字段校验集中在弹窗内；失败保留填写内容。
 class CreateGroupDialog extends StatefulWidget {

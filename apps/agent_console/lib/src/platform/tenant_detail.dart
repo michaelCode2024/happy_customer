@@ -1,12 +1,12 @@
 import '../ui/manual_quota_page.dart';
-import 'package:relaydesk_agent_console/src/platform/create_agent_dialog.dart';
+import 'package:tongyu_agent_console/src/platform/create_agent_dialog.dart';
 import 'package:flutter/material.dart';
 
-import 'package:relaydesk_agent_console/src/platform/platform_controller.dart';
-import 'package:relaydesk_agent_console/src/platform/platform_models.dart';
-import 'package:relaydesk_agent_console/src/ui/error_banner.dart';
-import 'package:relaydesk_agent_console/src/util/format.dart';
-import 'package:relaydesk_agent_console/src/util/labels.dart';
+import 'package:tongyu_agent_console/src/platform/platform_controller.dart';
+import 'package:tongyu_agent_console/src/platform/platform_models.dart';
+import 'package:tongyu_agent_console/src/ui/error_banner.dart';
+import 'package:tongyu_agent_console/src/util/format.dart';
+import 'package:tongyu_agent_console/src/util/labels.dart';
 
 /// The detail pane for one tenant: who is in it, what they bought, and what they
 /// have used.

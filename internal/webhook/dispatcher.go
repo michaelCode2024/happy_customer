@@ -175,10 +175,10 @@ func (d *Dispatcher) post(ctx context.Context, item delivery) (int, error) {
 	}
 	timestamp := fmt.Sprintf("%d", time.Now().Unix())
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-RelayDesk-Event", item.eventType)
-	request.Header.Set("X-RelayDesk-Delivery", item.id.String())
-	request.Header.Set("X-RelayDesk-Timestamp", timestamp)
-	request.Header.Set("X-RelayDesk-Signature", Sign(item.secret, timestamp, item.payload))
+	request.Header.Set("X-TongYu-Event", item.eventType)
+	request.Header.Set("X-TongYu-Delivery", item.id.String())
+	request.Header.Set("X-TongYu-Timestamp", timestamp)
+	request.Header.Set("X-TongYu-Signature", Sign(item.secret, timestamp, item.payload))
 	response, err := d.client.Do(request)
 	if err != nil {
 		return 0, err

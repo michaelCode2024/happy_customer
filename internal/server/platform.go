@@ -9,11 +9,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/relaydesk/relaydesk/internal/auth"
-	"github.com/relaydesk/relaydesk/internal/realtime"
+	"github.com/tongyu/tongyu/internal/auth"
+	"github.com/tongyu/tongyu/internal/realtime"
 )
 
-// registerPlatform is the RelayDesk operations API. It is the only API that may
+// registerPlatform is the TongYu operations API. It is the only API that may
 // cross tenant boundaries: creating tenants, changing plans, suspending abuse
 // and platform-wide reporting. Platform accounts use revocable password sessions.
 func (a *API) registerPlatform(mux *http.ServeMux) {
@@ -48,7 +48,7 @@ func (a *API) platformOverview(w http.ResponseWriter, r *http.Request, _ auth.Pr
 	var messagesToday int
 	_ = a.db.QueryRow(r.Context(), `select count(*)::int from tenant`).Scan(&tenants)
 	_ = a.db.QueryRow(r.Context(), `select count(*)::int from tenant where status='ACTIVE'`).Scan(&activeTenants)
-	_ = a.db.QueryRow(r.Context(), `select count(*)::int from agent where status='ACTIVE' and email <> 'bot@relaydesk.local'`).Scan(&agents)
+	_ = a.db.QueryRow(r.Context(), `select count(*)::int from agent where status='ACTIVE' and email <> 'bot@tongyu.local'`).Scan(&agents)
 	_ = a.db.QueryRow(r.Context(), `select count(*)::int from conversation`).Scan(&conversations)
 	_ = a.db.QueryRow(r.Context(), `select count(*)::int from conversation where status <> 'RESOLVED'`).Scan(&openConversations)
 	_ = a.db.QueryRow(r.Context(), `select coalesce(sum(messages_in + messages_out),0)::int from tenant_daily_stat
@@ -74,7 +74,7 @@ func (a *API) platformOverview(w http.ResponseWriter, r *http.Request, _ auth.Pr
 	topRows, err := a.db.Query(r.Context(), `
 		select t.id, t.name, t.slug, t.status,
 		       (select count(*)::int from conversation c where c.tenant_id = t.id and c.created_at >= now() - interval '7 days'),
-		       (select count(*)::int from agent ag where ag.tenant_id = t.id and ag.status='ACTIVE' and ag.email <> 'bot@relaydesk.local')
+		       (select count(*)::int from agent ag where ag.tenant_id = t.id and ag.status='ACTIVE' and ag.email <> 'bot@tongyu.local')
 		  from tenant t
 		 order by 5 desc, t.created_at desc limit 10`)
 	if err == nil {
@@ -113,7 +113,7 @@ func (a *API) platformTenants(w http.ResponseWriter, r *http.Request, _ auth.Pri
 		select t.id, t.name, t.slug, t.status, t.created_at,
 		       coalesce(s.plan,'TRIAL'), coalesce(s.status,'ACTIVE'), coalesce(s.seat_limit,3),
 		       coalesce(s.monthly_message_limit,5000), s.trial_ends_at,
-		       (select count(*)::int from agent ag where ag.tenant_id = t.id and ag.status='ACTIVE' and ag.email <> 'bot@relaydesk.local'),
+		       (select count(*)::int from agent ag where ag.tenant_id = t.id and ag.status='ACTIVE' and ag.email <> 'bot@tongyu.local'),
 		       (select count(*)::int from inbox i where i.tenant_id = t.id),
 		       (select count(*)::int from conversation c where c.tenant_id = t.id),
 		       (select count(*)::int from conversation c where c.tenant_id = t.id and c.status <> 'RESOLVED')

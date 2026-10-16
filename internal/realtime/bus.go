@@ -14,9 +14,9 @@ import (
 
 // notifyChannel is the PostgreSQL LISTEN/NOTIFY channel used as the event bus.
 // PostgreSQL already sits in the critical path of every message, so using it
-// avoids adding Redis to the deployment while still letting several RelayDesk
+// avoids adding Redis to the deployment while still letting several TongYu
 // instances deliver to each other's connected clients.
-const notifyChannel = "relaydesk_events"
+const notifyChannel = "tongyu_events"
 
 // maxNotifyPayload stays below PostgreSQL's 8000 byte NOTIFY limit. Larger
 // events degrade to a "refetch" hint: clients then pull the real payload from

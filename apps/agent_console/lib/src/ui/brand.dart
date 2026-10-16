@@ -1,14 +1,11 @@
-import 'package:relaydesk_agent_console/src/ui/design_a.dart';
+import 'package:tongyu_agent_console/src/ui/design_a.dart';
 import 'package:flutter/material.dart';
-import 'package:relaydesk_agent_console/src/ui/product_brand.dart';
+import 'package:tongyu_agent_console/src/ui/product_brand.dart';
 
 /// 品牌字号档位：侧栏用紧凑，登录英雄区放大，保证第一眼先看到产品名。
 enum TongYuBrandSize { compact, regular, large, hero }
 
-/// 兼容旧调用名；实现已统一为通语标识。
-typedef LiaoQiaoBrandSize = TongYuBrandSize;
-
-/// 展示品牌「通语」；RelayDesk 协议与存储键不变，已有客户无需迁移。
+/// 展示品牌「通语」。协议头、存储键和模块名同为 TongYu / tongyu。
 class TongYuBrand extends StatelessWidget {
   const TongYuBrand({
     super.key,
@@ -84,16 +81,6 @@ class TongYuBrand extends StatelessWidget {
       ],
     );
   }
-}
-
-/// 旧名别名，避免散落引用一次性炸裂。
-class LiaoQiaoBrand extends TongYuBrand {
-  const LiaoQiaoBrand({
-    super.key,
-    super.compact = false,
-    super.size = TongYuBrandSize.regular,
-    super.showEnglish = false,
-  });
 }
 
 /// 通语 Logo 图形：双对话气泡，与官网使用相同的轮廓和品牌色。

@@ -3,14 +3,14 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
-import 'package:relaydesk_agent_console/src/api/api_exception.dart';
-import 'package:relaydesk_agent_console/src/api/models.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
-import 'package:relaydesk_agent_console/src/platform/platform_models.dart';
+import 'package:tongyu_agent_console/src/api/api_exception.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
+import 'package:tongyu_agent_console/src/platform/platform_models.dart';
 
-/// The HTTP client for the RelayDesk operations API.
+/// The HTTP client for the TongYu operations API.
 ///
-/// This is a second client rather than more methods on [RelayDeskApi] because
+/// This is a second client rather than more methods on [TongYuApi] because
 /// the two speak as different principals against disjoint route trees: the agent
 /// client is always tenant-scoped and the operator client is never. Keeping them
 /// apart means neither can accidentally call the other's endpoints, which is the
@@ -18,7 +18,7 @@ import 'package:relaydesk_agent_console/src/platform/platform_models.dart';
 /// would be a cross-tenant bug, not a typo.
 class PlatformApi {
   PlatformApi({required String server, http.Client? client})
-      : _server = RelayDeskApi.normalizeServer(server),
+      : _server = TongYuApi.normalizeServer(server),
         _client = client ?? http.Client();
 
   final String _server;

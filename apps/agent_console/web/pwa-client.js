@@ -4,8 +4,9 @@
   const ios=()=>/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
   const embedded=()=>/MicroMessenger|QQ\/|FBAN|FBAV|Instagram|Line\//i.test(navigator.userAgent);
   const installed=()=>matchMedia('(display-mode: standalone)').matches||matchMedia('(display-mode: fullscreen)').matches||navigator.standalone===true;
-  window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();installEvent=event;});
-  window.addEventListener('appinstalled',()=>{installEvent=null;});
+  const installChanged=()=>window.dispatchEvent(new CustomEvent('tongyu:installchange'));
+  window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();installEvent=event;installChanged();});
+  window.addEventListener('appinstalled',()=>{installEvent=null;installChanged();});
   const ready= async()=>{
     if(!isSecureContext||!('serviceWorker' in navigator))throw new Error('当前浏览器不支持 PWA，请使用 HTTPS 和支持的浏览器');
     const existing=await navigator.serviceWorker.getRegistration('/console/');
@@ -57,7 +58,7 @@
     }
     if(action==='install'){
       if(installed())return '已作为应用打开';
-      if(installEvent){const event=installEvent;installEvent=null;await event.prompt();const choice=await event.userChoice;return choice.outcome==='accepted'?'请完成浏览器的安装确认，然后从桌面图标打开通语':'已取消安装，可稍后在个人设置中重新安装';}
+      if(installEvent){const event=installEvent;installEvent=null;try{await event.prompt();const choice=await event.userChoice;return choice.outcome==='accepted'?'请完成浏览器的安装确认，然后从桌面图标打开通语':'已取消安装，可稍后在个人设置中重新安装';}finally{installChanged();}}
       return /iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1)?'请在 Safari 中点「分享 → 添加到主屏幕」，如有「作为 Web App 打开」请保持开启':'请使用浏览器菜单中的「安装通语」或「安装应用」；首次访问请等待离线资源准备完成';
     }
     if(action==='checkUpdate'){

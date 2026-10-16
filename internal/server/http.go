@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/relaydesk/relaydesk/internal/auth"
+	"github.com/tongyu/tongyu/internal/auth"
 )
 
 type middleware func(http.Handler) http.Handler
@@ -103,7 +103,7 @@ func cors(next http.Handler, origins []string) http.Handler {
 				w.Header().Add("Vary", "Origin")
 			}
 		}
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-RelayDesk-Key, X-Request-Id")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-TongYu-Key, X-Request-Id")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Max-Age", "600")
 		if r.Method == http.MethodOptions {
@@ -224,7 +224,7 @@ func (a *API) requireRole(role []string, next func(http.ResponseWriter, *http.Re
 	})
 }
 
-// requirePlatform authenticates the RelayDesk operations API (tenant creation,
+// requirePlatform authenticates the TongYu operations API (tenant creation,
 // plan changes, cross-tenant support).
 func (a *API) requirePlatform(next func(http.ResponseWriter, *http.Request, auth.Principal)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

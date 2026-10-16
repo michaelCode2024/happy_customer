@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
-import 'package:relaydesk_agent_console/src/ui/integration_page.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
+import 'package:tongyu_agent_console/src/ui/integration_page.dart';
 
 void main() {
   Future<void> settleRequests(WidgetTester tester) async {
@@ -17,7 +17,7 @@ void main() {
 
   testWidgets('entry selector loads the corresponding installation snippet',
       (tester) async {
-    final api = RelayDeskApi(
+    final api = TongYuApi(
       server: 'https://chat.example.com',
       client: MockClient((request) async {
         final path = request.url.path;
@@ -105,7 +105,7 @@ void main() {
   testWidgets('new server key is only shown in the creation dialog',
       (tester) async {
     var creations = 0;
-    final api = RelayDeskApi(
+    final api = TongYuApi(
       server: 'https://chat.example.com',
       client: MockClient((request) async {
         final path = request.url.path;
@@ -171,7 +171,7 @@ void main() {
       tester.view.resetPhysicalSize();
       tester.view.resetDevicePixelRatio();
     });
-    final api = RelayDeskApi(
+    final api = TongYuApi(
         server: 'https://chat.example.com',
         client: MockClient((request) async {
           final body = switch (request.url.path) {
@@ -225,7 +225,7 @@ void main() {
   });
   testWidgets('回调校验和服务端错误留在表单，修正后可重试', (tester) async {
     var posts = 0;
-    final api = RelayDeskApi(
+    final api = TongYuApi(
         server: 'http://localhost',
         client: MockClient((request) async {
           if (request.url.path.endsWith('/entitlements')) {
@@ -273,7 +273,7 @@ void main() {
   });
 
   testWidgets('旗舰版接入指南展示 member-token 进群，不伪装企业版身份票据', (tester) async {
-    final api = RelayDeskApi(
+    final api = TongYuApi(
       server: 'https://chat.example.com',
       client: MockClient((request) async {
         final data = switch (request.url.path) {
@@ -299,7 +299,7 @@ void main() {
     await tester.tap(find.text('接入指南'));
     await settleRequests(tester);
     expect(find.textContaining('member-token'), findsWidgets);
-    expect(find.textContaining('liaoqiao-group-'), findsOneWidget);
+    expect(find.textContaining('tongyu-group-'), findsOneWidget);
     expect(find.textContaining('visitor-identity'), findsNothing);
   });
 }

@@ -4,10 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
-import 'package:relaydesk_agent_console/src/state/session_controller.dart';
-import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
-import 'package:relaydesk_agent_console/src/ui/conversation_list.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
+import 'package:tongyu_agent_console/src/state/session_controller.dart';
+import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
+import 'package:tongyu_agent_console/src/ui/conversation_list.dart';
 
 void main() {
   for (final width in [300.0, 340.0, 390.0]) {
@@ -20,7 +20,7 @@ void main() {
         tester.view.resetDevicePixelRatio();
       });
 
-      final api = RelayDeskApi(
+      final api = TongYuApi(
         server: 'https://chat.example.com',
         client: MockClient((request) async => http.Response.bytes(
               utf8.encode(jsonEncode({

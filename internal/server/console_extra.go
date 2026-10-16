@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/relaydesk/relaydesk/internal/ai"
-	"github.com/relaydesk/relaydesk/internal/auth"
+	"github.com/tongyu/tongyu/internal/ai"
+	"github.com/tongyu/tongyu/internal/auth"
 )
 
 func itoa(value int) string {
@@ -182,7 +182,7 @@ func (a *API) consoleAgents(w http.ResponseWriter, r *http.Request, p auth.Princ
 		       coalesce(ap.status,'OFFLINE'), coalesce(ap.last_seen_at, ag.created_at),
 		       (select count(*)::int from conversation c where c.assignee_id = ag.id and c.status <> 'RESOLVED')
 		  from agent ag left join agent_presence ap on ap.agent_id = ag.id
-		 where ag.tenant_id = $1 and ag.status = 'ACTIVE' and ag.email <> 'bot@relaydesk.local'
+		 where ag.tenant_id = $1 and ag.status = 'ACTIVE' and ag.email <> 'bot@tongyu.local'
 		 order by ag.display_name`, p.TenantID)
 	if err != nil {
 		fail(w, 500, "查询坐席失败")
@@ -288,7 +288,7 @@ func (a *API) consoleStats(w http.ResponseWriter, r *http.Request, p auth.Princi
 		  from agent ag
 		  left join conversation c on c.assignee_id = ag.id and c.created_at >= now() - interval '30 days'
 		  left join conversation_rating r on r.conversation_id = c.id
-		 where ag.tenant_id = $1 and ag.status = 'ACTIVE' and ag.email <> 'bot@relaydesk.local'
+		 where ag.tenant_id = $1 and ag.status = 'ACTIVE' and ag.email <> 'bot@tongyu.local'
 		 group by ag.id, ag.display_name
 		 order by resolved desc, open asc`, p.TenantID)
 	if err == nil {

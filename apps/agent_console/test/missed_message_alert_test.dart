@@ -2,15 +2,15 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
-import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
+import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
 
 void main() {
   test('断线补拉仅提醒新增客户消息，历史、系统和自己回复不响，重复补拉不重响', () async {
     var sequence = 7;
     final alerts = <String>[];
     final requestedAfter = <String?>[];
-    final api = RelayDeskApi(server: 'http://localhost', client: MockClient((r) async {
+    final api = TongYuApi(server: 'http://localhost', client: MockClient((r) async {
       Object body;
       if (r.url.path.endsWith('/conversations')) {
         body = {'items': [{'id':'c1','visitorName':'测试客户','lastSequence':sequence}]};

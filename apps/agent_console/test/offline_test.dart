@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
-import 'package:relaydesk_agent_console/src/ui/chat_panel.dart';
-import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
-import 'package:relaydesk_agent_console/src/util/attachment_picker.dart';
+import 'package:tongyu_agent_console/src/ui/chat_panel.dart';
+import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
+import 'package:tongyu_agent_console/src/util/attachment_picker.dart';
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
-import 'package:relaydesk_agent_console/src/api/api_exception.dart';
-import 'package:relaydesk_agent_console/src/state/offline_store.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
+import 'package:tongyu_agent_console/src/api/api_exception.dart';
+import 'package:tongyu_agent_console/src/state/offline_store.dart';
 
 class TestPicker implements AttachmentPicker {
   bool get supportsArbitraryFiles => false;
@@ -32,7 +32,7 @@ void main() {
   });
   test('会话权限撤销后关闭已选会话并清空消息和缓存', () async {
     bool denied=false;
-    final api=RelayDeskApi(server:'https://one.example',client:MockClient((r) async {
+    final api=TongYuApi(server:'https://one.example',client:MockClient((r) async {
       if(denied) return http.Response('{"code":"CONVERSATION_NOT_FOUND","message":"not allowed"}',404);
       if(r.url.path.endsWith('/c1'))return http.Response('{"conversation":{"id":"c1","status":"OPEN","assigneeId":"a"}}',200);
       if(r.url.path.endsWith('/messages'))return http.Response('{"items":[{"id":"m1","sequence":1,"content":"old private content","senderType":"VISITOR"}],"lastSequence":1}',200);
@@ -47,7 +47,7 @@ void main() {
   });
 
   testWidgets('已保存的离线草稿进入会话时显示在真实输入框', (tester) async {
-    final api = RelayDeskApi(
+    final api = TongYuApi(
         server: 'https://offline.example',
         client: MockClient((r) async {
           if (r.url.path.endsWith('/c1'))
@@ -124,7 +124,7 @@ void main() {
   });
   test('断网回退会话快照，恢复网络读取最新数据，403 不回退旧权限', () async {
     var state = 'online';
-    final api = RelayDeskApi(
+    final api = TongYuApi(
         server: 'https://one.example',
         client: MockClient((r) async {
           if (state == 'offline') throw http.ClientException('offline');
@@ -163,11 +163,11 @@ void main() {
       requests++;
       throw http.ClientException('offline');
     });
-    final api = RelayDeskApi(server: 'https://one.example', client: client)
+    final api = TongYuApi(server: 'https://one.example', client: client)
       ..token = 'test';
     api.configureOffline(tenant: 't', agent: 'a');
     await api.saveDraft('c1', '尚未发送的备注', localPrivate: true);
-    final restored = RelayDeskApi(server: 'https://one.example', client: client)
+    final restored = TongYuApi(server: 'https://one.example', client: client)
       ..token = 'test';
     restored.configureOffline(tenant: 't', agent: 'a');
     final before = requests;

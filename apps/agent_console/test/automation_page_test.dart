@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
-import 'package:relaydesk_agent_console/src/ui/automation_page.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
+import 'package:tongyu_agent_console/src/ui/automation_page.dart';
 
 void main() {
   testWidgets('窄屏欢迎语保存携带配置版本', (tester) async {
@@ -13,7 +13,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     Map<String, dynamic>? saved;
-    final api = RelayDeskApi(
+    final api = TongYuApi(
         server: 'http://localhost',
         client: MockClient((r) async {
           dynamic body;
@@ -75,7 +75,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
   testWidgets('渠道卡片拒绝不安全图片链接', (tester) async {
-    final api = RelayDeskApi(
+    final api = TongYuApi(
         server: 'http://localhost',
         client: MockClient((r) async {
           final body = r.url.path.endsWith('/inboxes')

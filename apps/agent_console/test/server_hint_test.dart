@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:relaydesk_agent_console/src/util/server_hint.dart';
+import 'package:tongyu_agent_console/src/util/server_hint.dart';
 
 void main() {
   test('web uses the current origin for a first visit under /console/', () {

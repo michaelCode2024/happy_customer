@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import '../api/relaydesk_api.dart';
+import '../api/tongyu_api.dart';
 import '../util/pwa_bridge.dart';
 
 /// 安装、离线就绪和版本更新使用同一个入口，避免把浏览器权限误当成已开启。
@@ -12,7 +12,7 @@ class PwaPanel extends StatefulWidget {
       this.onReconnect,
       this.settingsOnly = false,
       this.hideUpdateBanner = false});
-  final RelayDeskApi? api;
+  final TongYuApi? api;
   final bool settingsOnly;
   final bool hideUpdateBanner;
   final Future<void> Function()? onReconnect;

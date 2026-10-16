@@ -19,7 +19,7 @@ import (
 const defaultDir = "/data/uploads"
 
 func main() {
-	binary := "/relaydesk"
+	binary := "/tongyu"
 	if len(os.Args) > 1 {
 		binary = os.Args[1]
 	}
@@ -35,7 +35,7 @@ func main() {
 	// runtime's signals reach the server directly.
 	argv := append([]string{binary}, os.Args[2:]...)
 	if err := syscall.Exec(binary, argv, os.Environ()); err != nil {
-		fmt.Fprintf(os.Stderr, "relaydesk entrypoint: exec %s: %v\n", binary, err)
+		fmt.Fprintf(os.Stderr, "tongyu entrypoint: exec %s: %v\n", binary, err)
 		os.Exit(1)
 	}
 }
@@ -66,7 +66,7 @@ func prepare(dir string) {
 }
 
 func warn(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "relaydesk entrypoint: "+format+"\n", args...)
+	fmt.Fprintf(os.Stderr, "tongyu entrypoint: "+format+"\n", args...)
 }
 
 func writable(dir string) error {
@@ -102,13 +102,13 @@ func chownTree(root string, uid, gid int) error {
 // unprivileged mirrors the distroless :nonroot user.
 func unprivileged() (int, int) {
 	uid := 65532
-	if value := os.Getenv("RELAYDESK_UID"); value != "" {
+	if value := os.Getenv("TONGYU_UID"); value != "" {
 		if parsed, err := parsePositive(value); err == nil {
 			uid = parsed
 		}
 	}
 	gid := uid
-	if value := os.Getenv("RELAYDESK_GID"); value != "" {
+	if value := os.Getenv("TONGYU_GID"); value != "" {
 		if parsed, err := parsePositive(value); err == nil {
 			gid = parsed
 		}

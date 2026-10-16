@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// 宿主用自己的用户 ID（externalId）往服务群加人，不在聊桥镜像整库用户。
+// 宿主用自己的用户 ID（externalId）往服务群加人，不在通语镜像整库用户。
 func (a *API) registerOpenGroups(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/v1/open/groups/{id}/policy", a.requireAPIKey("write", a.openGroupPolicy))
 	mux.HandleFunc("PUT /api/v1/open/groups/{id}/manager", a.requireAPIKey("write", a.openGroupManager))

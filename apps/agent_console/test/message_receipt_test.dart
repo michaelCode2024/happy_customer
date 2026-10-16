@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:relaydesk_agent_console/src/api/models.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
-import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
+import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
 
 void main() {
   ChatMessage agentMessage({
@@ -28,7 +28,7 @@ void main() {
 
   test('坐席消息按访客游标展示未读 / 已送达 / 已读', () {
     final workbench = WorkbenchController(
-      api: RelayDeskApi(server: 'http://localhost'),
+      api: TongYuApi(server: 'http://localhost'),
       selfId: 'agent-1',
     );
     // 通过反射不可行；用公开 receiptFor + 内部状态需经事件或加载。
@@ -64,7 +64,7 @@ void main() {
 
   test('访客已读事件推进回执水位', () {
     final workbench = WorkbenchController(
-      api: RelayDeskApi(server: 'http://localhost'),
+      api: TongYuApi(server: 'http://localhost'),
       selfId: 'agent-1',
     );
     // 选中会话后才能吃事件；这里用 select 会打 API，改为验证公开 getter 初始值。

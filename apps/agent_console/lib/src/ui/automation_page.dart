@@ -1,13 +1,13 @@
-import 'package:relaydesk_agent_console/src/ui/workspace_layout.dart';
+import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
-import 'package:relaydesk_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
 
 /// 每个渠道拥有独立配置，切换前明确处理未保存内容，避免写入错误入口。
 class AutomationPage extends StatefulWidget {
   const AutomationPage({super.key, required this.api, this.channels = false});
-  final RelayDeskApi api;
+  final TongYuApi api;
   final bool channels;
   @override
   State<AutomationPage> createState() => _AutomationPageState();
@@ -924,7 +924,7 @@ class _ChannelMessagesDialog extends StatefulWidget {
       required this.inboxId,
       required this.conversationId,
       required this.visitorName});
-  final RelayDeskApi api;
+  final TongYuApi api;
   final String inboxId, conversationId, visitorName;
   @override
   State<_ChannelMessagesDialog> createState() => _ChannelMessagesDialogState();

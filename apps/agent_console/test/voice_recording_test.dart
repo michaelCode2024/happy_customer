@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'dart:typed_data';
-import 'package:relaydesk_agent_console/src/util/voice_recording.dart';
-import 'package:relaydesk_agent_console/src/ui/voice_recorder_button.dart';
+import 'package:tongyu_agent_console/src/util/voice_recording.dart';
+import 'package:tongyu_agent_console/src/ui/voice_recorder_button.dart';
 
 void main() {
   testWidgets('停止录音保留音频，上传失败可重试，取消释放设备', (tester) async {

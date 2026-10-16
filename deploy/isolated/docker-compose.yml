@@ -1,42 +1,42 @@
 # 独立实例：不占用默认 deploy 项目名/卷名，避免影响同机其它项目
-# 使用：COMPOSE_PROJECT_NAME=relaydesk_isolated docker compose -f docker-compose.yml up -d
+# 使用：COMPOSE_PROJECT_NAME=tongyu_isolated docker compose -f docker-compose.yml up -d
 services:
   postgres:
     image: postgres:18.6-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: relaydesk
-      POSTGRES_USER: relaydesk
-      POSTGRES_PASSWORD: relaydesk
+      POSTGRES_DB: tongyu
+      POSTGRES_USER: tongyu
+      POSTGRES_PASSWORD: tongyu
     # 不映射到宿主机 5432，避免和已有 Postgres 冲突
     volumes:
-      - relaydesk_isolated_pg:/var/lib/postgresql
+      - tongyu_isolated_pg:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U relaydesk"]
+      test: ["CMD-SHELL", "pg_isready -U tongyu"]
       interval: 5s
       timeout: 3s
       retries: 10
 
   server:
-    image: relaydesk-isolated:local
+    image: tongyu-isolated:local
     build:
       context: ../..
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgres://relaydesk:relaydesk@postgres:5432/relaydesk?sslmode=disable
+      DATABASE_URL: postgres://tongyu:tongyu@postgres:5432/tongyu?sslmode=disable
       # 对外访问地址（按你反代端口改）；不要末尾斜杠
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://47.130.172.91:41815}
       WIDGET_TOKEN_SECRET: ${WIDGET_TOKEN_SECRET:-change-me-to-at-least-32-random-chars!!}
       WIDGET_TOKEN_TTL: 12h
       ALLOWED_ORIGIN: "*"
       DEMO_ENABLED: ${DEMO_ENABLED:-true}
-      PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-admin@relaydesk.local}
-      PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:-RelayDesk@2026}
+      PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-admin@tongyu.local}
+      PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:-TongYu@2026}
       STORAGE_DRIVER: local
       STORAGE_LOCAL_DIR: /data/uploads
     volumes:
-      - relaydesk_isolated_uploads:/data/uploads
+      - tongyu_isolated_uploads:/data/uploads
     # 宿主机独立端口，不占 8080
     ports:
       - "18080:8080"
@@ -45,5 +45,5 @@ services:
         condition: service_healthy
 
 volumes:
-  relaydesk_isolated_pg:
-  relaydesk_isolated_uploads:
+  tongyu_isolated_pg:
+  tongyu_isolated_uploads:

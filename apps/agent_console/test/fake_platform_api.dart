@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
-import 'package:relaydesk_agent_console/src/platform/platform_api.dart';
+import 'package:tongyu_agent_console/src/platform/platform_api.dart';
 
 /// A [PlatformApi] fed by canned JSON.
 ///

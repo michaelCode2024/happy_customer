@@ -3,7 +3,7 @@ import 'dart:convert';
 
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-import 'package:relaydesk_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
 
 /// Connection state of the console socket, as shown in the status bar.
 enum SocketState { connecting, open, closed }

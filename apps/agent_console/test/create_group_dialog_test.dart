@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:relaydesk_agent_console/src/api/models.dart';
-import 'package:relaydesk_agent_console/src/theme.dart';
-import 'package:relaydesk_agent_console/src/ui/create_group_dialog.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/theme.dart';
+import 'package:tongyu_agent_console/src/ui/create_group_dialog.dart';
 
 const inbox = InboxInfo(
     id: 'i1',

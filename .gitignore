@@ -30,7 +30,7 @@ target/
 coverage/
 
 # Go
-relaydesk
+tongyu
 *.test
 
 # Flutter / Dart
@@ -43,8 +43,8 @@ pubspec.lock
 **/macos/Pods/
 
 # Locally built binaries (the image build produces these outside Docker)
-.relaydesk-server
-.relaydesk-entrypoint
+.tongyu-server
+.tongyu-entrypoint
 /server
 server.exe
 server-linux

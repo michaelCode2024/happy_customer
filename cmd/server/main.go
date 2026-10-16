@@ -9,9 +9,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/relaydesk/relaydesk/internal/config"
-	"github.com/relaydesk/relaydesk/internal/platform/database"
-	"github.com/relaydesk/relaydesk/internal/server"
+	"github.com/tongyu/tongyu/internal/config"
+	"github.com/tongyu/tongyu/internal/platform/database"
+	"github.com/tongyu/tongyu/internal/server"
 )
 
 func main() {
@@ -67,7 +67,7 @@ func main() {
 	}
 
 	go func() {
-		logger.Info("relaydesk started", "address", cfg.ListenAddress)
+		logger.Info("tongyu started", "address", cfg.ListenAddress)
 		if cfg.DemoEnabled {
 			logger.Info("demo login (development only)",
 				"console", cfg.PublicBaseURL+"/console/",

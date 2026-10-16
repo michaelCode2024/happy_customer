@@ -1,11 +1,11 @@
 # 第三方接入方向
 
-连语客服的消息与会话仍由自身服务存储和分发，不依赖腾讯云 IM。参考其“应用标识、服务端接口、客户端身份、事件回调”的接入体验，但不宣称协议或 SDK 兼容。
+通语客服的消息与会话仍由自身服务存储和分发，不依赖腾讯云 IM。参考其“应用标识、服务端接口、客户端身份、事件回调”的接入体验，但不宣称协议或 SDK 兼容。
 
 ## 当前已经具备
 
 - **网站 / H5**：通过公开 `inboxKey` 装载组件；`/h5/{inboxKey}` 可作为 App WebView 或业务系统 iframe。公开 Key 只标识入口，不是服务端密钥。
-- **客户业务系统**：企业管理员创建租户 API Key，服务端以 `X-RelayDesk-Key` 调用 `/api/v1/open/`，按 `read` / `write` 权限访问会话、访客、消息和统计。密钥只在创建时显示，不要放进网页或 App。完整列表见 [open-api.md](open-api.md)。
+- **客户业务系统**：企业管理员创建租户 API Key，服务端以 `X-TongYu-Key` 调用 `/api/v1/open/`，按 `read` / `write` 权限访问会话、访客、消息和统计。密钥只在创建时显示，不要放进网页或 App。完整列表见 [open-api.md](open-api.md)。
 - **访客身份**：匿名咨询只需 inboxKey；关联已登录客户必须传 identityToken。客户后端使用 write 权限的 APIKey 调用 `POST /api/v1/open/visitor-identity`，提交 inboxKey、externalId、displayName。返回的票据有效期 5 分钟，绑定企业、入口、客户 ID；bootstrap 从签名中读取身份，不受前端 externalId 覆盖。identityToken 不可作为聊天 Bearer Token 使用。
 - **事件推送**：企业配置 Webhook，接收会话、消息等事件；投递失败重试。接收方要校验签名并按事件 ID / 消息 ID 幂等处理。
 - **聊天可靠性**：发送使用 `clientMessageId` 幂等；会话消息以 `sequence` 排序，断线后按 `after` 补拉；WebSocket 是实时通知，不是唯一事实来源。
@@ -16,7 +16,7 @@
 
 ```html
 <iframe
-  id="relaydesk"
+  id="tongyu"
   src="https://chat.example.com/h5/{inboxKey}?parentOrigin=https://app.example.com"
   style="border:0;width:100%;height:100%;min-height:520px"
   allow="microphone;clipboard-write"
@@ -29,12 +29,12 @@
 
 ```js
 window.addEventListener('message', (event) => {
-  if (event.origin !== 'https://chat.example.com' || event.source !== document.getElementById('relaydesk').contentWindow) return;
+  if (event.origin !== 'https://chat.example.com' || event.source !== document.getElementById('tongyu').contentWindow) return;
   const data = event.data;
-  if (!data || data.source !== 'relaydesk') return;
+  if (!data || data.source !== 'tongyu') return;
   // ready | open | close | message | sent | unread | resize | error …
   if (data.type === 'resize') {
-    document.getElementById('relaydesk').style.height = `${data.data.height}px`;
+    document.getElementById('tongyu').style.height = `${data.data.height}px`;
   }
 });
 ```
@@ -56,7 +56,7 @@ CSP：服务端对 `/h5` 设置 `Content-Security-Policy: frame-ancestors …`�
 
 平台超级管理员调用 `POST /api/v1/platform/marketplaces`，body为 `{"name":"商城名称","plan":"ENTERPRISE"}`。响应包含id、apiKey、plan；密钥只在创建时返回，保存在商城后端。默认ENTERPRISE，平台也可指定STARTER/GROWTH；商城不能自行修改套餐。`PATCH /api/v1/platform/marketplaces/{id}` 可设置status为ACTIVE或DISABLED；停用撤销店员和买家会话。普通企业密钥与商城密钥不能互换。
 
-商城服务端接口请求头为 `X-RelayDesk-Marketplace-Key`。初始化流程：
+商城服务端接口请求头为 `X-TongYu-Marketplace-Key`。初始化流程：
 
 1. `PUT /api/v1/marketplace/shops/{shopId}`，body为 `{"name":"店铺A","status":"ACTIVE"}`。返回shopId、tenantId、inboxId、inboxKey、created、status。shopId是宿主稳定ID，同一商城重试返回原租户，不创建重复店铺。status可为SUSPENDED；停用后旧聊天身份不能继续访问。
 2. `GET /api/v1/marketplace/shops/{shopId}` 查询映射。商城密钥不能查询另一个商城的店铺。
@@ -88,13 +88,13 @@ card字段：kind为PRODUCT/ORDER；id是稳定商品或订单ID；title为1至1
 
 ### 本地验收与交付边界
 
-`examples/marketplace/server.py` 和同目录index.html是可运行的买家/店主联调示例，仅允许本机服务，模拟登录不是生产认证。先启动隔离通语API，再在进程环境配置DEMO_ADMIN_EMAIL、DEMO_ADMIN_PASSWORD和可选RELAYDESK_URL；运行 `python examples/marketplace/server.py` 后打开 `http://127.0.0.1:18090/`。密钥只在后端内存，前端只持有短期身份。
+`examples/marketplace/server.py` 和同目录index.html是可运行的买家/店主联调示例，仅允许本机服务，模拟登录不是生产认证。先启动隔离通语API，再在进程环境配置DEMO_ADMIN_EMAIL、DEMO_ADMIN_PASSWORD和可选TONGYU_URL；运行 `python examples/marketplace/server.py` 后打开 `http://127.0.0.1:18090/`。密钥只在后端内存，前端只持有短期身份。
 
 `cmd/commerce-load`是可重复千人在线压测工具。必须显式配置LOAD_DATABASE_URL（数据库名以_test结尾）、LOAD_URLS（两个本机测试实例，逗号分隔）、LOAD_TOKEN_SECRET（与测试实例相同）、可选LOAD_REPORT。它写入隔离租户、1000名成员，建立1000条真实WebSocket连接，广播20条消息，验证20000次通知、1000次历史查询/已读上报、100次重连补拉；保持在线至少60秒。结果是此场景的实测值，不代表生产上限、长时间稳定性或任意消息吞吐。
 
-Go回归测试使用独立RELAYDESK_TEST_DATABASE，先完成迁移；不要与正在运行的联调API共用数据库，否则后台接待通知任务可能并发消费测试数据。检索测试自动初始化演示知识库。消息幂等校验绑定发送者及消息用途，复用内部备注的标识不能把备注正文返回给访客。
+Go回归测试使用独立TONGYU_TEST_DATABASE，先完成迁移；不要与正在运行的联调API共用数据库，否则后台接待通知任务可能并发消费测试数据。检索测试自动初始化演示知识库。消息幂等校验绑定发送者及消息用途，复用内部备注的标识不能把备注正文返回给访客。
 
-Flutter的sports_new本次只接客服：通过RELAYDESK_ENDPOINT、RELAYDESK_INBOX_KEY构建参数启用原生客服页，首页客服入口不再依赖旧客服查询；未配置时继续原有入口。当前配置接入是匿名咨询，缓存按当前业务用户隔离；关联正式账号需宿主后端签发identityToken，再传入RelayDeskServicePage，不能把业务userId当聊天凭证。App原有店主、群聊、订单业务保持原路径，后续再接。独立客服预览入口为apps/sports_new/lib/relaydesk_service_preview.dart；它与正式入口共用组件，用于不启动登录/支付业务的验收。已做浏览器收发和回执联调，原生手机真机权限/网络验收需对应设备。
+Flutter的sports_new本次只接客服：通过TONGYU_ENDPOINT、TONGYU_INBOX_KEY构建参数启用原生客服页，首页客服入口不再依赖旧客服查询；未配置时继续原有入口。当前配置接入是匿名咨询，缓存按当前业务用户隔离；关联正式账号需宿主后端签发identityToken，再传入TongYuServicePage，不能把业务userId当聊天凭证。App原有店主、群聊、订单业务保持原路径，后续再接。独立客服预览入口为apps/sports_new/lib/tongyu_service_preview.dart；它与正式入口共用组件，用于不启动登录/支付业务的验收。已做浏览器收发和回执联调，原生手机真机权限/网络验收需对应设备。
 
 ## 后续开发者中心
 
@@ -102,16 +102,16 @@ Flutter的sports_new本次只接客服：通过RELAYDESK_ENDPOINT、RELAYDESK_IN
 2. 身份票据已实现企业、入口和客户 ID 绑定；下一阶段增加独立应用层、票据撤销和细粒度权限。
 3. 提供 Android、iOS、Flutter 与 Web 的轻量 SDK / 接入示例，统一登录、重连、增量补拉、消息幂等、已读、附件上传与错误码。SDK 不绕开服务端鉴权和权限规则。
 4. 开发者控制台显示 API Key 的权限与最近使用、Webhook 订阅 / 投递 / 重放、调用用量、沙箱测试入口及可复制的中文接入代码。
-5. 真正对接腾讯 IM 等外部通道时，通过独立适配器完成双向身份映射、消息 ID 去重、回调验签和失败补偿；不把第三方的 UserSig 或回调格式混进连语客服核心会话模型。
+5. 真正对接腾讯 IM 等外部通道时，通过独立适配器完成双向身份映射、消息 ID 去重、回调验签和失败补偿；不把第三方的 UserSig 或回调格式混进通语客服核心会话模型。
 
 腾讯云文档参考：[REST API 简介](https://cloud.tencent.com/document/product/269/1519)、[第三方回调与安全](https://cloud.tencent.com/document/product/269/1522)。以上“下一阶段”尚未实现，不能将现有 Open API 当作可直接运行的腾讯 IM SDK。
 
 
 ### Flutter 复用 SaaS 完整页面（2026-10-14）
 
-用户端 `sports_new` 与店主端 `sports_shop` 的客服入口统一承载 `/h5/{inboxKey}?source=APP`，不重新实现聊天界面。商城后端 `/system/relaydesk/session/support` 或 `/shop` 返回 `h5Url` 和短期 `identityToken`；`/staff` 返回 `/console/?embedded=1` 与店员会话票据。服务端密钥仅配置在商城后端。
+用户端 `sports_new` 与店主端 `sports_shop` 的客服入口统一承载 `/h5/{inboxKey}?source=APP`，不重新实现聊天界面。商城后端 `/system/tongyu/session/support` 或 `/shop` 返回 `h5Url` 和短期 `identityToken`；`/staff` 返回 `/console/?embedded=1` 与店员会话票据。服务端密钥仅配置在商城后端。
 
-Web 宿主以精确 `parentOrigin` 和 iframe 来源验证桥消息；身份以 `authenticate` 指令传入，不进入 URL 或持久存储。店主工作台验证票据后使用当前店铺租户，宿主会话不恢复普通工作台保存的账号。返回事件为 `{source:"relaydesk",type:"close"}`。App 使用 WebView 桥并由系统提示用户授权录音或拍摄。
+Web 宿主以精确 `parentOrigin` 和 iframe 来源验证桥消息；身份以 `authenticate` 指令传入，不进入 URL 或持久存储。店主工作台验证票据后使用当前店铺租户，宿主会话不恢复普通工作台保存的账号。返回事件为 `{source:"tongyu",type:"close"}`。App 使用 WebView 桥并由系统提示用户授权录音或拍摄。
 
 本机完整客服预览：18092；用户 App：18093；店主 App：18094；原彩站客服 H5 与对应工作台均为 8080。本机模拟商城双端完整 H5/工作台身份联调为 18090，连接隔离测试 SaaS 18080。两组服务的账号和会话不可混用。
 

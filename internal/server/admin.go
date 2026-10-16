@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/relaydesk/relaydesk/internal/auth"
+	"github.com/tongyu/tongyu/internal/auth"
 )
 
 // registerAdmin is the tenant administration API. Everything here is reachable
@@ -99,7 +99,7 @@ func (a *API) adminTenant(w http.ResponseWriter, r *http.Request, p auth.Princip
 		return
 	}
 	var agents, inboxes, conversations int
-	_ = a.db.QueryRow(r.Context(), `select count(*)::int from agent where tenant_id=$1 and email <> 'bot@relaydesk.local'`, p.TenantID).Scan(&agents)
+	_ = a.db.QueryRow(r.Context(), `select count(*)::int from agent where tenant_id=$1 and email <> 'bot@tongyu.local'`, p.TenantID).Scan(&agents)
 	_ = a.db.QueryRow(r.Context(), `select count(*)::int from inbox where tenant_id=$1`, p.TenantID).Scan(&inboxes)
 	_ = a.db.QueryRow(r.Context(), `select count(*)::int from conversation where tenant_id=$1`, p.TenantID).Scan(&conversations)
 	respond(w, 200, map[string]any{
@@ -644,8 +644,8 @@ func (a *API) adminSnippet(w http.ResponseWriter, r *http.Request, p auth.Princi
 		"openApiBase": base + "/api/v1/open",
 		"hostNotes": []string{
 			"网站脚本：把 script 贴进页面即可",
-			"业务系统 iframe：用 iframeHtml，或自行指向 iframe URL 并监听 window.message（source=relaydesk）",
-			"服务端对接：创建 API Key 后以 X-RelayDesk-Key 调用 openApiBase",
+			"业务系统 iframe：用 iframeHtml，或自行指向 iframe URL 并监听 window.message（source=tongyu）",
+			"服务端对接：创建 API Key 后以 X-TongYu-Key 调用 openApiBase",
 		},
 	})
 }
@@ -661,7 +661,7 @@ func (a *API) adminAgents(w http.ResponseWriter, r *http.Request, p auth.Princip
 		  from agent ag
 		  left join agent_presence ap on ap.agent_id = ag.id
 		  left join agent_inbox ai on ai.agent_id = ag.id
-		 where ag.tenant_id = $1 and ag.email <> 'bot@relaydesk.local'
+		 where ag.tenant_id = $1 and ag.email <> 'bot@tongyu.local'
 		 group by ag.id, ap.status
 		 order by ag.created_at`, p.TenantID)
 	if err != nil {
@@ -767,7 +767,7 @@ func (a *API) createPlatformAgent(w http.ResponseWriter, r *http.Request, p auth
 		fail(w, 500, "读取席位失败")
 		return
 	}
-	_ = tx.QueryRow(r.Context(), `select count(*) from agent where tenant_id=$1 and status='ACTIVE' and email<>'bot@relaydesk.local'`, p.TenantID).Scan(&usedSeats)
+	_ = tx.QueryRow(r.Context(), `select count(*) from agent where tenant_id=$1 and status='ACTIVE' and email<>'bot@tongyu.local'`, p.TenantID).Scan(&usedSeats)
 	if usedSeats >= seatLimit {
 		failCode(w, 409, "SEAT_LIMIT_REACHED", errSeatLimit(seatLimit).Error())
 		return
@@ -864,7 +864,7 @@ func (a *API) adminUpdateAgent(w http.ResponseWriter, r *http.Request, p auth.Pr
 	}
 	if status == "ACTIVE" && previousStatus != "ACTIVE" {
 		var used int
-		_ = tx.QueryRow(r.Context(), `select count(*) from agent where tenant_id=$1 and status='ACTIVE' and email<>'bot@relaydesk.local'`, p.TenantID).Scan(&used)
+		_ = tx.QueryRow(r.Context(), `select count(*) from agent where tenant_id=$1 and status='ACTIVE' and email<>'bot@tongyu.local'`, p.TenantID).Scan(&used)
 		if used >= limit {
 			failCode(w, 409, "SEAT_LIMIT_REACHED", errSeatLimit(limit).Error())
 			return
@@ -1064,7 +1064,7 @@ func (a *API) checkSeatLimit(r *http.Request, tenantID uuid.UUID) error {
 	}
 	var used int
 	_ = a.db.QueryRow(r.Context(), `select count(*)::int from agent
-		where tenant_id=$1 and status='ACTIVE' and email <> 'bot@relaydesk.local'`, tenantID).Scan(&used)
+		where tenant_id=$1 and status='ACTIVE' and email <> 'bot@tongyu.local'`, tenantID).Scan(&used)
 	if used >= limit {
 		return errSeatLimit(limit)
 	}
@@ -1339,7 +1339,7 @@ func (a *API) adminTestWebhook(w http.ResponseWriter, r *http.Request, p auth.Pr
 		values($1,$2,$3,'webhook.test',$4,'PENDING', now())`,
 		uuid.New(), id, p.TenantID, map[string]any{
 			"test": true, "tenantId": p.TenantID, "sentAt": nowUTC(),
-			"message": "这是一条 RelayDesk 测试回调",
+			"message": "这是一条 TongYu 测试回调",
 		}); err != nil {
 		fail(w, 500, "创建测试回调失败")
 		return

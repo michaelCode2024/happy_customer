@@ -1,10 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import 'package:relaydesk_agent_console/src/state/session_controller.dart';
-import 'package:relaydesk_agent_console/src/ui/error_banner.dart';
-import 'package:relaydesk_agent_console/src/ui/login_shell.dart';
-import 'package:relaydesk_agent_console/src/util/server_hint.dart';
+import 'package:tongyu_agent_console/src/state/session_controller.dart';
+import 'package:tongyu_agent_console/src/ui/error_banner.dart';
+import 'package:tongyu_agent_console/src/ui/login_shell.dart';
+import 'package:tongyu_agent_console/src/util/server_hint.dart';
 
 /// 客服工作台登录。
 ///

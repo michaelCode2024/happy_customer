@@ -4,10 +4,10 @@ import '../util/push_bridge_stub.dart'
 
 import 'package:flutter/foundation.dart';
 
-import 'package:relaydesk_agent_console/src/api/api_exception.dart';
-import 'package:relaydesk_agent_console/src/api/models.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
-import 'package:relaydesk_agent_console/src/state/credential_store.dart';
+import 'package:tongyu_agent_console/src/api/api_exception.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
+import 'package:tongyu_agent_console/src/state/credential_store.dart';
 
 /// How long a stored session is trusted locally before the console asks for a
 /// password again.
@@ -28,7 +28,7 @@ enum SessionPhase {
 }
 
 /// Owns the session: who is signed in, where the server is, and the one
-/// [RelayDeskApi] the rest of the app talks through.
+/// [TongYuApi] the rest of the app talks through.
 ///
 /// The token is deliberately never exposed to widgets. Everything that needs the
 /// server goes through [api], which already carries the bearer header, so there
@@ -36,14 +36,14 @@ enum SessionPhase {
 class SessionController extends ChangeNotifier {
   SessionController({
     CredentialStore? store,
-    RelayDeskApi Function(String server)? apiFactory,
+    TongYuApi Function(String server)? apiFactory,
   })  : _store = store ?? const PreferencesCredentialStore(),
-        _apiFactory = apiFactory ?? ((server) => RelayDeskApi(server: server));
+        _apiFactory = apiFactory ?? ((server) => TongYuApi(server: server));
 
   final CredentialStore _store;
-  final RelayDeskApi Function(String server) _apiFactory;
+  final TongYuApi Function(String server) _apiFactory;
 
-  RelayDeskApi? _api;
+  TongYuApi? _api;
   StoredSession? _session;
   SessionPhase _phase = SessionPhase.booting;
   String? _error;
@@ -68,7 +68,7 @@ class SessionController extends ChangeNotifier {
 
   bool get busy => _busy;
 
-  RelayDeskApi get api {
+  TongYuApi get api {
     final instance = _api;
     if (instance == null) {
       throw StateError('尚未选择服务器');
@@ -134,7 +134,7 @@ class SessionController extends ChangeNotifier {
     required String password,
     required String tenantSlug,
   }) async {
-    final origin = RelayDeskApi.normalizeServer(server);
+    final origin = TongYuApi.normalizeServer(server);
     if (origin.isEmpty) {
       _error = '请填写服务器地址';
       _notify();
@@ -308,7 +308,7 @@ class SessionController extends ChangeNotifier {
     _notify();
   }
 
-  Future<void> _clearRejectedSession(RelayDeskApi api) async {
+  Future<void> _clearRejectedSession(TongYuApi api) async {
     api.onSessionRejected = null;
     await disableBackgroundAlerts();
     await api.clearOfflineData();

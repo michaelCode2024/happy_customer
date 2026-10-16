@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:relaydesk_agent_console/src/util/labels.dart';
+import 'package:tongyu_agent_console/src/util/labels.dart';
 
 void main() {
   test('business codes are displayed in Chinese without changing API values',

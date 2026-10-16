@@ -14,7 +14,7 @@
 本文所有 example.com 地址、用户编号与凭证均为示例。实际域名、入口和套餐须使用管理员提供的开通配置。
 API Key 只配置在业务后端；不得写入网页、Flutter 构建参数、App 安装包、URL 或日志。
 inboxKey 是公开入口标识，不是密钥；identityToken 是短期身份票据，不是聊天接口的 Bearer Token。
-普通租户密钥使用 X-RelayDesk-Key，商城密钥使用 X-RelayDesk-Marketplace-Key，两者不可互换。
+普通租户密钥使用 X-TongYu-Key，商城密钥使用 X-TongYu-Marketplace-Key，两者不可互换。
 
 二、推荐接入流程
 
@@ -32,7 +32,7 @@ inboxKey 是公开入口标识，不是密钥；identityToken 是短期身份票
 
 POST {BASE_URL}/api/v1/open/visitor-identity
 请求头：
-X-RelayDesk-Key: <SERVER_API_KEY>
+X-TongYu-Key: <SERVER_API_KEY>
 Content-Type: application/json
 
 请求体：
@@ -72,14 +72,14 @@ GET /api/customer-service/session
 下例由网站自己的后端提供 /api/customer-service/session。
 将 chat.example.com 与入口替换为实际配置。parentOrigin 必须是宿主精确 Origin；使用 * 时无法交接登录身份。
 
-<iframe id="relaydesk" title="在线客服"
+<iframe id="tongyu" title="在线客服"
   allow="microphone; camera; clipboard-write"
   style="width:100%;height:650px;border:0"></iframe>
 
 <script>
 (async () => {
   const chatOrigin = 'https://chat.example.com';
-  const frame = document.getElementById('relaydesk');
+  const frame = document.getElementById('tongyu');
   const response = await fetch('/api/customer-service/session', {
     credentials: 'same-origin', cache: 'no-store'
   });
@@ -97,7 +97,7 @@ GET /api/customer-service/session
     if (typeof data === 'string') {
       try { data = JSON.parse(data); } catch { return; }
     }
-    if (!data || data.source !== 'relaydesk') return;
+    if (!data || data.source !== 'tongyu') return;
     if (data.type === 'close') {
       // 在这里隐藏客服容器或返回业务页面。
     }
@@ -121,7 +121,7 @@ GET /api/customer-service/session
 say 会实际发送消息，请只在用户明确触发时使用，并等待聊天身份初始化完成。
 
 页面回传事件格式：
-{ "source": "relaydesk", "type": "close" }
+{ "source": "tongyu", "type": "close" }
 其他事件包括 ready、open、message、sent、unread、resize、error，data 随事件变化。
 HTTP iframe 跨域策略、服务端 FRAME_ANCESTORS、ALLOWED_ORIGINS 和实际页面来源必须配套配置。
 
@@ -136,14 +136,14 @@ Android/iOS WebView：需要配置原生桥，将指令送至组件 bridge.onMes
 桥接协议为上述 authenticate、close 等 JSON；具体注入方式需按项目所用 WebView 插件和页面适配器实现。
 接入方应根据所用 WebView 插件完成原生消息桥适配，并验证身份交接和页面返回。
 
-App 收到 source=relaydesk、type=close 时返回上一业务页面。
+App 收到 source=tongyu、type=close 时返回上一业务页面。
 用户退出或切换账号时销毁旧客服页面及身份，重新获取当前用户票据，避免复用上一个客户的聊天状态。
 录音和拍照需要系统权限及 WebView 权限回调；线上使用 HTTPS。附件、键盘遮挡、安全区、返回按钮需真机验收。
 
 六、商城店铺与店员接入（按需启用）
 
 商城密钥由平台管理员创建商城时签发。以下请求均由商城后端发起：
-X-RelayDesk-Marketplace-Key: <MARKETPLACE_SERVER_KEY>
+X-TongYu-Marketplace-Key: <MARKETPLACE_SERVER_KEY>
 Content-Type: application/json
 
 1. 创建或更新店铺
@@ -203,7 +203,7 @@ POST /{id}/dissolve：解散群。
 店员用客服 token 调用 POST /api/v1/marketplace/staff/groups/{id}/session。
 返回 token、groupId、visitorId、expiresIn:3600，使用群会话 token 访问群消息接口。
 群页面 /groups.html?groupId=<ID>&embed=1&parentOrigin=<精确宿主Origin>。
-父页交接：{ "type": "relaydesk.group.authenticate", "groupId": "<ID>", "token": "<GROUP_TOKEN>" }。
+父页交接：{ "type": "tongyu.group.authenticate", "groupId": "<ID>", "token": "<GROUP_TOKEN>" }。
 群会话与访客票据不可混用。
 
 八、商品与订单卡片（按需启用）
@@ -237,7 +237,7 @@ title 为 1～120 字；amountMinor 为非负整数，最大 9007199254740991，
 
 九、开放 API 与消息同步
 
-普通租户后端使用 X-RelayDesk-Key：
+普通租户后端使用 X-TongYu-Key：
 GET /api/v1/open/me：检查当前租户与密钥。
 GET /api/v1/open/conversations：会话列表。
 GET /api/v1/open/conversations/{id}：会话详情。
@@ -260,7 +260,7 @@ sequence 必须大于 0；游标只前进。后端验证 readerId 与当前用�
 十、Webhook（按需启用）
 
 管理员配置回调地址、密钥及订阅事件，如 message.created、message.agent、conversation.read、conversation.delivered。
-请求头：X-RelayDesk-Event、X-RelayDesk-Delivery、X-RelayDesk-Timestamp、X-RelayDesk-Signature。
+请求头：X-TongYu-Event、X-TongYu-Delivery、X-TongYu-Timestamp、X-TongYu-Signature。
 签名原文：<timestamp>.<原始请求体>。
 算法：HMAC-SHA256；签名头格式 sha256=<十六进制签名>。
 使用原始请求体字节验签，采用常量时间比较，检查时间窗口，并按投递 ID 幂等。

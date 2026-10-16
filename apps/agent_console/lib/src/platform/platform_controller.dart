@@ -2,10 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import 'package:relaydesk_agent_console/src/api/api_exception.dart';
-import 'package:relaydesk_agent_console/src/platform/platform_api.dart';
-import 'package:relaydesk_agent_console/src/platform/platform_models.dart';
-import 'package:relaydesk_agent_console/src/state/credential_store.dart';
+import 'package:tongyu_agent_console/src/api/api_exception.dart';
+import 'package:tongyu_agent_console/src/platform/platform_api.dart';
+import 'package:tongyu_agent_console/src/platform/platform_models.dart';
+import 'package:tongyu_agent_console/src/state/credential_store.dart';
 
 /// Which screen the operations console is showing.
 enum PlatformPhase { booting, locked, signingIn, ready }

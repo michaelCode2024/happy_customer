@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:relaydesk_agent_console/src/api/models.dart';
-import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
 
 /// 跨页面保留接待入口；仅显式点击查看才导航，不抢走客服当前的会话。
 class ReceptionGuidance extends StatelessWidget {

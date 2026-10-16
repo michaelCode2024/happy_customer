@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import '../api/relaydesk_api.dart';
+import '../api/tongyu_api.dart';
 
 final _conversationEvents = StreamController<String>.broadcast();
 Stream<String> notificationConversationEvents() {
@@ -24,7 +24,7 @@ Future<String?> initialNotificationConversation() async {
   }
 }
 
-Future<String> disableBackgroundPush(RelayDeskApi api) async {
+Future<String> disableBackgroundPush(TongYuApi api) async {
   await disableBackgroundAlerts();
   return '后台接待提醒已关闭';
 }
@@ -38,7 +38,7 @@ Future<void> disableBackgroundAlerts() async {
   }
 }
 
-Future<String> enableBackgroundPush(RelayDeskApi api) async {
+Future<String> enableBackgroundPush(TongYuApi api) async {
   if (defaultTargetPlatform != TargetPlatform.android)
     return '此设备请使用网页版开启浏览器通知';
   try {

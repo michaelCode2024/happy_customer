@@ -6,14 +6,14 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 from urllib.parse import urlparse
 
-BASE = os.environ.get('RELAYDESK_URL', 'http://127.0.0.1:18080').rstrip('/')
+BASE = os.environ.get('TONGYU_URL', 'http://127.0.0.1:18080').rstrip('/')
 if urlparse(BASE).hostname not in ('127.0.0.1', 'localhost'):
     raise RuntimeError('联调示例只允许本机服务，不能用模拟账号对接生产环境')
 sessions = {}
 groups = {}
 def call(method, path, body=None, key=None, token=None):
     headers = {'Content-Type': 'application/json'}
-    if key: headers['X-RelayDesk-Marketplace-Key'] = key
+    if key: headers['X-TongYu-Marketplace-Key'] = key
     if token: headers['Authorization'] = 'Bearer ' + token
     request = Request(BASE + path, data=json.dumps(body or {}).encode() if method != 'GET' else None, headers=headers, method=method)
     with urlopen(request, timeout=20) as response: return json.load(response)

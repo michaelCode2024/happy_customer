@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/relaydesk/relaydesk/internal/auth"
+	"github.com/tongyu/tongyu/internal/auth"
 )
 
 func (a *API) groupNickname(w http.ResponseWriter, r *http.Request, p auth.Principal) {
@@ -140,7 +140,7 @@ func (a *API) groupCalls(w http.ResponseWriter, r *http.Request, p auth.Principa
 	ice := []any{}
 	// Deployers provide their own STUN/TURN configuration; no third-party
 	// server receives network metadata by default.
-	if raw := os.Getenv("RELAYDESK_RTC_ICE_SERVERS"); raw != "" {
+	if raw := os.Getenv("TONGYU_RTC_ICE_SERVERS"); raw != "" {
 		json.Unmarshal([]byte(raw), &ice)
 	}
 	respond(w, 200, map[string]any{"items": items, "iceServers": ice})

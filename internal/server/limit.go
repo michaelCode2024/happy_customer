@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/relaydesk/relaydesk/internal/auth"
-	"github.com/relaydesk/relaydesk/internal/ratelimit"
+	"github.com/tongyu/tongyu/internal/auth"
+	"github.com/tongyu/tongyu/internal/ratelimit"
 )
 
 // limit wraps a public handler with a per-caller token bucket. Callers are
@@ -25,7 +25,7 @@ func (a *API) limit(limiter *ratelimit.Limiter, next http.HandlerFunc) http.Hand
 }
 
 func rateKey(r *http.Request) string {
-	if key := r.Header.Get("X-RelayDesk-Marketplace-Key"); key != "" {
+	if key := r.Header.Get("X-TongYu-Marketplace-Key"); key != "" {
 		return "marketplace:" + hex.EncodeToString(auth.HashToken(key))
 	}
 	if token := bearer(r); token != "" {
@@ -37,7 +37,7 @@ func rateKey(r *http.Request) string {
 	return "ip:" + clientIP(r)
 }
 
-// clientIP trusts the left-most X-Forwarded-For entry because RelayDesk is
+// clientIP trusts the left-most X-Forwarded-For entry because TongYu is
 // expected to run behind a reverse proxy or platform load balancer.
 func clientIP(r *http.Request) string {
 	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {

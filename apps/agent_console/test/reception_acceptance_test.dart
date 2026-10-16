@@ -3,11 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
-import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
-import 'package:relaydesk_agent_console/src/theme.dart';
-import 'package:relaydesk_agent_console/src/ui/chat_panel.dart';
-import 'package:relaydesk_agent_console/src/util/attachment_picker.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
+import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
+import 'package:tongyu_agent_console/src/theme.dart';
+import 'package:tongyu_agent_console/src/ui/chat_panel.dart';
+import 'package:tongyu_agent_console/src/util/attachment_picker.dart';
 
 class _Picker implements AttachmentPicker {
   @override
@@ -41,7 +41,7 @@ void main() {
                 accepted ? null : '2099-10-12T06:01:00Z',
             'acceptedAt': accepted ? '2026-10-12T06:00:00Z' : null
           };
-      final api = RelayDeskApi(
+      final api = TongYuApi(
           server: 'http://localhost',
           client: MockClient((r) async {
             Object body = {};
@@ -108,7 +108,7 @@ void main() {
             'acceptedAt': claimed ? '2026-10-14T12:00:00Z' : null,
             'assignmentExpiresAt': null,
           };
-      final api = RelayDeskApi(
+      final api = TongYuApi(
           server: 'http://localhost',
           client: MockClient((r) async {
             Object body = {};
@@ -173,7 +173,7 @@ void main() {
             'acceptedAt': '2026-10-14T12:00:00Z',
             'assignmentExpiresAt': null,
           };
-      final api = RelayDeskApi(
+      final api = TongYuApi(
           server: 'http://localhost',
           client: MockClient((r) async {
             Object body = {};
@@ -245,7 +245,7 @@ void main() {
             'assigneeName': '客服甲',
             'acceptedAt': '2026-10-14T12:00:00Z',
           };
-      final api = RelayDeskApi(
+      final api = TongYuApi(
           server: 'http://localhost',
           client: MockClient((r) async {
             Object body = {};

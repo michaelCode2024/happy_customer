@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/relaydesk/relaydesk/internal/realtime"
+	"github.com/tongyu/tongyu/internal/realtime"
 )
 
 func receptionNotice(ctx context.Context, tx pgx.Tx, tenant, conversation uuid.UUID, content, state string) error {

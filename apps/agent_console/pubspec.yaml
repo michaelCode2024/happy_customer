@@ -1,5 +1,5 @@
-name: relaydesk_agent_console
-description: RelayDesk cross-platform agent and operations console.
+name: tongyu_agent_console
+description: TongYu cross-platform agent and operations console.
 publish_to: none
 version: 0.1.0+1
 

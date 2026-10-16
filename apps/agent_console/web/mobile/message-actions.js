@@ -7,19 +7,58 @@ async function forwardMessage(id){await post(threadPath()+'/messages/'+state.sel
 async function pinnedSheet(){const r=await api(threadPath()+'/pins');sheet('置顶消息',(r.items||[]).map(m=>`<div class="note-card">${esc(m.content)}<div class="small muted">${time(m.createdAt)}</div></div>`).join('')||empty('没有置顶消息'))}
 function searchMessagesSheet(){sheet('搜索当前会话','<div class="search"><input aria-label="搜索消息" id="message-query" placeholder="输入消息关键词"></div><button class="secondary" onclick="runAction(searchMessages)">搜索</button><div id="message-results"></div>')}
 async function searchMessages(){const q=$('message-query').value.trim();if(!q)return;const r=await api(threadPath()+'/search?q='+encodeURIComponent(q));$('message-results').innerHTML=(r.items||[]).map(m=>`<div class="note-card">${esc(m.content)}<div class="small muted">${time(m.createdAt)}</div></div>`).join('')||empty('没有找到相关消息')}
-async function enablePush(){toast(await window.tongyuEnablePush(location.origin,state.session.token))}
-async function disablePush(){await window.tongyuDisablePush(location.origin,state.session.token);toast('后台提醒已关闭')}
-function pushSheet(){sheet('消息提醒',sheetOption('bell','开启后台消息提醒','runAction(enablePush)')+sheetOption('bell','关闭本机后台提醒','runAction(disablePush)')+sheetOption('clock','免打扰一小时',"runAction(async()=>{await post(C+'/notifications/quiet',{minutes:60});closeSheet();toast('已开启一小时免打扰')})")+sheetOption('bell','结束免打扰',"runAction(async()=>{await post(C+'/notifications/quiet',{minutes:0});closeSheet();toast('已结束免打扰')})"))}
-function desktopWorkspace(){location.href='/console/?surface=agent&layout=desktop'}
+function notificationPreferences(){
+  const scope=sessionScope();
+  if(!state.notificationPrefs||state.notificationPrefs.scope!==scope)state.notificationPrefs={scope,pushEnabled:false,pushReady:false,pushLoading:true,pushBusy:false,pushError:'',quietUntil:readStore(cachePrefix()+'quietUntil'),quietLoading:true,quietBusy:false,quietError:'',checkedAt:0};
+  return state.notificationPrefs;
+}
+function notificationSwitch(label,description,enabled,busy,action,kind='bell',disabled=false){return `<button class="notification-switch" type="button" role="switch" aria-label="${esc(label)}" aria-checked="${!!enabled}" aria-busy="${!!busy}" title="${enabled?'关闭':'开启'}${esc(label)}" ${busy||disabled?'disabled':''} onclick="${action}">${icon(kind)}<span class="notification-setting-copy"><strong>${esc(label)}</strong><small>${esc(description)}</small></span><span class="notification-control"><span class="notification-state">${busy?'处理中…':enabled?'已开启':'已关闭'}</span><span class="toggle ${enabled?'on':''}" aria-hidden="true"></span></span></button>`}
+function notificationPreferencesBody(){const p=notificationPreferences(),quiet=Date.parse(p.quietUntil)>Date.now();return notificationSwitch('系统通知','接收锁屏与后台提醒，通知声音由系统设置控制。',p.pushEnabled,p.pushBusy||p.pushLoading,'toggleSystemNotifications()','bell',!p.pushReady)+`<div class="notification-feedback" role="status" aria-live="polite">${p.pushLoading?'正在检查本机通知状态…':esc(p.pushError)}${p.pushError?'<button type="button" onclick="refreshNotificationSettings(true)">重新检查</button>':''}</div>`+notificationSwitch('页面消息声音','在当前页面收到客户消息时播放提示音。',readStore('tongyu.mobile.sound',false),false,'toggleSound()')+notificationSwitch('免打扰',quiet?'已暂停提醒，将于 '+time(p.quietUntil)+' 自动恢复。':'开启后暂停提醒一小时，也可以随时关闭。',quiet,p.quietBusy||p.quietLoading,'toggleQuietNotifications()','moon',!!p.quietError)+(p.quietError?`<p class="notification-feedback" role="status">${esc(p.quietError)}<button type="button" onclick="refreshNotificationSettings(true)">重新检查</button></p>`:'')}
+function notificationSettingsPanel(){return `<div id="notification-preferences">${notificationPreferencesBody()}</div>`}
+function paintNotificationPreferences(){const panel=$('notification-preferences');if(!panel)return;const label=panel.contains(document.activeElement)?document.activeElement.getAttribute('aria-label'):null;panel.innerHTML=notificationPreferencesBody();if(label)[...panel.querySelectorAll('[role="switch"]')].find(el=>el.getAttribute('aria-label')===label)?.focus()}
+async function refreshNotificationSettings(force=false){
+  if(!$('notification-preferences')||!state.session?.token)return;
+  const p=notificationPreferences();if(p.refreshing||p.pushBusy||p.quietBusy||!force&&Date.now()-p.checkedAt<15000)return;
+  p.refreshing=true;p.pushLoading=true;p.quietLoading=true;paintNotificationPreferences();const token=state.session.token;
+  const current=()=>state.session?.token===token&&state.notificationPrefs===p;
+  await Promise.allSettled([
+    (async()=>{try{await window.tongyuPreparePush(location.origin,token);if(!current())return;p.pushEnabled=window.tongyuPushStatus().stage==='enabled';p.pushReady=true;p.pushError=''}catch(error){if(current()){p.pushReady=false;if(window.Notification?.permission==='denied')p.pushEnabled=false;p.pushError=error.message}}finally{if(current()){p.pushLoading=false;paintNotificationPreferences()}}})(),
+    (async()=>{try{const result=await api(C+'/notifications');if(!current())return;p.quietUntil=result.quietUntil;p.quietError='';writeStore(cachePrefix()+'quietUntil',p.quietUntil)}catch(error){if(current())p.quietError=error.message}finally{if(current()){p.quietLoading=false;paintNotificationPreferences()}}})()
+  ]);
+  if(current()){p.checkedAt=Date.now();p.refreshing=false}
+}
+async function toggleSystemNotifications(){
+  const p=notificationPreferences();if(p.pushBusy||p.pushLoading||!p.pushReady)return;
+  const enabled=p.pushEnabled,token=state.session.token;p.pushBusy=true;p.pushError='';
+  try{
+    const request=enabled?window.tongyuDisablePush(location.origin,token):window.tongyuEnablePush(location.origin,token);
+    paintNotificationPreferences();await request;if(state.session?.token!==token)return;
+    p.pushEnabled=!enabled;p.pushReady=true;
+  }catch(error){if(state.session?.token===token)p.pushError=error.message}
+  finally{if(state.session?.token===token){p.pushBusy=false;paintNotificationPreferences()}}
+}
+async function toggleQuietNotifications(){
+  const p=notificationPreferences();if(p.quietBusy||p.quietLoading)return;const token=state.session.token;
+  const quiet=Date.parse(p.quietUntil)>Date.now();p.quietBusy=true;paintNotificationPreferences();
+  try{const result=await post(C+'/notifications/quiet',{minutes:quiet?0:60});if(state.session?.token!==token)return;p.quietUntil=result.quietUntil;p.quietError='';writeStore(cachePrefix()+'quietUntil',p.quietUntil)}catch(error){if(state.session?.token===token)p.quietError=error.message}
+  finally{if(state.session?.token===token){p.quietBusy=false;paintNotificationPreferences()}}
+}
+function pushSheet(){closeSheet();state.settingsSection=0;go('settings')}
+function enablePush(){return toggleSystemNotifications()}
+function disablePush(){if(notificationPreferences().pushEnabled)return toggleSystemNotifications()}
+window.addEventListener('focus',()=>refreshNotificationSettings(true));
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')refreshNotificationSettings(true)});
+window.addEventListener('storage',event=>{if(event.key===cachePrefix()+'quietUntil'){notificationPreferences().quietUntil=readStore(event.key);paintNotificationPreferences()}if(event.key==='tongyu.mobile.sound')paintNotificationPreferences()});
+setInterval(()=>{if($('notification-preferences'))paintNotificationPreferences()},30000);
 async function putAutomation(config){await api(A+'/inboxes/'+state.automationInbox+'/automation',{method:'PUT',body:{config,revision:state.automation.revision}});closeSheet();await loadAutomation();toast('规则已保存')}
 async function toggleAutomation(){await putAutomation({...state.automation.config,enabled:!state.automation.config.enabled})}
 function editAutomationText(key,title){state.autoKey=key;sheet(title,`<textarea id="auto-text" class="field" rows="6">${esc(state.automation.config[key])}</textarea><button class="primary" style="margin-top:20px" onclick="runAction(()=>putAutomation({...state.automation.config,[state.autoKey]:$('auto-text').value}))">保存规则</button>`)}
 function editAutomationRule(index=-1){state.autoRuleIndex=index;const r=state.automation?.config.keywordRules?.[index]||{};sheet(index<0?'新增关键词规则':'编辑关键词规则',`<label class="field-label">规则名称</label><input class="field" id="rule-title" value="${esc(r.title)}"><label class="field-label">关键词（用逗号分隔）</label><input class="field" id="rule-keys" value="${esc((r.keywords||[]).join('，'))}"><label class="field-label">回复内容</label><textarea class="field" id="rule-reply" rows="4">${esc(r.reply)}</textarea><label class="list-row"><input type="checkbox" id="rule-enabled" ${r.enabled===false?'':'checked'}>启用规则</label><button class="primary" onclick="runAction(saveAutomationRule)">保存规则</button>`)}
 async function saveAutomationRule(){const config=structuredClone(state.automation.config),rules=config.keywordRules||[],index=state.autoRuleIndex,old=rules[index]||{},title=$('rule-title').value.trim(),keywords=$('rule-keys').value.split(/[，,]/).map(s=>s.trim()).filter(Boolean),reply=$('rule-reply').value.trim();if(!title||!keywords.length||!reply)throw new Error('请填写规则名称、关键词和回复内容');const rule={...old,id:old.id||crypto.randomUUID(),title,keywords,reply,enabled:$('rule-enabled').checked,matchMode:old.matchMode||'CONTAINS',priority:old.priority||0};if(index>=0)rules[index]=rule;else rules.push(rule);config.keywordRules=rules;await putAutomation(config)}
 let soundContext;
-function toggleSound(){const enabled=!readStore('tongyu.mobile.sound',false);writeStore('tongyu.mobile.sound',enabled);if(enabled){try{soundContext=new(window.AudioContext||window.webkitAudioContext)();soundContext.resume();playAlert()}catch{toast('请在系统设置中允许声音')}}render()}
+function toggleSound(){const enabled=!readStore('tongyu.mobile.sound',false);writeStore('tongyu.mobile.sound',enabled);if(enabled){try{soundContext=new(window.AudioContext||window.webkitAudioContext)();soundContext.resume();playAlert()}catch{toast('请在系统设置中允许声音')}}const toggles=document.querySelectorAll('[role="switch"][aria-label="页面消息声音"]');for(const toggle of toggles){toggle.setAttribute('aria-checked',String(enabled));toggle.querySelector('.toggle')?.classList.toggle('on',enabled)}paintNotificationPreferences()}
 function playAlert(){if(!soundContext)return;const osc=soundContext.createOscillator(),gain=soundContext.createGain();gain.gain.setValueAtTime(.06,soundContext.currentTime);gain.gain.exponentialRampToValueAtTime(.001,soundContext.currentTime+.18);osc.frequency.value=880;osc.connect(gain);gain.connect(soundContext.destination);osc.start();osc.stop(soundContext.currentTime+.18)}
-async function incomingAlert(event){if(event.type!=='message.created'||event.data?.senderType!=='VISITOR')return;if(state.page==='chat'&&state.current?.id===event.conversationId&&document.visibilityState==='visible')return;const claimed=await window.tongyuClaimMessageAlert?.(event.data.id);if(claimed===false)return;toast('有新的客户消息');if(readStore('tongyu.mobile.sound',false))playAlert()}
+async function incomingAlert(event){if(Date.parse(notificationPreferences().quietUntil)>Date.now())return;if(event.type!=='message.created'||event.data?.senderType!=='VISITOR')return;if(state.page==='chat'&&state.current?.id===event.conversationId&&document.visibilityState==='visible')return;const claimed=await window.tongyuClaimMessageAlert?.(event.data.id);if(claimed===false)return;toast('有新的客户消息');if(readStore('tongyu.mobile.sound',false))playAlert()}
 function editCustomer(){sheet('编辑客户资料',`<label class="field-label">客户称呼</label><input class="field" id="customer-name" value="${esc(state.visitor?.displayName||state.current.visitorName)}"><label class="field-label">联系电话</label><input class="field" id="customer-phone" type="tel" value="${esc(state.visitor?.attributes?.phone||state.visitor?.phone)}"><label class="field-label">邮箱</label><input class="field" id="customer-email" type="email" value="${esc(state.visitor?.attributes?.email||state.visitor?.email)}"><button class="primary" style="margin-top:20px" onclick="runAction(saveCustomer)">保存资料</button>`)}
 async function saveCustomer(){const displayName=$('customer-name').value.trim(),attributes={phone:$('customer-phone').value.trim(),email:$('customer-email').value.trim()};if(!displayName)throw new Error('请填写客户称呼');await api(C+'/visitors/'+state.current.visitorId,{method:'PATCH',body:{displayName,attributes}});state.current.visitorName=displayName;closeSheet();await loadPage('profile');toast('客户资料已保存')}
 function customerTags(){sheet('客户标签',`<label class="field-label">用逗号分隔多个标签</label><input class="field" id="customer-tags" value="${esc((state.current.tags||[]).join('，'))}"><button class="primary" style="margin-top:20px" onclick="runAction(saveTags)">保存标签</button>`)}

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:relaydesk_agent_console/src/platform/create_agent_dialog.dart';
-import 'package:relaydesk_agent_console/src/platform/platform_controller.dart';
-import 'package:relaydesk_agent_console/src/state/credential_store.dart';
+import 'package:tongyu_agent_console/src/platform/create_agent_dialog.dart';
+import 'package:tongyu_agent_console/src/platform/platform_controller.dart';
+import 'package:tongyu_agent_console/src/state/credential_store.dart';
 
 void main() {
   for (final width in [390.0, 1100.0]) {

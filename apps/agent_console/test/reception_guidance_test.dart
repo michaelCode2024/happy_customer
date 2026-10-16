@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
-import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
-import 'package:relaydesk_agent_console/src/ui/reception_guidance.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
+import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
+import 'package:tongyu_agent_console/src/ui/reception_guidance.dart';
 
 void main() {
   testWidgets('历史队列不弹窗，新客户提醒不抢选择，关闭不重弹，接待后人数同步', (tester) async {
@@ -22,7 +22,7 @@ void main() {
           'acceptedAt': id == 'new' && claimed ? '2026-10-15T00:00:00Z' : null,
           'lastMessagePreview': '你好，请问有客服吗？',
         };
-    final api = RelayDeskApi(
+    final api = TongYuApi(
         server: 'http://localhost',
         client: MockClient((r) async {
           Object body = {};

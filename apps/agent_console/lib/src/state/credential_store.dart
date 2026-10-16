@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:relaydesk_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
 
 /// Where the console keeps the session between launches.
 ///
@@ -58,16 +58,16 @@ abstract class CredentialStore {
 class PreferencesCredentialStore implements CredentialStore {
   const PreferencesCredentialStore();
 
-  static const _serverKey = 'relaydesk.server';
-  static const _tokenKey = 'relaydesk.token';
-  static const _agentKey = 'relaydesk.agent';
-  static const _tenantKey = 'relaydesk.tenant';
-  static const _inboxesKey = 'relaydesk.inboxes';
-  static const _expiresKey = 'relaydesk.expiresAt';
-  static const _themeKey = 'relaydesk.themeMode';
-  static const _platformKey = 'relaydesk.platformToken';
-  static const _surfaceKey = 'relaydesk.consoleSurface';
-  static const _platformEmailKey = 'relaydesk.platformEmail';
+  static const _serverKey = 'tongyu.server';
+  static const _tokenKey = 'tongyu.token';
+  static const _agentKey = 'tongyu.agent';
+  static const _tenantKey = 'tongyu.tenant';
+  static const _inboxesKey = 'tongyu.inboxes';
+  static const _expiresKey = 'tongyu.expiresAt';
+  static const _themeKey = 'tongyu.themeMode';
+  static const _platformKey = 'tongyu.platformToken';
+  static const _surfaceKey = 'tongyu.consoleSurface';
+  static const _platformEmailKey = 'tongyu.platformEmail';
 
   @override
   Future<StoredSession?> load() async {

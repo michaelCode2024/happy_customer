@@ -1,7 +1,7 @@
 package server
 
 import (
-	"github.com/relaydesk/relaydesk/internal/config"
+	"github.com/tongyu/tongyu/internal/config"
 	"testing"
 )
 

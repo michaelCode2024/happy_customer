@@ -1248,7 +1248,7 @@ export class ChatStore {
 
   /** Publishes an event to onEvent, native bridge, and iframe parent. */
   emitHost(event: { type: string; data?: unknown }): void {
-    const envelope = { source: 'relaydesk', ...event };
+    const envelope = { source: 'tongyu', ...event };
     this.#options.onEvent?.(event as never);
     this.#options.bridge?.postMessage?.(JSON.stringify(envelope));
     if (typeof window !== 'undefined' && window.parent && window.parent !== window) {

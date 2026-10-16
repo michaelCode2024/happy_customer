@@ -1,14 +1,14 @@
-import 'package:relaydesk_agent_console/src/ui/design_a.dart';
+import 'package:tongyu_agent_console/src/ui/design_a.dart';
 import 'package:flutter/material.dart';
-import 'package:relaydesk_agent_console/src/ui/console_form_dialog.dart';
-import 'package:relaydesk_agent_console/src/util/channel_preview_stub.dart'
-    if (dart.library.html) 'package:relaydesk_agent_console/src/util/channel_preview_web.dart';
-import 'package:relaydesk_agent_console/src/ui/workspace_layout.dart';
-import 'package:relaydesk_agent_console/src/ui/error_banner.dart';
+import 'package:tongyu_agent_console/src/ui/console_form_dialog.dart';
+import 'package:tongyu_agent_console/src/util/channel_preview_stub.dart'
+    if (dart.library.html) 'package:tongyu_agent_console/src/util/channel_preview_web.dart';
+import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
+import 'package:tongyu_agent_console/src/ui/error_banner.dart';
 
-import 'package:relaydesk_agent_console/src/api/api_exception.dart';
-import 'package:relaydesk_agent_console/src/api/models.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
+import 'package:tongyu_agent_console/src/api/api_exception.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
 
 class IntegrationPage extends StatefulWidget {
   const IntegrationPage({
@@ -17,7 +17,7 @@ class IntegrationPage extends StatefulWidget {
     this.canIdentity = false,
   });
 
-  final RelayDeskApi api;
+  final TongYuApi api;
 
   /// 企业版才开 visitor-identity；旗舰及以下只展示升级说明，避免指引与接口 403 脱节。
   final bool canIdentity;
@@ -389,14 +389,14 @@ class _IntegrationPageState extends State<IntegrationPage> {
           const SizedBox(height: 12),
           _copyRow('后端申请客户身份票据',
               '''POST ${widget.api.server}/api/v1/open/visitor-identity
-X-RelayDesk-Key: <仅保存在你的后端的 APIKey>
+X-TongYu-Key: <仅保存在你的后端的 APIKey>
 Content-Type: application/json
 
 {"inboxKey":"<客服入口公钥>","externalId":"<当前登录客户ID>","displayName":"<客户昵称>"}'''),
           _copyRow(
               '你的前端加载组件', '''// /api/customer-chat-identity 由你的后端实现，并校验当前客户登录状态。
 const identity = await fetch('/api/customer-chat-identity').then(r => r.json());
-window.RelayDeskSettings = {
+window.TongYuSettings = {
   endpoint: '${widget.api.server}',
   inboxKey: identity.inboxKey,
   identityToken: identity.identityToken
@@ -412,7 +412,7 @@ document.head.appendChild(script);'''),
           const SizedBox(height: 12),
           _copyRow('按用户 ID 加入服务群',
               '''POST ${widget.api.server}/api/v1/open/groups/<groupId>/members
-X-RelayDesk-Key: <APIKey>
+X-TongYu-Key: <APIKey>
 {"members":[{"externalId":"<客户ID>","displayName":"<昵称>"}]}'''),
           _copyRow('打开已入群用户的群页',
               '''${widget.api.server}/groups.html?groupId=<groupId>&identityToken=<identityToken>'''),
@@ -423,7 +423,7 @@ X-RelayDesk-Key: <APIKey>
           const SizedBox(height: 12),
           _copyRow('按用户 ID 加入服务群',
               '''POST ${widget.api.server}/api/v1/open/groups/<groupId>/members
-X-RelayDesk-Key: <仅保存在你的后端的 APIKey>
+X-TongYu-Key: <仅保存在你的后端的 APIKey>
 {"members":[{"externalId":"<客户ID>","displayName":"<昵称>"}]}'''),
           _copyRow('签发群会话并打开群页', '''// 你的后端校验本站登录后调用：
 // POST /api/v1/open/groups/<groupId>/member-token
@@ -433,7 +433,7 @@ const session = await fetch('/api/customer-group-session', {
   method: 'POST', body: JSON.stringify({ groupId })
 }).then(r => r.json());
 sessionStorage.setItem(
-  'liaoqiao-group-' + groupId,
+  'tongyu-group-' + groupId,
   JSON.stringify({
     token: session.token,
     groupId,

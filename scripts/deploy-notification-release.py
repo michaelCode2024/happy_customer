@@ -9,11 +9,11 @@ parser=argparse.ArgumentParser();parser.add_argument('stage');args=parser.parse_
 stage=Path(args.stage).resolve()
 assert str(stage).startswith('/tmp/tongyu-client-release-') and (stage/'server').is_file()
 stamp=time.strftime('%Y%m%d%H%M%S')
-app=Path('/opt/relaydesk-isolated')
+app=Path('/opt/tongyu-isolated')
 compose=app/'deploy/isolated/docker-compose.yml'
 nginx=Path('/www/server/panel/vhost/nginx/chat.lookfunny.xyz.conf')
-downloads=Path('/opt/relaydesk-downloads')
-backup=Path('/opt/relaydesk-backups')/('client-notifications-'+stamp)
+downloads=Path('/opt/tongyu-downloads')
+backup=Path('/opt/tongyu-backups')/('client-notifications-'+stamp)
 backup.mkdir(mode=0o700,parents=True)
 os.umask(0o077)
 def run(*cmd):return subprocess.check_output(cmd,text=True,stderr=subprocess.STDOUT)
@@ -23,20 +23,20 @@ assert live['Config']['Labels']['com.docker.compose.service']=='server'
 env=dict(value.split('=',1) for value in live['Config']['Env'])
 assert env.get('PUBLIC_BASE_URL','').rstrip('/')=='https://chat.lookfunny.xyz','Live public origin mismatch'
 assert (app/'internal').is_dir() and nginx.is_file()
-tag='relaydesk-isolated:client-notifications-'+stamp
-oldtag='relaydesk-isolated:before-client-notifications-'+stamp
+tag='tongyu-isolated:client-notifications-'+stamp
+oldtag='tongyu-isolated:before-client-notifications-'+stamp
 run('docker','tag',live['Image'],oldtag)
 shutil.copy2(nginx,backup/'nginx.conf')
 (backup/'image-tag').write_text(oldtag)
 with (backup/'database.sql').open('wb') as output:
-    subprocess.run(['docker','exec','isolated-postgres-1','pg_dump','-U','relaydesk','-d','relaydesk'],stdout=output,check=True)
+    subprocess.run(['docker','exec','isolated-postgres-1','pg_dump','-U','tongyu','-d','tongyu'],stdout=output,check=True)
 for name,image in [('rollback',oldtag),('release',tag)]:
     (backup/(name+'.json')).write_text(json.dumps({'services':{'server':{'image':image,'environment':env}}}))
     (backup/(name+'.json')).chmod(0o600)
 for folder in [stage/'console',stage/'website']:
     folder.chmod(0o755)
     for item in folder.rglob('*'):item.chmod(0o755 if item.is_dir() else 0o644)
-(stage/'Dockerfile').write_text('FROM '+oldtag+'\nCOPY --chmod=0755 server /relaydesk\nCOPY console/ /static/console/\nCOPY website/ /static/website/\n')
+(stage/'Dockerfile').write_text('FROM '+oldtag+'\nCOPY --chmod=0755 server /tongyu\nCOPY console/ /static/console/\nCOPY website/ /static/website/\n')
 run('docker','build','--pull=false','-t',tag,'-f',str(stage/'Dockerfile'),str(stage))
 def recreate(name):
     run('docker','compose','-p','isolated','-f',str(compose),'-f',str(backup/(name+'.json')),'up','-d','--no-deps','--force-recreate','server')
@@ -55,7 +55,7 @@ try:
     boot=(stage/'console/flutter_bootstrap.js').read_text()
     match=re.search(r'const releaseVersion = "?([0-9]+)"?;',boot)
     assert match,'Missing Flutter release version'
-    assetdir=Path('/opt/relaydesk-console-assets');assetdir.mkdir(mode=0o755,exist_ok=True)
+    assetdir=Path('/opt/tongyu-console-assets');assetdir.mkdir(mode=0o755,exist_ok=True)
     main=(stage/'console/main.dart.js').read_bytes()
     asset=assetdir/('main.'+match.group(1)+'.js')
     if asset.exists():assert asset.read_bytes()==main,'Immutable script version collision'
@@ -72,12 +72,12 @@ try:
     shutil.copyfile(stage/'website/downloads.css',downloads/'downloads.css')
     (downloads/'downloads.css').chmod(0o644)
     config=nginx.read_text()
-    if 'alias /opt/relaydesk-downloads/;' not in config:
+    if 'alias /opt/tongyu-downloads/;' not in config:
         needle=' location / {\n  proxy_pass http://127.0.0.1:18080;'
         assert config.count(needle)==1,'Unexpected nginx configuration'
         block=''' location = /downloads { return 301 /downloads/; }
  location ^~ /downloads/ {
-  alias /opt/relaydesk-downloads/;
+  alias /opt/tongyu-downloads/;
   index index.html;
   autoindex off;
   types { text/html html; application/json json; application/vnd.android.package-archive apk; application/x-apple-aspen-config mobileconfig; }
@@ -91,7 +91,7 @@ try:
         needle=' location ^~ /downloads/ {'
         assert config.count(needle)==1,'Unexpected downloads location'
         block=''' location = /downloads/tongyu-ios.mobileconfig {
-  alias /opt/relaydesk-downloads/tongyu-ios.mobileconfig;
+  alias /opt/tongyu-downloads/tongyu-ios.mobileconfig;
   default_type application/x-apple-aspen-config;
   add_header Content-Disposition 'attachment; filename="tongyu-ios.mobileconfig"';
   add_header Cache-Control "no-cache";
@@ -102,7 +102,7 @@ try:
     if 'location = /website/downloads.css' not in config:
         needle=' location ^~ /downloads/ {'
         assert config.count(needle)==1,'Unexpected downloads location'
-        block=' location = /website/downloads.css {\n  alias /opt/relaydesk-downloads/downloads.css;\n  default_type text/css;\n  add_header Cache-Control "no-cache";\n }\n'
+        block=' location = /website/downloads.css {\n  alias /opt/tongyu-downloads/downloads.css;\n  default_type text/css;\n  add_header Cache-Control "no-cache";\n }\n'
         nginx.write_text(config.replace(needle,block+needle))
     run('/www/server/nginx/sbin/nginx','-t')
     run('/www/server/nginx/sbin/nginx','-s','reload')
@@ -123,12 +123,12 @@ try:
     assert hashlib.sha256(published.read_bytes()).hexdigest()==release['android']['sha256']
     # 核对容器读到的二进制、部署清单，避免重启后恢复旧镜像。
     expected=hashlib.sha256((stage/'server').read_bytes()).hexdigest()
-    run('docker','cp','isolated-server-1:/relaydesk',str(backup/'deployed-server'))
+    run('docker','cp','isolated-server-1:/tongyu',str(backup/'deployed-server'))
     assert hashlib.sha256((backup/'deployed-server').read_bytes()).hexdigest()==expected
     (backup/'release-info.json').write_text(json.dumps({'image':tag,'serverSha256':expected,'apkSha256':release['android']['sha256'],'downloadDir':str(downloads)}))
     shutil.copyfile(backup/'release.json',compose.parent/'client-release.override.json')
     (compose.parent/'client-release.override.json').chmod(0o600)
-    run('docker','tag',tag,'relaydesk-isolated:local')
+    run('docker','tag',tag,'tongyu-isolated:local')
     print(json.dumps({'status':'READY','image':tag,'backup':str(backup),'downloads':str(downloads),'apkSha256':release['android']['sha256']}))
 except Exception:
     shutil.copy2(backup/'nginx.conf',nginx)

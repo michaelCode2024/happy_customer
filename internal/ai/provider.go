@@ -14,14 +14,14 @@ type Message struct {
 
 // Usage records what a completion cost. Tokens are only present when the
 // gateway reports them; a tenant can therefore see spend per conversation
-// without RelayDesk having to guess at a price list it does not control.
+// without TongYu having to guess at a price list it does not control.
 type Usage struct {
 	PromptTokens     int `json:"promptTokens,omitempty"`
 	CompletionTokens int `json:"completionTokens,omitempty"`
 	TotalTokens      int `json:"totalTokens,omitempty"`
 }
 
-// Provider is the abstraction every AI backend implements. RelayDesk ships an
+// Provider is the abstraction every AI backend implements. TongYu ships an
 // OpenAI-compatible HTTP provider (which also covers DeepSeek, Qwen, Moonshot
 // and most domestic Chinese gateways) and a deterministic offline provider so
 // the platform keeps working when no model credentials are configured.

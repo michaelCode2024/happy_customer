@@ -5,7 +5,7 @@
 -- rewrite, translation) is an operator tool that runs with or without a thread
 -- open, so the conversation reference becomes optional and the row gains the
 -- task name. Token counts are recorded because they are the only honest way for
--- a tenant to see what the model budget was spent on; a price list RelayDesk
+-- a tenant to see what the model budget was spent on; a price list TongYu
 -- does not control would be a guess.
 alter table ai_interaction alter column conversation_id drop not null;
 alter table ai_interaction add column if not exists task varchar(30);

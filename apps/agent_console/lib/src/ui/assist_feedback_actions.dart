@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:relaydesk_agent_console/src/api/models.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
 
 /// 保存失败时不宣称已采纳，反馈只表示草稿质量，不表示客户问题解决。
 class AssistFeedbackActions extends StatefulWidget {
@@ -10,7 +10,7 @@ class AssistFeedbackActions extends StatefulWidget {
       required this.result,
       required this.onAdopt,
       this.canAdopt = true});
-  final RelayDeskApi api;
+  final TongYuApi api;
   final AssistResult result;
   final ValueChanged<AssistResult> onAdopt;
   final bool canAdopt;

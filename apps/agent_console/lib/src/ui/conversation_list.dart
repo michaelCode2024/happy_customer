@@ -2,12 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import 'package:relaydesk_agent_console/src/api/models.dart';
-import 'package:relaydesk_agent_console/src/state/session_controller.dart';
-import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
-import 'package:relaydesk_agent_console/src/theme.dart';
-import 'package:relaydesk_agent_console/src/util/format.dart';
-import 'package:relaydesk_agent_console/src/util/labels.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/state/session_controller.dart';
+import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
+import 'package:tongyu_agent_console/src/theme.dart';
+import 'package:tongyu_agent_console/src/util/format.dart';
+import 'package:tongyu_agent_console/src/util/labels.dart';
 
 /// The left pane of the workbench: which conversations to work on.
 ///

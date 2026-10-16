@@ -16,13 +16,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/relaydesk/relaydesk/internal/auth"
-	"github.com/relaydesk/relaydesk/internal/platform/database"
-	"github.com/relaydesk/relaydesk/internal/realtime"
+	"github.com/tongyu/tongyu/internal/auth"
+	"github.com/tongyu/tongyu/internal/platform/database"
+	"github.com/tongyu/tongyu/internal/realtime"
 )
 
 func TestOpenGroupMembersByExternalIDAndIdentityJoin(t *testing.T) {
-	dsn := os.Getenv("RELAYDESK_TEST_DATABASE")
+	dsn := os.Getenv("TONGYU_TEST_DATABASE")
 	if dsn == "" {
 		t.Skip("database not configured")
 	}
@@ -192,7 +192,7 @@ func TestOpenGroupMembersByExternalIDAndIdentityJoin(t *testing.T) {
 }
 
 func TestGroupJoinIdentityCreatesSharedVisitor(t *testing.T) {
-	dsn := os.Getenv("RELAYDESK_TEST_DATABASE")
+	dsn := os.Getenv("TONGYU_TEST_DATABASE")
 	if dsn == "" {
 		t.Skip("database not configured")
 	}

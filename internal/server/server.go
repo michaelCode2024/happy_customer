@@ -10,18 +10,18 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/relaydesk/relaydesk/internal/ai"
-	"github.com/relaydesk/relaydesk/internal/auth"
-	"github.com/relaydesk/relaydesk/internal/config"
-	"github.com/relaydesk/relaydesk/internal/ratelimit"
-	"github.com/relaydesk/relaydesk/internal/realtime"
-	"github.com/relaydesk/relaydesk/internal/storage"
-	"github.com/relaydesk/relaydesk/internal/webhook"
+	"github.com/tongyu/tongyu/internal/ai"
+	"github.com/tongyu/tongyu/internal/auth"
+	"github.com/tongyu/tongyu/internal/config"
+	"github.com/tongyu/tongyu/internal/ratelimit"
+	"github.com/tongyu/tongyu/internal/realtime"
+	"github.com/tongyu/tongyu/internal/storage"
+	"github.com/tongyu/tongyu/internal/webhook"
 )
 
 // API carries every dependency the HTTP layer needs. Handlers are grouped by
 // audience in widget.go (visitor), console.go (agent workbench), admin.go
-// (tenant management), platform.go (RelayDesk operations) and sockets.go.
+// (tenant management), platform.go (TongYu operations) and sockets.go.
 type API struct {
 	cfg        config.Config
 	db         *pgxpool.Pool
@@ -187,7 +187,7 @@ func (a *API) ready(w http.ResponseWriter, r *http.Request) {
 // meta is public and lets the embed script discover features without an API key.
 func (a *API) meta(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, map[string]any{
-		"product":     "RelayDesk",
+		"product":     "TongYu",
 		"version":     version,
 		"time":        time.Now().UTC(),
 		"aiEnabled":   a.ai.Available(),
@@ -204,7 +204,7 @@ func (a *API) meta(w http.ResponseWriter, r *http.Request) {
 var version = "0.1.0-dev"
 
 func init() {
-	if value := os.Getenv("RELAYDESK_VERSION"); value != "" {
+	if value := os.Getenv("TONGYU_VERSION"); value != "" {
 		version = value
 	}
 }

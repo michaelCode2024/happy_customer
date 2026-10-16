@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:relaydesk_agent_console/src/ui/workspace_layout.dart';
+import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
 
-import 'package:relaydesk_agent_console/src/api/models.dart';
-import 'package:relaydesk_agent_console/src/state/session_controller.dart';
-import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
-import 'package:relaydesk_agent_console/src/util/format.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/state/session_controller.dart';
+import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
+import 'package:tongyu_agent_console/src/util/format.dart';
 
 /// The operations dashboard.
 ///

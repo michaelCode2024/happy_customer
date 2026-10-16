@@ -5,7 +5,7 @@
 .env.*
 *.pem
 *.key
-.relaydesk-*
+.tongyu-*
 .*.txt
 .*.js
 apps/**/.dart_tool

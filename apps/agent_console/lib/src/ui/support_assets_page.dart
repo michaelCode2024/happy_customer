@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:relaydesk_agent_console/src/util/labels.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
-import 'package:relaydesk_agent_console/src/api/models.dart';
-import 'package:relaydesk_agent_console/src/ui/workspace_layout.dart';
+import 'package:tongyu_agent_console/src/util/labels.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
 
 /// 共用素材在企业内管理，消息编辑器使用同一份常用回复与标签数据。
 class SupportAssetsPage extends StatefulWidget {
@@ -14,7 +14,7 @@ class SupportAssetsPage extends StatefulWidget {
       this.initialKnowledgeTab = 0,
       this.onGapAdd,
       this.onGapTest});
-  final RelayDeskApi api;
+  final TongYuApi api;
   final bool knowledge;
   final bool embedded;
   final int initialKnowledgeTab;

@@ -4,15 +4,15 @@ import (
 	"context"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/relaydesk/relaydesk/internal/realtime"
-	"github.com/relaydesk/relaydesk/internal/webhook"
+	"github.com/tongyu/tongyu/internal/realtime"
+	"github.com/tongyu/tongyu/internal/webhook"
 	"log/slog"
 	"os"
 	"testing"
 )
 
 func TestReceiptBoundaryAndWebhookOutbox(t *testing.T) {
-	dsn := os.Getenv("RELAYDESK_TEST_DATABASE")
+	dsn := os.Getenv("TONGYU_TEST_DATABASE")
 	if dsn == "" {
 		t.Skip("database not configured")
 	}

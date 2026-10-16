@@ -14,9 +14,9 @@ live=json.loads(run('docker','inspect','isolated-server-1'))[0]
 env=dict(value.split('=',1) for value in live['Config']['Env'])
 assert env.get('PUBLIC_BASE_URL','').rstrip('/')=='https://chat.lookfunny.xyz'
 assert live['Config']['Labels']['com.docker.compose.project']=='isolated'
-folder=Path('/opt/relaydesk-isolated/deploy/isolated')
+folder=Path('/opt/tongyu-isolated/deploy/isolated')
 compose=folder/'docker-compose.yml'
-backup=Path('/opt/relaydesk-backups')/('ai-config-'+time.strftime('%Y%m%d%H%M%S'))
+backup=Path('/opt/tongyu-backups')/('ai-config-'+time.strftime('%Y%m%d%H%M%S'))
 backup.mkdir(parents=True,mode=0o700)
 files=[compose,folder/'.env',folder/'client-release.override.json',folder/'ai.runtime.override.json']
 existed={str(file):file.exists() for file in files}

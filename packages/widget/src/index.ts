@@ -2,40 +2,40 @@
 // a script on someone else's site additionally auto-mounts a widget when the
 // script tag carries data-endpoint and data-inbox-key.
 
-import { TAG_NAME, RelayDeskWidgetElement, optionsFromElement } from './widget.js';
-import type { RelayDeskWidgetOptions, WidgetEvent, WidgetBridge } from './config.js';
+import { TAG_NAME, TongYuWidgetElement, optionsFromElement } from './widget.js';
+import type { TongYuWidgetOptions, WidgetEvent, WidgetBridge } from './config.js';
 
-export type { RelayDeskWidgetOptions, WidgetEvent, WidgetBridge } from './config.js';
+export type { TongYuWidgetOptions, WidgetEvent, WidgetBridge } from './config.js';
 export type { ChatMessage, Conversation, Message, SenderType, MessageType, ConversationStatus } from './types.js';
-export { RelayDeskWidgetElement, optionsFromElement } from './widget.js';
+export { TongYuWidgetElement, optionsFromElement } from './widget.js';
 
-interface RelayDeskGlobal {
-  mount: (options: RelayDeskWidgetOptions) => RelayDeskWidgetElement;
+interface TongYuGlobal {
+  mount: (options: TongYuWidgetOptions) => TongYuWidgetElement;
   unmount: () => void;
   /** Present once a widget has been mounted. */
-  readonly widget?: RelayDeskWidgetElement;
+  readonly widget?: TongYuWidgetElement;
 }
 
 declare global {
   interface Window {
-    RelayDesk?: RelayDeskGlobal;
+    TongYu?: TongYuGlobal;
     /** Optional configuration object, read before the script attributes. */
-    RelayDeskSettings?: RelayDeskWidgetOptions;
+    TongYuSettings?: TongYuWidgetOptions;
   }
 }
 
 if (typeof window !== 'undefined' && !customElements.get(TAG_NAME)) {
-  customElements.define(TAG_NAME, RelayDeskWidgetElement);
+  customElements.define(TAG_NAME, TongYuWidgetElement);
 }
 
-let mounted: RelayDeskWidgetElement | undefined;
+let mounted: TongYuWidgetElement | undefined;
 
-function mount(options: RelayDeskWidgetOptions): RelayDeskWidgetElement {
+function mount(options: TongYuWidgetOptions): TongYuWidgetElement {
   if (mounted?.isConnected) {
     mounted.configure(options);
     return mounted;
   }
-  const element = document.createElement(TAG_NAME) as RelayDeskWidgetElement;
+  const element = document.createElement(TAG_NAME) as TongYuWidgetElement;
   // configure() before insertion, so the first paint already has data and the
   // panel never flashes an empty shell.
   element.configure(options);
@@ -50,20 +50,20 @@ function unmount(): void {
 }
 
 if (typeof window !== 'undefined') {
-  const api: RelayDeskGlobal = {
+  const api: TongYuGlobal = {
     mount,
     unmount,
     get widget() {
       return mounted;
     },
   };
-  window.RelayDesk = api;
+  window.TongYu = api;
 
-  // Auto-mount: prefer an explicit window.RelayDeskSettings (a CMS or a tag
+  // Auto-mount: prefer an explicit window.TongYuSettings (a CMS or a tag
   // manager usually sets that), then fall back to the loading script's own
   // data-* attributes.
   const boot = (): void => {
-    const settings = window.RelayDeskSettings;
+    const settings = window.TongYuSettings;
     if (settings?.endpoint && settings.inboxKey) {
       api.mount(settings);
       return;
@@ -91,13 +91,13 @@ if (typeof window !== 'undefined') {
 }
 
 /** Reads the widgets configuration straight off a <script> tag. */
-function optionsFromScript(script: HTMLScriptElement): RelayDeskWidgetOptions | undefined {
+function optionsFromScript(script: HTMLScriptElement): TongYuWidgetOptions | undefined {
   const endpoint = script.dataset.endpoint;
   const inboxKey = script.dataset.inboxKey;
   if (!endpoint || !inboxKey) {
     return undefined;
   }
-  const options: RelayDeskWidgetOptions = { endpoint, inboxKey };
+  const options: TongYuWidgetOptions = { endpoint, inboxKey };
   if (script.dataset.title) {
     options.title = script.dataset.title;
   }

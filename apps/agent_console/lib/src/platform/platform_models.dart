@@ -1,4 +1,4 @@
-/// Wire models for the RelayDesk operations console.
+/// Wire models for the TongYu operations console.
 ///
 /// The operations API crosses tenants, which is exactly what the agent console
 /// must never do, so these types are deliberately separate from `models.dart`:
@@ -6,7 +6,7 @@
 /// from here.
 library;
 
-import 'package:relaydesk_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
 
 /// Coerces a JSON array of strings, dropping anything that is not one. The
 /// feature list is decoration on the about panel: a shape change there must not
@@ -179,7 +179,7 @@ class TenantAgent {
   /// disabled password, so an operator seeing them in the list needs to be told
   /// they are not seats anyone can sign in with.
   bool get isSystemAccount =>
-      email == 'bot@relaydesk.local' || email == 'integration@relaydesk.local';
+      email == 'bot@tongyu.local' || email == 'integration@tongyu.local';
 }
 
 class TenantInbox {

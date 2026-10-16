@@ -3,20 +3,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:relaydesk_agent_console/src/api/models.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
-import 'package:relaydesk_agent_console/src/state/session_controller.dart';
-import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
-import 'package:relaydesk_agent_console/src/theme.dart';
-import 'package:relaydesk_agent_console/src/ui/knowledge_page.dart';
-import 'package:relaydesk_agent_console/src/ui/settings_page.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
+import 'package:tongyu_agent_console/src/state/session_controller.dart';
+import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
+import 'package:tongyu_agent_console/src/theme.dart';
+import 'package:tongyu_agent_console/src/ui/knowledge_page.dart';
+import 'package:tongyu_agent_console/src/ui/settings_page.dart';
 
 class _Session extends SessionController {
   _Session(this.client, {this.role = 'SUPERVISOR'});
-  final RelayDeskApi client;
+  final TongYuApi client;
   final String role;
   @override
-  RelayDeskApi get api => client;
+  TongYuApi get api => client;
   @override
   AgentProfile get agent => AgentProfile(
       id: 'a1',
@@ -41,7 +41,7 @@ void main() {
       var status = 'ACTIVE';
       var writes = 0;
       var answers = 0;
-      final api = RelayDeskApi(
+      final api = TongYuApi(
           server: 'http://localhost',
           client: MockClient((r) async {
             Object body = {};
@@ -149,7 +149,7 @@ void main() {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
       });
-      final api = RelayDeskApi(
+      final api = TongYuApi(
           server: 'http://localhost',
           client: MockClient((_) async => http.Response('{}', 200)));
       final session = _Session(api);

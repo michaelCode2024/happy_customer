@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/relaydesk/relaydesk/internal/config"
+	"github.com/tongyu/tongyu/internal/config"
 )
 
 func TestStaticRoutes(t *testing.T) {
@@ -21,7 +21,7 @@ func TestStaticRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	for path, content := range map[string]string{
-		"widget.js":            "window.RelayDesk = {};",
+		"widget.js":            "window.TongYu = {};",
 		"console/index.html":   `<base href="/console/">`,
 		"console/main.dart.js": "console.log('console');",
 		"website/index.html":   `<title>通语 TongYu</title><a href="/console/?surface=agent">登录</a>`,
@@ -39,7 +39,7 @@ func TestStaticRoutes(t *testing.T) {
 		path, content string
 		status        int
 	}{
-		{path: "/widget.js", content: "window.RelayDesk", status: 200},
+		{path: "/widget.js", content: "window.TongYu", status: 200},
 		{path: "/", content: "通语 TongYu", status: 200},
 		{path: "/website/site.css", content: "margin:0", status: 200},
 		{path: "/website/missing.js", status: 404},

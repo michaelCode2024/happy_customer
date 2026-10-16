@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:relaydesk_agent_console/src/util/message_sound_card.dart';
+import 'package:tongyu_agent_console/src/util/message_sound_card.dart';
 
 void main() {
   testWidgets('窄屏展示所有方式，关闭后禁止选择和试听', (tester) async {

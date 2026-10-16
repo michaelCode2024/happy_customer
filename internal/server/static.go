@@ -19,7 +19,7 @@ var h5Page = template.Must(template.New("h5").Parse(`<!doctype html>
   <style>html,body{margin:0;height:100%;background:#f5f6f8}</style>
 </head>
 <body>
-  <script>window.RelayDeskSettings={{.SettingsJSON}};</script>
+  <script>window.TongYuSettings={{.SettingsJSON}};</script>
   <script src="/widget.js" defer></script>
 </body>
 </html>`))

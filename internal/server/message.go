@@ -11,10 +11,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/relaydesk/relaydesk/internal/ai"
-	"github.com/relaydesk/relaydesk/internal/auth"
-	"github.com/relaydesk/relaydesk/internal/realtime"
-	"github.com/relaydesk/relaydesk/internal/webhook"
+	"github.com/tongyu/tongyu/internal/ai"
+	"github.com/tongyu/tongyu/internal/auth"
+	"github.com/tongyu/tongyu/internal/realtime"
+	"github.com/tongyu/tongyu/internal/webhook"
 )
 
 // messageInput is the common description of a message regardless of who sends it.
@@ -1226,7 +1226,7 @@ func (a *API) recentTranscript(ctx context.Context, conversationID uuid.UUID, be
 // through its integration.
 func (a *API) integrationAgentID(ctx context.Context, tenantID uuid.UUID) *uuid.UUID {
 	var id uuid.UUID
-	if a.db.QueryRow(ctx, `select id from agent where tenant_id=$1 and email='integration@relaydesk.local' limit 1`, tenantID).Scan(&id) == nil {
+	if a.db.QueryRow(ctx, `select id from agent where tenant_id=$1 and email='integration@tongyu.local' limit 1`, tenantID).Scan(&id) == nil {
 		return &id
 	}
 	inserted := uuid.New()
@@ -1236,11 +1236,11 @@ func (a *API) integrationAgentID(ctx context.Context, tenantID uuid.UUID) *uuid.
 	// instead of the losing insert's id.
 	err := a.db.QueryRow(ctx, `
 		insert into agent(id, tenant_id, email, display_name, password_hash, role, status, max_concurrent)
-		values($1,$2,'integration@relaydesk.local','系统集成','!disabled','AGENT','DISABLED',0)
+		values($1,$2,'integration@tongyu.local','系统集成','!disabled','AGENT','DISABLED',0)
 		on conflict do nothing
 		returning id`, inserted).Scan(&id)
 	if err != nil {
-		if a.db.QueryRow(ctx, `select id from agent where tenant_id=$1 and email='integration@relaydesk.local'`, tenantID).Scan(&id) != nil {
+		if a.db.QueryRow(ctx, `select id from agent where tenant_id=$1 and email='integration@tongyu.local'`, tenantID).Scan(&id) != nil {
 			return nil
 		}
 	}
@@ -1250,13 +1250,13 @@ func (a *API) integrationAgentID(ctx context.Context, tenantID uuid.UUID) *uuid.
 // botAgentID returns the system agent that speaks for the bot inside a tenant.
 func (a *API) botAgentID(ctx context.Context, tenantID uuid.UUID) *uuid.UUID {
 	var id uuid.UUID
-	err := a.db.QueryRow(ctx, `select id from agent where tenant_id=$1 and email='bot@relaydesk.local' limit 1`, tenantID).Scan(&id)
+	err := a.db.QueryRow(ctx, `select id from agent where tenant_id=$1 and email='bot@tongyu.local' limit 1`, tenantID).Scan(&id)
 	if err == nil {
 		return &id
 	}
 	inserted := uuid.New()
 	_, err = a.db.Exec(ctx, `insert into agent(id, tenant_id, email, display_name, password_hash, role, status, max_concurrent)
-		values($1,$2,'bot@relaydesk.local','AI 助手','!disabled', 'AGENT','DISABLED',0)
+		values($1,$2,'bot@tongyu.local','AI 助手','!disabled', 'AGENT','DISABLED',0)
 		on conflict do nothing`, inserted)
 	if err != nil {
 		return nil

@@ -4,9 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:relaydesk_agent_console/src/api/models.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
-import 'package:relaydesk_agent_console/src/ui/conversation_context_panel.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
+import 'package:tongyu_agent_console/src/ui/conversation_context_panel.dart';
 
 ChatMessage message(String id, String content) => ChatMessage.fromJson({
       'id': id,
@@ -27,7 +27,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     var attempts = 0;
     var adopted = '';
-    final api = RelayDeskApi(
+    final api = TongYuApi(
         server: 'http://localhost',
         client: MockClient((request) async {
           expect(request.url.path, '/api/v1/console/assist');
@@ -88,7 +88,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final fullText = List.filled(18, '网站支持手机访问，接入前请准备网站域名与常见问题资料。').join('\n');
     var adopted = '';
-    final api = RelayDeskApi(
+    final api = TongYuApi(
         server: 'http://localhost',
         client: MockClient((request) async {
           final task = jsonDecode(request.body)['task'];
@@ -134,7 +134,7 @@ void main() {
 
   testWidgets('生成期间出现新消息，旧结果不能直接采纳；切换会话丢弃迟到结果', (tester) async {
     final pending = <Completer<http.Response>>[];
-    final api = RelayDeskApi(
+    final api = TongYuApi(
         server: 'http://localhost',
         client: MockClient((request) {
           final completion = Completer<http.Response>();

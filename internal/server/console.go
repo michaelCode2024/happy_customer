@@ -7,9 +7,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/relaydesk/relaydesk/internal/auth"
-	"github.com/relaydesk/relaydesk/internal/realtime"
-	"github.com/relaydesk/relaydesk/internal/webhook"
+	"github.com/tongyu/tongyu/internal/auth"
+	"github.com/tongyu/tongyu/internal/realtime"
+	"github.com/tongyu/tongyu/internal/webhook"
 )
 
 func (a *API) registerConsole(mux *http.ServeMux) {

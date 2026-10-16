@@ -5,8 +5,8 @@ import (
 	"encoding/hex"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/relaydesk/relaydesk/internal/auth"
-	"github.com/relaydesk/relaydesk/internal/realtime"
+	"github.com/tongyu/tongyu/internal/auth"
+	"github.com/tongyu/tongyu/internal/realtime"
 	"net/http"
 	"strings"
 	"time"
@@ -130,7 +130,7 @@ func (a *API) platformMarketplaceStatus(w http.ResponseWriter, r *http.Request, 
 
 func (a *API) requireMarketplace(next func(http.ResponseWriter, *http.Request, uuid.UUID)) http.HandlerFunc {
 	return a.limit(a.openRate, func(w http.ResponseWriter, r *http.Request) {
-		key := r.Header.Get("X-RelayDesk-Marketplace-Key")
+		key := r.Header.Get("X-TongYu-Marketplace-Key")
 		var id uuid.UUID
 		if key == "" || a.db.QueryRow(r.Context(), `select id from marketplace where key_hash=$1 and status='ACTIVE'`, auth.HashToken(key)).Scan(&id) != nil {
 			failCode(w, 401, "MARKETPLACE_KEY_INVALID", "商城密钥无效或已停用")

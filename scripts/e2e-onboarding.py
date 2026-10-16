@@ -19,9 +19,9 @@ import urllib.request
 from typing import Any
 
 BASE = "http://127.0.0.1:8080"
-PLATFORM_EMAIL = "admin@relaydesk.local"
-PLATFORM_PASSWORD = "RelayDesk@2026"
-OWNER_PASSWORD = "RelayDesk@2026"
+PLATFORM_EMAIL = "admin@tongyu.local"
+PLATFORM_PASSWORD = "TongYu@2026"
+OWNER_PASSWORD = "TongYu@2026"
 
 
 class Fail(Exception):

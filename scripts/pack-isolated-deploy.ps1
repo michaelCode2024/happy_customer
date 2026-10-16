@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $outDir = Join-Path $root '.local-deploy'
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$outFile = Join-Path $outDir ("relaydesk-isolated-" + $stamp + ".tgz")
+$outFile = Join-Path $outDir ("tongyu-isolated-" + $stamp + ".tgz")
 
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 

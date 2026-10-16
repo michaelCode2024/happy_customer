@@ -1,21 +1,21 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:relaydesk_agent_console/src/api/models.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
-import 'package:relaydesk_agent_console/src/state/session_controller.dart';
-import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
-import 'package:relaydesk_agent_console/src/ui/visitor_sidebar.dart';
-import 'package:relaydesk_agent_console/src/ui/stats_page.dart';
-import 'package:relaydesk_agent_console/src/ui/platform_page.dart';
-import 'package:relaydesk_agent_console/src/ui/groups_page.dart';
-import 'package:relaydesk_agent_console/src/ui/knowledge_page.dart';
-import 'package:relaydesk_agent_console/src/platform/platform_controller.dart';
-import 'package:relaydesk_agent_console/src/state/credential_store.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
+import 'package:tongyu_agent_console/src/state/session_controller.dart';
+import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
+import 'package:tongyu_agent_console/src/ui/visitor_sidebar.dart';
+import 'package:tongyu_agent_console/src/ui/stats_page.dart';
+import 'package:tongyu_agent_console/src/ui/platform_page.dart';
+import 'package:tongyu_agent_console/src/ui/groups_page.dart';
+import 'package:tongyu_agent_console/src/ui/knowledge_page.dart';
+import 'package:tongyu_agent_console/src/platform/platform_controller.dart';
+import 'package:tongyu_agent_console/src/state/credential_store.dart';
 import 'fake_platform_api.dart';
 
 // 仅使用内存 API 复现，无网络请求或生产写入。
-class AuditApi extends RelayDeskApi {
+class AuditApi extends TongYuApi {
   AuditApi() : super(server: 'http://127.0.0.1:1');
   final note = Completer<VisitorNote>();
   final calls = <Completer<StatsOverview>>[];
@@ -54,16 +54,16 @@ class AuditApi extends RelayDeskApi {
 
 class AuditSession extends SessionController {
   AuditSession(this.client);
-  final RelayDeskApi client;
+  final TongYuApi client;
   @override
-  RelayDeskApi get api => client;
+  TongYuApi get api => client;
   @override
   AgentProfile? get agent =>
       AgentProfile.fromJson({'id': 'self', 'role': 'SUPERVISOR'});
 }
 
 class AuditWorkbench extends WorkbenchController {
-  AuditWorkbench(RelayDeskApi api) : super(api: api);
+  AuditWorkbench(TongYuApi api) : super(api: api);
   String visitorId = 'A';
   void change(String id) {
     visitorId = id;

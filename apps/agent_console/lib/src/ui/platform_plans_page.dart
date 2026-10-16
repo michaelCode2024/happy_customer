@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:relaydesk_agent_console/src/platform/platform_controller.dart';
-import 'package:relaydesk_agent_console/src/ui/product_brand.dart';
-import 'package:relaydesk_agent_console/src/ui/workspace_layout.dart';
+import 'package:tongyu_agent_console/src/platform/platform_controller.dart';
+import 'package:tongyu_agent_console/src/ui/product_brand.dart';
+import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
 
 /// 套餐对比与营销卖点，对齐现有 TRIAL / STARTER / GROWTH / ENTERPRISE。
 ///

@@ -313,7 +313,7 @@ func assistPrompt(task Task, tone, language string) string {
 	}
 	switch task {
 	case TaskSuggest:
-		return `你是 RelayDesk 的坐席助手。根据知识库资料和对话记录，为坐席起草一条回复。
+		return `你是 TongYu 的坐席助手。根据知识库资料和对话记录，为坐席起草一条回复。
 规则：
 1. 只能依据知识库资料，不要编造价格、承诺、政策或时间。
 2. 语气` + voice + `，与访客使用同一种语言。
@@ -321,7 +321,7 @@ func assistPrompt(task Task, tone, language string) string {
 4. 控制在 120 字以内，需要分点时最多 3 条；只保留本次问题需要的信息，不重复问候和结束语。
 5. 知识库资料不足以回答时，只输出：需要人工确认后回复。`
 	case TaskSummarize:
-		return `你是 RelayDesk 的会话摘要助手。阅读对话记录，输出摘要。
+		return `你是 TongYu 的会话摘要助手。阅读对话记录，输出摘要。
 规则：
 1. 先一句话说明访客的核心诉求。
 2. 再列出已确认的事实、待办事项和未解决的问题，最多 3 条，每条一行，以“- ”开头；没有内容的分类不输出。

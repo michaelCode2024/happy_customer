@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/relaydesk/relaydesk/internal/auth"
+	"github.com/tongyu/tongyu/internal/auth"
 )
 
 // demoNamespace makes every seeded identifier deterministic. Re-running the
@@ -25,11 +25,11 @@ var demoNamespace = uuid.MustParse("6f1b7c2e-8d3a-4f5b-9c0d-1a2b3c4d5e6f")
 const (
 	DemoTenantSlug = "demo"
 
-	DemoOwnerEmail = "owner@relaydesk.local"
+	DemoOwnerEmail = "owner@tongyu.local"
 
-	DemoAgentEmail = "agent@relaydesk.local"
+	DemoAgentEmail = "agent@tongyu.local"
 
-	DemoAgentPassword = "RelayDesk@2026"
+	DemoAgentPassword = "TongYu@2026"
 )
 
 func demoID(name string) uuid.UUID { return uuid.NewSHA1(demoNamespace, []byte(name)) }
@@ -74,7 +74,7 @@ func EnsureDemoData(ctx context.Context, pool *pgxpool.Pool) error {
 
 			"demo": true,
 
-			"supportMail": "support@relaydesk.local",
+			"supportMail": "support@tongyu.local",
 		}); err != nil {
 
 		return fmt.Errorf("seed tenant: %w", err)
@@ -253,7 +253,7 @@ func EnsureDemoData(ctx context.Context, pool *pgxpool.Pool) error {
 
 		{DemoOwnerEmail, "演示企业主", auth.RoleSupervisor, []string{"demo-web", "demo-app"}},
 
-		{"supervisor@relaydesk.local", "客服主管", auth.RoleSupervisor, []string{"demo-web", "demo-app"}},
+		{"supervisor@tongyu.local", "客服主管", auth.RoleSupervisor, []string{"demo-web", "demo-app"}},
 
 		{DemoAgentEmail, "客服小林", auth.RoleAgent, []string{"demo-web"}},
 	}

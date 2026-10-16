@@ -3,13 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:relaydesk_agent_console/src/api/relaydesk_api.dart';
-import 'package:relaydesk_agent_console/src/ui/tenant_admin_page.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
+import 'package:tongyu_agent_console/src/ui/tenant_admin_page.dart';
 
 void main() {
   testWidgets('企业后台不提供建号或邀请入口', (tester) async {
     Map<String, dynamic>? creation;
-    final api = RelayDeskApi(
+    final api = TongYuApi(
         server: 'https://chat.example.com',
         client: MockClient((request) async {
           if (request.method == 'POST') {
@@ -51,7 +51,7 @@ void main() {
   });
   testWidgets('体验版入口保存失败保留弹窗，重试不提交 AI 配置', (tester) async {
     int saves = 0;
-    final api = RelayDeskApi(
+    final api = TongYuApi(
         server: 'https://chat.example.com',
         client: MockClient((request) async {
           if (request.method == 'PATCH') {

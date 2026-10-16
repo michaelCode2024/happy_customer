@@ -1,4 +1,4 @@
-module github.com/relaydesk/relaydesk
+module github.com/tongyu/tongyu
 
 go 1.27.1
 

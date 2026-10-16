@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/relaydesk/relaydesk/internal/auth"
-	"github.com/relaydesk/relaydesk/internal/realtime"
+	"github.com/tongyu/tongyu/internal/auth"
+	"github.com/tongyu/tongyu/internal/realtime"
 	"log/slog"
 	"net/http/httptest"
 	"os"
@@ -16,7 +16,7 @@ import (
 
 // 同时检查实时频道和补拉历史，避免备注在一个通道隐藏、另一个通道泄露。
 func TestInternalNotesStayAgentOnly(t *testing.T) {
-	dsn := os.Getenv("RELAYDESK_TEST_DATABASE")
+	dsn := os.Getenv("TONGYU_TEST_DATABASE")
 	if dsn == "" {
 		t.Skip("database not configured")
 	}

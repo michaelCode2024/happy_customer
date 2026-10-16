@@ -7,14 +7,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/relaydesk/relaydesk/internal/platform/database"
+	"github.com/tongyu/tongyu/internal/platform/database"
 )
 
 // Retrieval ranking is only meaningful as a distribution: a formula that puts
 // the right article first for one hand-picked question but scores everything the
 // same is exactly the defect being fixed. These tests need the real tokenizer
 // and the real knowledge base, so they run against the database and skip when
-// there is none. Set RELAYDESK_TEST_DATABASE to the application's DATABASE_URL.
+// there is none. Set TONGYU_TEST_DATABASE to the application's DATABASE_URL.
 //
 // The demo tenant's knowledge base is the fixture: nine English-free articles
 // covering a support team's recurring questions, which is the shape of a real
@@ -23,9 +23,9 @@ var demoKnowledgeTenant = database.DemoTenantID().String()
 
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	url := os.Getenv("RELAYDESK_TEST_DATABASE")
+	url := os.Getenv("TONGYU_TEST_DATABASE")
 	if url == "" {
-		t.Skip("RELAYDESK_TEST_DATABASE is not set; skipping database-backed retrieval tests")
+		t.Skip("TONGYU_TEST_DATABASE is not set; skipping database-backed retrieval tests")
 	}
 	pool, err := pgxpool.New(context.Background(), url)
 	if err != nil {
@@ -60,8 +60,8 @@ func TestGoTermsMatchDatabaseTokenizer(t *testing.T) {
 	}
 	for _, input := range inputs {
 		var fromDatabase []string
-		if err := pool.QueryRow(ctx, `select relaydesk_terms($1)::text[]`, input).Scan(&fromDatabase); err != nil {
-			t.Fatalf("relaydesk_terms(%q): %v", input, err)
+		if err := pool.QueryRow(ctx, `select tongyu_terms($1)::text[]`, input).Scan(&fromDatabase); err != nil {
+			t.Fatalf("tongyu_terms(%q): %v", input, err)
 		}
 		got := terms(input)
 		if len(got) != len(fromDatabase) {

@@ -7,13 +7,13 @@ import 'dart:js_util' as js;
 bool get isHostedConsole => Uri.base.queryParameters['embedded'] == '1';
 void closeHostedConsole() {
   final origin = Uri.base.queryParameters['parentOrigin'];
-  final event = {'source': 'relaydesk', 'type': 'close'};
+  final event = {'source': 'tongyu', 'type': 'close'};
   if (origin != null && origin != '*') {
     html.window.parent?.postMessage(event, origin);
   } else if (js.hasProperty(html.window, 'flutter_inappwebview')) {
     final bridge = js.getProperty<Object>(html.window, 'flutter_inappwebview');
     js.callMethod<Object?>(
-        bridge, 'callHandler', ['relaydeskHost', jsonEncode(event)]);
+        bridge, 'callHandler', ['tongyuHost', jsonEncode(event)]);
   }
 }
 
@@ -40,15 +40,15 @@ Stream<String> hostSessions() {
         } catch (_) {}
       });
       html.window.parent
-          ?.postMessage({'source': 'relaydesk', 'type': 'host-ready'}, origin);
-    } else if (js.hasProperty(html.window, '__relaydeskHostIdentity')) {
+          ?.postMessage({'source': 'tongyu', 'type': 'host-ready'}, origin);
+    } else if (js.hasProperty(html.window, '__tongyuHostIdentity')) {
       final credentials =
-          js.getProperty<Object?>(html.window, '__relaydeskHostIdentity');
+          js.getProperty<Object?>(html.window, '__tongyuHostIdentity');
       if (credentials != null) {
         final token = js.getProperty<Object?>(credentials, 'identityToken');
         if (token is String) stream.add(token);
       }
-      js.setProperty(html.window, '__relaydeskHostIdentity', null);
+      js.setProperty(html.window, '__tongyuHostIdentity', null);
     }
   };
   stream.onCancel = () => listener?.cancel();

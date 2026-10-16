@@ -1,43 +1,43 @@
 import 'src/ui/app_safe_area.dart';
 import 'src/util/browser_theme.dart';
 import 'dart:async';
-import 'package:relaydesk_agent_console/src/util/host_session.dart';
-import 'package:relaydesk_agent_console/src/util/console_surface.dart';
+import 'package:tongyu_agent_console/src/util/host_session.dart';
+import 'package:tongyu_agent_console/src/util/console_surface.dart';
 
 import 'package:flutter/material.dart';
-import 'package:relaydesk_agent_console/src/platform/platform_api.dart';
+import 'package:tongyu_agent_console/src/platform/platform_api.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
-import 'package:relaydesk_agent_console/src/platform/platform_controller.dart';
-import 'package:relaydesk_agent_console/src/state/credential_store.dart';
-import 'package:relaydesk_agent_console/src/state/session_controller.dart';
-import 'package:relaydesk_agent_console/src/theme.dart';
-import 'package:relaydesk_agent_console/src/ui/login_page.dart';
-import 'package:relaydesk_agent_console/src/ui/platform_login_page.dart';
-import 'package:relaydesk_agent_console/src/ui/platform_page.dart';
-import 'package:relaydesk_agent_console/src/ui/product_brand.dart';
-import 'package:relaydesk_agent_console/src/ui/workbench_page.dart';
+import 'package:tongyu_agent_console/src/platform/platform_controller.dart';
+import 'package:tongyu_agent_console/src/state/credential_store.dart';
+import 'package:tongyu_agent_console/src/state/session_controller.dart';
+import 'package:tongyu_agent_console/src/theme.dart';
+import 'package:tongyu_agent_console/src/ui/login_page.dart';
+import 'package:tongyu_agent_console/src/ui/platform_login_page.dart';
+import 'package:tongyu_agent_console/src/ui/platform_page.dart';
+import 'package:tongyu_agent_console/src/ui/product_brand.dart';
+import 'package:tongyu_agent_console/src/ui/workbench_page.dart';
 
 void main() {
-  runApp(const RelayDeskConsoleApp());
+  runApp(const TongYuConsoleApp());
 }
 
 /// 同一安装包里的两套门面：客服工作台与平台运营后台。
 enum ConsoleSurface { agent, platform }
 
 /// 应用根：按「已登录 → 主页 / 未登录 → 登录页」路由，并记住上次门面。
-class RelayDeskConsoleApp extends StatefulWidget {
-  const RelayDeskConsoleApp(
+class TongYuConsoleApp extends StatefulWidget {
+  const TongYuConsoleApp(
       {super.key, this.credentials, this.platformApiFactory});
 
   final CredentialStore? credentials;
   final PlatformApi Function(String server)? platformApiFactory;
 
   @override
-  State<RelayDeskConsoleApp> createState() => _RelayDeskConsoleAppState();
+  State<TongYuConsoleApp> createState() => _TongYuConsoleAppState();
 }
 
-class _RelayDeskConsoleAppState extends State<RelayDeskConsoleApp> {
+class _TongYuConsoleAppState extends State<TongYuConsoleApp> {
   StreamSubscription<String>? _hostSession;
   late final CredentialStore _store;
   late final SessionController _session;

@@ -1,9 +1,9 @@
-import 'package:relaydesk_agent_console/src/ui/design_a.dart';
+import 'package:tongyu_agent_console/src/ui/design_a.dart';
 import 'pwa_panel.dart';
 import 'package:flutter/material.dart';
-import 'package:relaydesk_agent_console/src/ui/brand.dart';
-import 'package:relaydesk_agent_console/src/ui/product_brand.dart';
-import 'package:relaydesk_agent_console/src/util/website.dart';
+import 'package:tongyu_agent_console/src/ui/brand.dart';
+import 'package:tongyu_agent_console/src/ui/product_brand.dart';
+import 'package:tongyu_agent_console/src/util/website.dart';
 
 enum LoginHeroKind { agent, platform }
 

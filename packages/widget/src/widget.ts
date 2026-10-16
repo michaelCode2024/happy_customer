@@ -1,18 +1,18 @@
 // The custom element. It is deliberately thin: it owns the shadow root, listens
 // to the store and forwards user intent, so all state lives in one place.
 
-import { resolveOptions, type RelayDeskWidgetOptions, type ResolvedOptions } from './config.js';
+import { resolveOptions, type TongYuWidgetOptions, type ResolvedOptions } from './config.js';
 import { ChatStore, type Snapshot } from './store.js';
 import { WidgetView } from './ui.js';
 
-export const TAG_NAME = 'relaydesk-widget';
+export const TAG_NAME = 'tongyu-widget';
 
-export class RelayDeskWidgetElement extends HTMLElement {
+export class TongYuWidgetElement extends HTMLElement {
   #store?: ChatStore;
   #view?: WidgetView;
   #options?: ResolvedOptions;
   #unsubscribe?: () => void;
-  #pending?: RelayDeskWidgetOptions;
+  #pending?: TongYuWidgetOptions;
   #parentListener?: (event: MessageEvent) => void;
   #resizeObserver?: ResizeObserver;
 
@@ -21,11 +21,11 @@ export class RelayDeskWidgetElement extends HTMLElement {
   }
 
   /** Public API for pages that import the module rather than the embed script. */
-  get widget(): RelayDeskWidgetElement {
+  get widget(): TongYuWidgetElement {
     return this;
   }
 
-  configure(options: RelayDeskWidgetOptions): void {
+  configure(options: TongYuWidgetOptions): void {
     if (this.#store) {
       this.#teardown();
     }
@@ -88,7 +88,7 @@ export class RelayDeskWidgetElement extends HTMLElement {
 
   open(): void {
     if (!this.#store) {
-      this.#pending = { ...(this.#pending ?? (optionsFromElement(this) as RelayDeskWidgetOptions)) };
+      this.#pending = { ...(this.#pending ?? (optionsFromElement(this) as TongYuWidgetOptions)) };
       this.connectedCallback();
       if (!this.#store) {
         return;
@@ -150,7 +150,7 @@ export class RelayDeskWidgetElement extends HTMLElement {
 
   /**
    * Bridges the widget to a native WebView and/or a parent iframe host.
-   * Outbound events are JSON with { source: 'relaydesk', type, data }.
+   * Outbound events are JSON with { source: 'tongyu', type, data }.
    */
   #bridge(): void {
     const bridge = this.#options?.bridge;
@@ -196,7 +196,7 @@ export class RelayDeskWidgetElement extends HTMLElement {
       return;
     }
     // 只接受宿主指令；忽略我们自己 postMessage 出去的业务事件。
-    if (parsed.source === 'relaydesk' && !['open', 'close', 'say', 'prefill'].includes(parsed.type ?? '')) {
+    if (parsed.source === 'tongyu' && !['open', 'close', 'say', 'prefill'].includes(parsed.type ?? '')) {
       return;
     }
     switch (parsed.type) {
@@ -243,8 +243,8 @@ export class RelayDeskWidgetElement extends HTMLElement {
 }
 
 /** Builds options from the element's attributes, or undefined when unset. */
-export function optionsFromElement(element: HTMLElement): RelayDeskWidgetOptions | undefined {
-  const endpoint = element.getAttribute('endpoint') ?? (typeof window !== 'undefined' ? (window as never as Record<string, string>)['RELAYDESK_ENDPOINT'] : undefined);
+export function optionsFromElement(element: HTMLElement): TongYuWidgetOptions | undefined {
+  const endpoint = element.getAttribute('endpoint') ?? (typeof window !== 'undefined' ? (window as never as Record<string, string>)['TONGYU_ENDPOINT'] : undefined);
   const inboxKey = element.getAttribute('inbox-key');
   if (!endpoint || !inboxKey) {
     return undefined;
@@ -258,12 +258,12 @@ export function optionsFromElement(element: HTMLElement): RelayDeskWidgetOptions
       parsedAttributes = undefined;
     }
   }
-  const options: RelayDeskWidgetOptions = {
+  const options: TongYuWidgetOptions = {
     endpoint,
     inboxKey,
     attributes: parsedAttributes,
   };
-  const mapping: Array<[string, keyof RelayDeskWidgetOptions]> = [
+  const mapping: Array<[string, keyof TongYuWidgetOptions]> = [
     ['external-id', 'externalId'],
     ['identity-token', 'identityToken'],
     ['display-name', 'displayName'],

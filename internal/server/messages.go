@@ -8,9 +8,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/relaydesk/relaydesk/internal/auth"
-	"github.com/relaydesk/relaydesk/internal/realtime"
-	"github.com/relaydesk/relaydesk/internal/webhook"
+	"github.com/tongyu/tongyu/internal/auth"
+	"github.com/tongyu/tongyu/internal/realtime"
+	"github.com/tongyu/tongyu/internal/webhook"
 )
 
 // This file holds the message operations that turn an append-only transcript
@@ -496,7 +496,7 @@ func (a *API) consoleSaveDraft(w http.ResponseWriter, r *http.Request, p auth.Pr
 
 // consoleSearchMessages searches every conversation the agent can see.
 //
-// Both sides of the match call relaydesk_tsquery, so a keyword the search box
+// Both sides of the match call tongyu_tsquery, so a keyword the search box
 // accepts is a keyword the index can answer — an ordinary Chinese query like
 // "退款" used to match nothing at all because the tokenizer could not segment it.
 // Trigram similarity is kept as a second path for typos and partial Latin words,
@@ -517,7 +517,7 @@ func (a *API) consoleSearchMessages(w http.ResponseWriter, r *http.Request, p au
 	conditions := []string{
 		"m.tenant_id = $1",
 		"m.deleted_at is null",
-		"(m.search_vector @@ relaydesk_tsquery($2) or m.content % $2)",
+		"(m.search_vector @@ tongyu_tsquery($2) or m.content % $2)",
 	}
 	if conversationFilter != "" {
 		if parsed, err := uuid.Parse(conversationFilter); err == nil {
@@ -544,7 +544,7 @@ func (a *API) consoleSearchMessages(w http.ResponseWriter, r *http.Request, p au
 		           -- large for the per-query frequency pass the knowledge base
 		           -- uses, and ts_rank_cd costs nothing extra here. It is scaled
 		           -- so that a genuine multi-term hit can outrank a verbatim one.
-		           ts_rank_cd(m.search_vector, relaydesk_tsquery($2)) * 0.5,
+		           ts_rank_cd(m.search_vector, tongyu_tsquery($2)) * 0.5,
 		           -- A message containing the query verbatim is what the operator
 		           -- meant even when the tokenizer ranks it low, which is the
 		           -- usual case for a short Chinese query.
@@ -643,14 +643,14 @@ func (a *API) searchMessagesInConversation(ctx context.Context, conversationID u
 		           -- Same two signals the cross-conversation search uses, so an
 		           -- in-thread search and a global one never disagree about which
 		           -- match matters more.
-		           ts_rank_cd(m.search_vector, relaydesk_tsquery($2)) * 0.5,
+		           ts_rank_cd(m.search_vector, tongyu_tsquery($2)) * 0.5,
 		           case when m.content ilike '%' || $2 || '%' then 0.5 else 0 end
 		       ) as rank
 		  from message m
 		  left join agent ag on ag.id = m.sender_id and m.sender_type = 'AGENT'
 		  left join visitor v on v.id = m.sender_id and m.sender_type = 'VISITOR'
 		 where m.conversation_id = $1
-		   and (m.search_vector @@ relaydesk_tsquery($2) or m.content % $2)`+view.filter("m")+`
+		   and (m.search_vector @@ tongyu_tsquery($2) or m.content % $2)`+view.filter("m")+`
 		 order by rank desc, m.sequence desc limit $3`, conversationID, query, limit)
 	if err != nil {
 		return nil, err

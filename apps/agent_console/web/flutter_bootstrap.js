@@ -14,5 +14,5 @@ _flutter.loader.load({
   // 在线客服优先加载当前版本，避免首次离线缓存初始化阻塞页面。
   config: { renderer: 'html' },
 }).catch(function () {
-  window.relaydeskLoadingFailed?.();
+  window.tongyuLoadingFailed?.();
 });

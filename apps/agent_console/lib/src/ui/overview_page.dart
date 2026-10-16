@@ -1,7 +1,7 @@
-import 'package:relaydesk_agent_console/src/ui/design_a.dart';
+import 'package:tongyu_agent_console/src/ui/design_a.dart';
 import 'package:flutter/material.dart';
-import 'package:relaydesk_agent_console/src/state/workbench_controller.dart';
-import 'package:relaydesk_agent_console/src/ui/workspace_layout.dart';
+import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
+import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
 
 /// 傻瓜式首页：先告诉人「现在该做什么」，再给数字和最近会话。
 class OverviewPage extends StatelessWidget {

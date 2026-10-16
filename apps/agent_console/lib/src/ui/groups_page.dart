@@ -2,14 +2,14 @@ import 'dart:async';
 import 'dart:convert';
 import '../util/message_alert_stub.dart'
     if (dart.library.html) '../util/message_alert_web.dart';
-import 'package:relaydesk_agent_console/src/util/group_window_stub.dart'
-    if (dart.library.html) 'package:relaydesk_agent_console/src/util/group_window_web.dart';
+import 'package:tongyu_agent_console/src/util/group_window_stub.dart'
+    if (dart.library.html) 'package:tongyu_agent_console/src/util/group_window_web.dart';
 import 'package:flutter/material.dart';
-import 'package:relaydesk_agent_console/src/ui/create_group_dialog.dart';
+import 'package:tongyu_agent_console/src/ui/create_group_dialog.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
-import 'package:relaydesk_agent_console/src/state/session_controller.dart';
+import 'package:tongyu_agent_console/src/state/session_controller.dart';
 
 class GroupsPage extends StatefulWidget {
   const GroupsPage({super.key, required this.session});

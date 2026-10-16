@@ -3,10 +3,10 @@ function fixture({installed=false,ios=false,waiting=false}={}){
  const events={},docEvents={},intervals=[],session=new Map();let version="v2";let updates=0,prompts=0,reloads=0,rewritten='';
  const worker={postMessage(message,ports){if(message.type==='SHELL_STATUS'){ports[0].postMessage({version,release:{version,notes:["release notes for "+version]}});return;}assert.equal(message.type,'ACTIVATE_UPDATE');}};
  const registration={waiting:waiting?worker:null,installing:null,update:async()=>{updates++;},addEventListener(){}};
- const window={addEventListener:(name,fn)=>events[name]=fn};
+ const window={dispatchEvent(){},addEventListener:(name,fn)=>events[name]=fn};
  const navigator={onLine:true,userAgent:ios?'iPhone':'Chrome',platform:ios?'iPhone':'Win32',standalone:installed,maxTouchPoints:ios?1:0,
   serviceWorker:{getRegistration:async()=>registration,register:async()=>registration,addEventListener:(name,fn)=>events[name]=fn}};
- const context={window,navigator,isSecureContext:true,matchMedia:()=>({matches:installed}),URL,MessageChannel:class{constructor(){this.port1={close(){}};this.port2={postMessage:data=>this.port1.onmessage?.({data})};}},sessionStorage:{getItem:k=>session.get(k),setItem:(k,v)=>session.set(k,v)},
+ const context={CustomEvent:class{constructor(type){this.type=type;}},window,navigator,isSecureContext:true,matchMedia:()=>({matches:installed}),URL,MessageChannel:class{constructor(){this.port1={close(){}};this.port2={postMessage:data=>this.port1.onmessage?.({data})};}},sessionStorage:{getItem:k=>session.get(k),setItem:(k,v)=>session.set(k,v)},
   location:{href:'https://test.example/console/?surface=agent&install=1',reload(){reloads++;}},
   history:{state:null,replaceState(state,title,url){rewritten=url.toString();}},
   document:{visibilityState:'visible',addEventListener:(name,fn)=>docEvents[name]=fn},setTimeout(){},setInterval(fn){intervals.push(fn);}};

@@ -6,8 +6,8 @@ const ticket = query.get('invite') || '';
 const identityToken = query.get('identityToken') || '';
 const deepGroupId = query.get('groupId') || query.get('group') || '';
 const cache = query.has('console')
-  ? 'liaoqiao-console-group'
-  : 'liaoqiao-group-' + (ticket || deepGroupId || (identityToken ? 'identity' : 'anon'));
+  ? 'tongyu-console-group'
+  : 'tongyu-group-' + (ticket || deepGroupId || (identityToken ? 'identity' : 'anon'));
 let token = '', groupId = '', actorId = '', actorKind = 'widget';
 let socket, retry, searchTimer, pollTimer, items = [], pending = null, sending = false;
 let group = null, refreshGeneration = 0, call = null, peer = null, media = null;
@@ -367,12 +367,12 @@ if (query.get('embed') === '1' && (window.parent !== window || window.opener)) {
   const host = window.parent !== window ? window.parent : window.opener;
   if (!parentOrigin || !deepGroupId) error(new Error('请配置准确的parentOrigin和groupId'));
   else {
-    const ready = setInterval(() => host.postMessage({type:'relaydesk.group.ready',groupId:deepGroupId}, parentOrigin), 500);
+    const ready = setInterval(() => host.postMessage({type:'tongyu.group.ready',groupId:deepGroupId}, parentOrigin), 500);
     let authenticating = false;
     window.addEventListener('message', async event => {
       if (event.origin !== parentOrigin || event.source !== host || token || authenticating) return;
       const data = event.data;
-      if (data?.type !== 'relaydesk.group.authenticate' || data.groupId !== deepGroupId || typeof data.token !== 'string') return;
+      if (data?.type !== 'tongyu.group.authenticate' || data.groupId !== deepGroupId || typeof data.token !== 'string') return;
       authenticating = true;
       token = data.token; groupId = deepGroupId;
       try {
@@ -380,7 +380,7 @@ if (query.get('embed') === '1' && (window.parent !== window || window.opener)) {
         actorId = me.actorId; actorKind = me.actorKind;
         if (!await start()) throw new Error('群聊初始化失败，请重新打开');
         clearInterval(ready);
-        host.postMessage({type:'relaydesk.group.authenticated',groupId}, parentOrigin);
+        host.postMessage({type:'tongyu.group.authenticated',groupId}, parentOrigin);
       } catch(e) { token = ''; error(e); }
       finally { authenticating = false; }
     });
@@ -390,11 +390,11 @@ if (query.get('embed') === '1' && (window.parent !== window || window.opener)) {
   // Only the same-origin parent (embedded console) or opener may hand off login.
   const sourceWindow = window.parent !== window ? window.parent : window.opener;
   token = ''; el('join').hidden = true; el('loading').hidden = false;
-  const ready = setInterval(() => sourceWindow?.postMessage('liaoqiao-group-ready', location.origin), 400);
+  const ready = setInterval(() => sourceWindow?.postMessage('tongyu-group-ready', location.origin), 400);
   window.addEventListener('message', async event => {
     if (event.origin !== location.origin || event.source !== sourceWindow || token) return;
     let data; try { data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data; } catch { return; }
-    if(data?.type !== 'liaoqiao-group-auth') return;
+    if(data?.type !== 'tongyu-group-auth') return;
     ({token,groupId,actorId,actorKind} = data); clearInterval(ready);
     await start();
   });

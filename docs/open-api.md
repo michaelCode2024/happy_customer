@@ -5,7 +5,7 @@
 租户后端用 API Key 调用。密钥在管理端创建，请求头：
 
 ```http
-X-RelayDesk-Key: <api-key>
+X-TongYu-Key: <api-key>
 Content-Type: application/json
 ```
 
@@ -38,7 +38,7 @@ Base：`{PUBLIC_BASE_URL}/api/v1/open`
 
 ```http
 POST /api/v1/open/groups/<group-id>/members
-X-RelayDesk-Key: <server-api-key>
+X-TongYu-Key: <server-api-key>
 Content-Type: application/json
 
 {
@@ -57,7 +57,7 @@ Content-Type: application/json
 
 ```http
 POST /api/v1/open/groups/<group-id>/member-token
-X-RelayDesk-Key: <server-api-key>
+X-TongYu-Key: <server-api-key>
 Content-Type: application/json
 
 {"externalId":"user-1001"}
@@ -94,7 +94,7 @@ JSON：`{ "status": 401, "code": "...", "message": "...", "timestamp": "..." }`�
 
 ```http
 POST /api/v1/open/conversations/<conversation-id>/read
-X-RelayDesk-Key: <server-api-key>
+X-TongYu-Key: <server-api-key>
 Content-Type: application/json
 
 {"readerType":"VISITOR","readerId":"<visitor-uuid>","sequence":12}
@@ -112,7 +112,7 @@ readerType 为 VISITOR / AGENT，readerId 必须属于对应客户会话或企�
 {"conversationId":"<uuid>","readerType":"VISITOR","readerId":"<uuid>","sequence":12}
 ```
 
-请求头 `X-RelayDesk-Event` 标识事件类型，`X-RelayDesk-Delivery` 为投递 ID；按照已有 `X-RelayDesk-Timestamp` 与 `X-RelayDesk-Signature` 校验 HMAC-SHA256：签名原文为 `<timestamp>.<原始请求体>`，请求头值为 `sha256=<十六进制签名>`。校验时间窗口，使用原始字节，成功持久化后返回 2xx；失败会重试。按投递 ID 去重，并按 `(conversationId,readerType,readerId,eventType)` 取最大 sequence，防止乱序回调回退。
+请求头 `X-TongYu-Event` 标识事件类型，`X-TongYu-Delivery` 为投递 ID；按照已有 `X-TongYu-Timestamp` 与 `X-TongYu-Signature` 校验 HMAC-SHA256：签名原文为 `<timestamp>.<原始请求体>`，请求头值为 `sha256=<十六进制签名>`。校验时间窗口，使用原始字节，成功持久化后返回 2xx；失败会重试。按投递 ID 去重，并按 `(conversationId,readerType,readerId,eventType)` 取最大 sequence，防止乱序回调回退。
 
 ### 工作台提醒
 
@@ -143,11 +143,11 @@ readerType 为 VISITOR / AGENT，readerId 必须属于对应客户会话或企�
 ```python
 import hashlib, hmac, time
 raw = request.body  # 原始字节，不要 JSON 解析后再序列化
-stamp = request.headers['X-RelayDesk-Timestamp']
+stamp = request.headers['X-TongYu-Timestamp']
 if abs(time.time() - int(stamp)) > 300:
     return 401
 expected = 'sha256=' + hmac.new(secret.encode(), stamp.encode() + b'.' + raw, hashlib.sha256).hexdigest()
-if not hmac.compare_digest(expected, request.headers['X-RelayDesk-Signature']):
+if not hmac.compare_digest(expected, request.headers['X-TongYu-Signature']):
     return 401
 # 持久化投递 ID 去重与最大 sequence，再返回 200
 ```

@@ -37,8 +37,8 @@ def main():
 
     assert req('GET', '/ready')['status'] == 'READY'
     platform = req('POST', '/api/v1/platform/login', {
-        'email': os.environ.get('AI_E2E_PLATFORM_EMAIL', 'admin@relaydesk.local'),
-        'password': os.environ.get('AI_E2E_PLATFORM_PASSWORD', 'RelayDesk@2026'),
+        'email': os.environ.get('AI_E2E_PLATFORM_EMAIL', 'admin@tongyu.local'),
+        'password': os.environ.get('AI_E2E_PLATFORM_PASSWORD', 'TongYu@2026'),
     })['token']
     slug = 'tongyu-ai-' + time.strftime('%m%d%H%M%S')
     password = 'TongYuLocal@2026'

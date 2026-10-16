@@ -11,14 +11,14 @@ COPY cmd ./cmd
 COPY internal ./internal
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/relaydesk ./cmd/server && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/tongyu ./cmd/server && \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/entrypoint ./cmd/entrypoint && \
     mkdir -p /out/uploads
 
 FROM gcr.io/distroless/static-debian13:nonroot
 
 # Use pre-built static files instead of building in container
-COPY --from=build /out/relaydesk /relaydesk
+COPY --from=build /out/tongyu /tongyu
 COPY --from=build /out/entrypoint /entrypoint
 COPY --chown=65532:65532 --from=build /out/uploads /data/uploads
 
@@ -36,5 +36,5 @@ WORKDIR /data
 
 EXPOSE 8080
 USER root
-ENTRYPOINT ["/entrypoint", "/relaydesk"]
+ENTRYPOINT ["/entrypoint", "/tongyu"]
 
