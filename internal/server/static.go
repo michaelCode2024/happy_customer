@@ -149,7 +149,7 @@ func (a *API) registerStatic(mux *http.ServeMux) {
 	mux.HandleFunc("GET /console", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/console/", http.StatusPermanentRedirect)
 	})
-	// 本机联调：模拟第三方业务 H5 嵌入客服，不进入 /console 体系。
+	// 演示页：模拟第三方业务 H5 嵌入客服，不进 /console。
 	mux.HandleFunc("GET /demo/{name}", func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
 		if name == "" || strings.ContainsAny(name, `/\:`) || !strings.HasSuffix(name, ".html") {
