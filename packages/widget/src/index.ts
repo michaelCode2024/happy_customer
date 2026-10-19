@@ -21,6 +21,8 @@ declare global {
     TongYu?: TongYuGlobal;
     /** Optional configuration object, read before the script attributes. */
     TongYuSettings?: TongYuWidgetOptions;
+    /** 旧名：线上 Go 壳尚未全部切到 TongYuSettings 前兼容读取。 */
+    RelayDeskSettings?: TongYuWidgetOptions;
   }
 }
 
@@ -59,11 +61,10 @@ if (typeof window !== 'undefined') {
   };
   window.TongYu = api;
 
-  // Auto-mount: prefer an explicit window.TongYuSettings (a CMS or a tag
-  // manager usually sets that), then fall back to the loading script's own
-  // data-* attributes.
+  // Auto-mount: prefer TongYuSettings；线上旧 H5 壳仍写 RelayDeskSettings 时回退读取。
+  // 出站事件协议仍是 source=tongyu，与宿主对齐。
   const boot = (): void => {
-    const settings = window.TongYuSettings;
+    const settings = window.TongYuSettings ?? window.RelayDeskSettings;
     if (settings?.endpoint && settings.inboxKey) {
       api.mount(settings);
       return;

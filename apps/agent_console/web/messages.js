@@ -98,7 +98,8 @@ window.addEventListener('message', async event=>{
   if(event.source===frame.contentWindow && event.origin===location.origin){
     let data;try{data=typeof event.data==='string'?JSON.parse(event.data):event.data;}catch{return;}
     if(data?.type==='tongyu.group.ready' && data.groupId===selectedGroup)frame.contentWindow.postMessage({type:'tongyu.group.authenticate',groupId:selectedGroup,token},location.origin);
-    if(data?.source==='tongyu' && data.type==='host-ready')frame.contentWindow.postMessage({type:'authenticate',identityToken:token},location.origin);
+    // widget 出站是 ready；host-ready 留给外层 App 壳，这里两种都给 iframe 补鉴权。
+    if(data?.source==='tongyu' && (data.type==='host-ready' || data.type==='ready'))frame.contentWindow.postMessage({type:'authenticate',identityToken:token},location.origin);
     if(data?.source==='tongyu' && data.type==='close')back();
     if(data?.type==='tongyu.group.authenticated' && inbox?.customCss){const style=frame.contentDocument.createElement('style');style.textContent=inbox.customCss;frame.contentDocument.head.append(style);}
     return;
