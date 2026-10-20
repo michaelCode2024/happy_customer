@@ -16,8 +16,9 @@
   --ui-muted: #637b9e;
   --ui-soft: #edf2ff;
   --ui-border: #e7edf6;
-  --ui-mine: #e9f0ff;
-  --ui-mine-ink: #3e5c94;
+  /* B 方案：客服发出气泡用主色实底，与客户白底气泡形成高密对照 */
+  --ui-mine: #3263ff;
+  --ui-mine-ink: #ffffff;
   --ui-hero: linear-gradient(115deg, #eef3ff, #f7faff 72%);
   --ui-shadow: 0 8px 28px #263d6c08;
 }
@@ -25,6 +26,7 @@
   background: var(--action-rest);
   border-color: #376aff;
   color: #fff;
+  border-radius: 40px;
   filter: none;
 }
 #app :is(button.primary, .btn.primary):hover:not(:disabled) {
@@ -53,8 +55,8 @@
   --ui-muted: #a1b0c9;
   --ui-soft: #2c3d60;
   --ui-border: #354258;
-  --ui-mine: #344e7c;
-  --ui-mine-ink: #e4ecff;
+  --ui-mine: #4d7aff;
+  --ui-mine-ink: #ffffff;
   --ui-hero: linear-gradient(115deg, #2a3956, #222e43 80%);
   --ui-shadow: 0 8px 28px #080d160f;
 }
