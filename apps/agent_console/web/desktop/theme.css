@@ -163,3 +163,353 @@ body, #app { font-family: "Plus Jakarta Sans",-apple-system,BlinkMacSystemFont,"
   .knowledge-grid { grid-template-columns: minmax(0,1fr); }
   .workspace-hero { padding: 22px; gap: 16px; }
 }
+
+/* ========== Stitch B「高密高效沉浸流」：客服端图标轨 + 四栏接待台 ========== */
+body.icon-rail {
+  --rail: 56px;
+  --inbox-w: 290px;
+  --side-w: 300px;
+  --workspace-foot-height: 48px;
+}
+body.icon-rail #sidebar {
+  width: var(--rail);
+  padding: 10px 0 8px;
+  align-items: center;
+  background: #f2f3ff;
+  border-right: 1px solid #e2e7ff;
+  gap: 0;
+}
+body.icon-rail #sidebar .brand {
+  margin: 0 0 6px;
+  padding: 4px 0;
+  justify-content: center;
+  width: 100%;
+}
+body.icon-rail #sidebar .brand > span,
+body.icon-rail #sidebar .workspace-switch,
+body.icon-rail #sidebar .nav-label { display: none !important; }
+body.icon-rail #sidebar .brand-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
+body.icon-rail #sidebar .nav-scroll {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  width: 100%;
+  padding: 0;
+  overflow-x: hidden;
+}
+body.icon-rail #sidebar .nav-item {
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  margin: 0;
+  padding: 7px 2px 6px;
+  border-radius: 0;
+  color: #637b9e;
+  background: transparent;
+  white-space: normal;
+}
+body.icon-rail #sidebar .nav-item .i {
+  font-size: 20px;
+  width: 20px;
+  height: 20px;
+}
+body.icon-rail #sidebar .nav-item .nav-caption {
+  display: block;
+  font-size: 9px;
+  line-height: 1.15;
+  letter-spacing: 0;
+  max-width: 52px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+}
+body.icon-rail #sidebar .nav-item:hover {
+  color: #3263ff;
+  background: rgba(50, 99, 255, 0.06);
+}
+body.icon-rail #sidebar .nav-item.active {
+  color: #3263ff;
+  background: #edf2ff;
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 #3263ff;
+}
+body.icon-rail #sidebar .sidebar-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  width: 100%;
+  padding-top: 6px;
+  border-top: 1px solid #e2e7ff;
+  margin-top: auto;
+}
+body.icon-rail #sidebar .sidebar-account {
+  width: 100%;
+  height: auto;
+  min-height: 44px;
+  margin: 4px 0 0;
+  padding: 8px 0;
+  justify-content: center;
+  border: 0;
+  border-radius: 0;
+}
+body.icon-rail #sidebar .sidebar-account .grow,
+body.icon-rail #sidebar .sidebar-account > .i { display: none !important; }
+body.icon-rail #sidebar .sidebar-account .avatar {
+  width: 28px;
+  height: 28px;
+  font-size: 11px;
+}
+body.icon-rail.immerse-chat #topbar { display: none !important; }
+body.icon-rail.immerse-chat #main { min-height: 0; }
+body.icon-rail.immerse-chat #screen { height: 100%; }
+body.icon-rail .chat-layout {
+  grid-template-columns: var(--inbox-w) minmax(480px, 1fr) var(--side-w);
+  height: 100%;
+  background: #f5f7fb;
+}
+body.icon-rail .inbox,
+body.icon-rail .chat-side {
+  background: #fff;
+  border-color: #e7edf6;
+}
+body.icon-rail .inbox-head { padding: 14px 14px 0; }
+body.icon-rail .inbox-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+body.icon-rail .inbox-title h2 { font-size: 16px; font-weight: 600; letter-spacing: -0.2px; }
+body.icon-rail .inbox-tools { display: flex; gap: 2px; }
+body.icon-rail .inbox-head .search {
+  background: #f8faff;
+  border: 1px solid #e7edf6;
+  border-radius: 10px;
+  min-height: 36px;
+}
+body.icon-rail .inbox-head .tabs {
+  gap: 0;
+  margin-top: 10px;
+  border-bottom: 1px solid #e7edf6;
+}
+body.icon-rail .inbox-head .tabs button {
+  flex: 1;
+  font-size: 12px;
+  padding: 10px 4px;
+  color: #637b9e;
+}
+body.icon-rail .inbox-head .tabs button.active {
+  color: #3263ff;
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 #3263ff;
+}
+body.icon-rail .inbox-items { padding: 6px 8px 10px; }
+body.icon-rail .conversation {
+  border-radius: 10px;
+  min-height: 72px;
+  padding: 10px 10px;
+  margin-bottom: 2px;
+  border-bottom: 0;
+}
+body.icon-rail .conversation.active {
+  background: #edf2ff;
+  box-shadow: inset 3px 0 0 #3263ff;
+}
+body.icon-rail .conv-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+body.icon-rail .conv-name {
+  font-weight: 600;
+  color: #0c1d40;
+  max-width: 88px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+body.icon-rail .channel-chip {
+  font-size: 10px;
+  line-height: 16px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #f2f3ff;
+  color: #637b9e;
+  flex-shrink: 0;
+}
+body.icon-rail .conversation.active .channel-chip {
+  background: #d9e2ff;
+  color: #3263ff;
+}
+body.icon-rail .conv-title time {
+  margin-left: auto;
+  font-size: 10px;
+  color: #637b9e;
+}
+body.icon-rail .conv-preview {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #637b9e;
+}
+body.icon-rail .chat-main { background: #faf8ff; border-right: 1px solid #e7edf6; }
+body.icon-rail .chat-head {
+  height: 56px;
+  min-height: 56px;
+  padding: 0 16px;
+  background: #fff;
+  border-bottom: 1px solid #e7edf6;
+}
+body.icon-rail .chat-ext-id {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #637b9e;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+body.icon-rail .chat-head-actions .btn {
+  min-height: 32px;
+  border-radius: 16px;
+  padding: 0 14px;
+  font-size: 12px;
+}
+body.icon-rail .chat-head-actions .btn.primary {
+  border-radius: 16px;
+}
+body.icon-rail .thread { background: #f8faff; padding: 18px 22px; }
+body.icon-rail .message .bubble {
+  border-radius: 12px 12px 12px 4px;
+  line-height: 1.85;
+  box-shadow: 0 1px 3px rgba(12, 29, 64, 0.04);
+}
+body.icon-rail .message.mine .bubble {
+  border-radius: 12px 12px 4px 12px;
+  background: #3263ff;
+}
+body.icon-rail .composer {
+  background: #fff;
+  border-top: 1px solid #e7edf6;
+  padding: 10px 16px 12px;
+}
+body.icon-rail .composer-tools {
+  background: #f8faff;
+  border: 1px solid #e7edf6;
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+  padding: 4px 8px;
+  margin: 0;
+  gap: 4px;
+}
+body.icon-rail .composer textarea {
+  border: 1px solid #e7edf6;
+  border-radius: 0 0 10px 10px;
+  min-height: 72px;
+  padding: 10px 12px;
+  background: #fff;
+}
+body.icon-rail .composer textarea:focus {
+  border-color: #3263ff;
+  box-shadow: 0 0 0 3px rgba(50, 99, 255, 0.12);
+}
+body.icon-rail .ai-assist-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 14px;
+  background: #edf2ff;
+  color: #3263ff;
+  font-size: 12px;
+  font-weight: 600;
+}
+body.icon-rail .composer .btn.primary {
+  min-height: 40px;
+  border-radius: 40px;
+  padding: 0 18px;
+}
+body.icon-rail .chat-side {
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+body.icon-rail .side-tabs { display: none; }
+body.icon-rail .side-body.side-stack {
+  padding: 12px;
+  gap: 10px;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+body.icon-rail .side-card {
+  background: #fff;
+  border: 1px solid #e7edf6;
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: 0 1px 3px rgba(12, 29, 64, 0.04);
+}
+body.icon-rail .side-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  gap: 8px;
+}
+body.icon-rail .side-card-head h4 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0c1d40;
+}
+body.icon-rail .side-card-head .i { font-size: 16px; width: 16px; height: 16px; color: #3263ff; }
+body.icon-rail .ai-suggest-card { background: #f8faff; }
+body.icon-rail .ai-suggest-hint { font-size: 11px; color: #637b9e; margin: 0 0 8px; }
+body.icon-rail .ai-suggest-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+body.icon-rail .tag-add {
+  background: transparent;
+  border: 1px dashed #c3c5d8;
+  color: #637b9e;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+body.icon-rail .note-card {
+  padding: 8px 0;
+  border-bottom: 1px solid #e7edf6;
+}
+body.icon-rail .note-card:last-child { border-bottom: 0; }
+body.icon-rail .note-card strong { display: block; font-size: 12px; color: #0c1d40; }
+body.icon-rail .note-card small { color: #637b9e; font-size: 11px; }
+body.icon-rail .note-card p { margin: 4px 0 0; font-size: 12px; line-height: 1.7; color: #434656; }
+body.icon-rail .inbox-foot {
+  font-size: 11px;
+  gap: 6px;
+}
+@media (max-width: 1350px) {
+  body.icon-rail {
+    --inbox-w: 260px;
+    --side-w: 280px;
+  }
+  body.icon-rail .chat-layout {
+    grid-template-columns: var(--inbox-w) minmax(420px, 1fr) var(--side-w);
+  }
+}
+@media (max-width: 1180px) {
+  body.icon-rail .chat-layout {
+    grid-template-columns: 270px minmax(360px, 1fr);
+  }
+}
+/* 平台端仍用宽侧栏，不受 icon-rail 影响 */
+body.platform-shell { --rail: 216px; }

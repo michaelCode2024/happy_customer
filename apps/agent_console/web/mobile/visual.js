@@ -1,13 +1,15 @@
-/* 业务图标名 → Material Symbols Outlined 连字名；品牌 logo 仍用 favicon.svg，不走这里 */
+/* 业务图标名 → Material Symbols Outlined；对齐 Stitch B 方案连字名。品牌 logo 仍用 favicon.svg */
 const symbols={
   eye:'visibility',eyeOff:'visibility_off',back:'arrow_back',chevron:'chevron_right',search:'search',
-  bell:'notifications',more:'more_horiz',plus:'add',message:'forum',groups:'groups',grid:'grid_view',
-  user:'person',check:'check',close:'close',filter:'tune',smile:'sentiment_satisfied',spark:'auto_awesome',
-  image:'image',file:'description',mic:'mic',send:'send',reply:'reply',forward:'forward',edit:'edit',
-  trash:'delete',pin:'keep',phone:'call',video:'videocam',book:'menu_book',chart:'bar_chart',
-  settings:'settings',link:'link',logout:'logout',clock:'schedule',copy:'content_copy',star:'star',
+  bell:'notifications',more:'more_vert',plus:'add',message:'chat',groups:'forum',grid:'dashboard',
+  user:'person',check:'check_circle',close:'close',filter:'filter_list',smile:'sentiment_satisfied',spark:'smart_toy',
+  image:'image',file:'attach_file',mic:'mic',send:'send',reply:'reply',forward:'forward',edit:'edit',
+  trash:'delete',pin:'keep',phone:'call',video:'videocam',book:'menu_book',chart:'analytics',
+  settings:'settings',link:'cable',logout:'logout',clock:'schedule',copy:'content_copy',star:'star',
   share:'share',download:'download',play:'play_arrow',pause:'pause',camera:'photo_camera',shield:'shield',
-  headset:'headset_mic',moon:'dark_mode',folder:'folder',bolt:'bolt',domain:'domain',lock:'lock',person:'person'
+  headset:'headset_mic',moon:'dark_mode',folder:'folder',bolt:'quickreply',domain:'domain',lock:'lock',person:'person',
+  account:'account_circle',sync:'sync',sort:'sort',info:'info',psychology:'psychology',library:'library_books',
+  automation:'smart_button',done:'done_all',note:'sticky_note_2'
 };
 const icon=(name,cls='')=>`<span class="material-symbols-outlined i ${cls}" aria-hidden="true">${symbols[name]||symbols.grid}</span>`;
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
