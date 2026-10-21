@@ -1,4 +1,3 @@
-import 'package:tongyu_agent_console/src/ui/design_a.dart';
 import 'package:tongyu_agent_console/src/util/labels.dart';
 import 'package:tongyu_agent_console/src/util/format.dart';
 import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
@@ -230,12 +229,6 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
             .toList();
         return ListView(padding: const EdgeInsets.all(24), children: [
           const WorkspaceHeading('团队成员', '集中查看团队账号、接待权限与在线状态。新账号由平台管理员建立。'),
-          const TongYuHero(
-              compact: true,
-              title: '好的服务，来自并肩的团队。',
-              description: '让每一位成员找到自己的接待入口，让每一次协作更有默契。',
-              eyebrow: 'TEAM / 团队协作'),
-          const SizedBox(height: 24),
           // 汇总当前企业的真实成员数据；搜索只筛选列表，不改变团队总览。
           Padding(
             padding: const EdgeInsets.only(bottom: 24),

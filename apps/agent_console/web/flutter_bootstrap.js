@@ -8,11 +8,10 @@ for (const build of _flutter.buildConfig.builds) {
     build.mainJsPath += '?release=' + releaseVersion;
   }
 }
-// CanvasKit 会向 Google Fonts 拉 Noto Sans SC；国内网络常失败，中文就会变成方框。
-// 固定 HTML 渲染器，用系统 CJK 字体（微软雅黑等），与 index.html 的 font-family 一致。
+// 当前 Flutter 只提供 CanvasKit 构建。继续指定 html 渲染器时加载会直接失败，页面停在开屏。
+// 中文仍走主题里的系统字体回退，不依赖页面去拉一套网页字体。
 _flutter.loader.load({
-  // 在线客服优先加载当前版本，避免首次离线缓存初始化阻塞页面。
-  config: { renderer: 'html' },
+  config: { renderer: 'canvaskit' },
 }).catch(function () {
   window.tongyuLoadingFailed?.();
 });

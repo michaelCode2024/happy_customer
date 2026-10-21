@@ -310,7 +310,7 @@ class _PwaPanelState extends State<PwaPanel> {
             : update
                 ? '新版本已就绪，请保存草稿后更新'
                 : error.isNotEmpty
-                    ? error
+                    ? '当前页面暂时无法准备离线安装'
                     : ready
                         ? '离线资源已就绪'
                         : '正在准备离线资源…';

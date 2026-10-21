@@ -7,6 +7,7 @@
 .bubble{font-size:var(--message-font,15px)}.conv-line strong{font-size:var(--list-font,15px)}.bubble audio{display:block}.bubble .photo-message{margin:0}.bubble{white-space:pre-wrap;overflow-wrap:anywhere}.bubble:focus-visible{outline:2px solid #718fe0}.primary,.secondary,.sheet-option,.list-row{min-height:44px}.login .logo{white-space:nowrap}#record-preview audio{max-width:100%}
 
 html[data-keyboard="open"] .composer{padding-bottom:8px}
+.draft-banner.send-error{color:#ad2525;background:#fff1f0;border:1px solid #f4c3c0}.draft-banner.send-error button{color:#ad2525;font-weight:600}
 
 .group-call-frame{margin-bottom:env(safe-area-inset-bottom,0px)}
 .login{padding-bottom:max(25px,env(safe-area-inset-bottom,0px));overflow-y:auto;min-height:0}.login .field,.login button{flex-shrink:0}.section{padding-bottom:max(24px,env(safe-area-inset-bottom,0px))}.article{padding-bottom:calc(28px + env(safe-area-inset-bottom,0px))}

@@ -1,4 +1,3 @@
-import 'package:tongyu_agent_console/src/ui/design_a.dart';
 import 'package:flutter/material.dart';
 import 'package:tongyu_agent_console/src/ui/console_form_dialog.dart';
 import 'package:tongyu_agent_console/src/util/channel_preview_stub.dart'
@@ -344,20 +343,12 @@ class _IntegrationPageState extends State<IntegrationPage> {
                         Text(_error!),
                         TextButton(onPressed: _load, child: const Text('重试'))
                       ]))
-                    : ListView(padding: const EdgeInsets.all(24), children: [
-                        if (_tab == 0) ...[
-                          const TongYuHero(
-                              title: '连接你的业务，让服务触手可及。',
-                              description:
-                                  '选择适合网站、H5 或 App 的接入方式，让每一次咨询都有清晰的入口。',
-                              eyebrow: 'CONNECT / 连接与服务'),
-                          const SizedBox(height: 24)
-                        ],
+                    : ListView(padding: const EdgeInsets.all(16), children: [
                         Container(
                             padding: const EdgeInsets.all(22),
                             decoration: BoxDecoration(
                                 color: theme.colorScheme.surface,
-                                borderRadius: BorderRadius.circular(16),
+                                borderRadius: BorderRadius.circular(10),
                                 border: Border.all(
                                     color: theme.colorScheme.outlineVariant)),
                             child: switch (_tab) {

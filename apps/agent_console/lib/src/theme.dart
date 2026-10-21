@@ -182,7 +182,7 @@ class RelayTheme {
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         ),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: scheme.surface,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
@@ -193,7 +193,7 @@ class RelayTheme {
           side: BorderSide(color: scheme.outlineVariant),
         ),
       ),
-      dialogTheme: DialogTheme(
+      dialogTheme: DialogThemeData(
         backgroundColor: scheme.surface,
         surfaceTintColor: Colors.transparent,
         titleTextStyle: TextStyle(
@@ -204,7 +204,7 @@ class RelayTheme {
         ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
-      tabBarTheme: TabBarTheme(
+      tabBarTheme: TabBarThemeData(
         labelColor: scheme.primary,
         unselectedLabelColor: scheme.onSurfaceVariant,
         indicatorColor: scheme.primary,

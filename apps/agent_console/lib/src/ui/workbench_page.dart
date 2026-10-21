@@ -407,15 +407,8 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                 _workbench.dismissReceptionNotice();
                 unawaited(_workbench.select(conversation.id));
               },
-              // 接待区直接进入工作画布，标题由全局面包屑和会话列表承担。
-              // 留白只用于分隔三栏，不再让宣传文案占用聊天与输入空间。
-              child: useRail && _section == WorkbenchSection.conversations
-                  ? Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: ClipRRect(
-                          borderRadius: BorderRadius.circular(16),
-                          child: _bodyFor(width - 264)))
-                  : _bodyFor(useRail ? width - 232 : width),
+              // 图标轨固定 72。接待区铺满剩余宽度，不再套一层圆角留白。
+              child: _bodyFor(useRail ? width - 72 : width),
             );
             final body = Column(children: [
               if (!isHostedConsole)
@@ -474,8 +467,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
               body: Row(children: [
                 ListenableBuilder(
                     listenable: _workbench,
-                    builder: (context, _) => WorkspaceSidebar(
-                          subtitle: widget.session.tenant?.name ?? '企业工作空间',
+                    builder: (context, _) => ConsoleIconRail(
                           selectedIndex: sections
                               .indexWhere((spec) => spec.section == _section),
                           onSelected: (index) => setState(
@@ -487,36 +479,30 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                                   _section == spec.section
                                       ? spec.selectedIcon
                                       : spec.icon,
-                                  group: '',
                                   count: spec.section ==
                                           WorkbenchSection.conversations
                                       ? _workbench.unread
                                       : 0)
                           ],
-                          footer:
-                              Column(mainAxisSize: MainAxisSize.min, children: [
-                            InkWell(
-                              onTap: () => setState(
-                                  () => _section = WorkbenchSection.settings),
-                              child: _RailLeading(agent: agent, extended: true),
-                            ),
-                            if (canOpenWebsite)
-                              TextButton.icon(
-                                  onPressed: openDownloads,
-                                  icon:
-                                      const Icon(Icons.phone_android, size: 18),
-                                  label: const Text('手机客户端下载')),
-                            const SizedBox(height: 10),
-                            Row(children: [
-                              _ConnectionBadge(workbench: _workbench),
-                              const Spacer(),
-                              NotificationCenter(
-                                  api: widget.session.api,
-                                  onConversation:
-                                      _openNotificationConversation),
-                              messageSoundButton(),
-                            ]),
-                          ]),
+                          footer: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                NotificationCenter(
+                                    api: widget.session.api,
+                                    onConversation:
+                                        _openNotificationConversation),
+                                if (canOpenWebsite)
+                                  IconButton(
+                                      tooltip: '手机客户端下载',
+                                      onPressed: openDownloads,
+                                      icon: const Icon(Icons.phone_android,
+                                          size: 20)),
+                              ]),
+                          avatar: InkWell(
+                            onTap: () => setState(
+                                () => _section = WorkbenchSection.settings),
+                            child: _RailLeading(agent: agent, extended: false),
+                          ),
                         )),
                 Expanded(
                     child: Column(children: [
@@ -531,7 +517,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                                       .colorScheme
                                       .outlineVariant))),
                       child: Row(children: [
-                        Text('工作空间',
+                        Text(widget.session.tenant?.name ?? '工作空间',
                             style: TextStyle(
                                 fontSize: 12,
                                 color: Theme.of(context)
@@ -548,8 +534,9 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                                 style: const TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w600))),
-                        const Icon(Icons.verified_user_outlined, size: 16),
-                        const SizedBox(width: 7),
+                        _ConnectionBadge(workbench: _workbench),
+                        messageSoundButton(),
+                        const SizedBox(width: 8),
                         Text(agent?.displayName ?? '',
                             style: const TextStyle(fontSize: 12))
                       ])),
@@ -566,18 +553,8 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
   Widget _bodyFor(double width) {
     switch (_section) {
       case WorkbenchSection.groups:
-        return LayoutBuilder(builder: (context, box) {
-          final groups = GroupsPage(session: widget.session);
-          return box.maxWidth < 760
-              ? groups
-              : Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: ClipRRect(
-                      borderRadius: BorderRadius.circular(16),
-                      child: ColoredBox(
-                          color: Theme.of(context).colorScheme.surface,
-                          child: groups)));
-        });
+        // 和客户消息一样铺满剩余宽度，不再套一层圆角留白。
+        return GroupsPage(session: widget.session);
       case WorkbenchSection.overview:
         final admin = widget.session.agent?.role == 'SUPERVISOR';
         return OverviewPage(

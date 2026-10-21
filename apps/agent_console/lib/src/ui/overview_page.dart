@@ -44,15 +44,7 @@ class OverviewPage extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   WorkspaceHeading('工作概览', '$greeting，查看当前接待情况与团队工作状态。'),
-                  const SizedBox(height: 20),
-                  TongYuHero(
-                      title: '有温度的服务，\n从一次好好回应开始。',
-                      description: '把客户、团队与知识连接起来。专注每一次对话，也看见服务的全貌。',
-                      action: FilledButton.icon(
-                          onPressed: onInbox,
-                          icon: const Icon(Icons.chat_bubble_outline, size: 17),
-                          label: const Text('进入消息工作台'))),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 8),
                   _PrimaryActionCard(
                     title: workbench.queued > 0
                         ? '有 ${workbench.queued} 位客户在等'

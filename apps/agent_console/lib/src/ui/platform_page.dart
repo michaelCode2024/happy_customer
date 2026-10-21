@@ -1,4 +1,3 @@
-import 'package:tongyu_agent_console/src/ui/design_a.dart';
 import 'package:tongyu_agent_console/src/ui/brand.dart';
 import 'manual_quota_page.dart';
 import 'platform_plans_page.dart';
@@ -106,10 +105,7 @@ class _PlatformPageState extends State<PlatformPage> {
                 child: Row(
                   children: <Widget>[
                     if (wide)
-                      WorkspaceSidebar(
-                        subtitle: controller.isSuperAdmin
-                            ? '平台管理 · 超级管理员'
-                            : '平台管理员 · 仅可查看',
+                      ConsoleIconRail(
                         selectedIndex: _navIndex(controller.section),
                         onSelected: (index) =>
                             controller.selectSection(_nav[index]),
@@ -269,12 +265,6 @@ class _OverviewSection extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
       children: <Widget>[
         const WorkspaceHeading('工作概览', '查看企业服务、会话负载与平台运行情况'),
-        const TongYuHero(
-            compact: true,
-            title: '看见服务全貌，让团队稳步前行。',
-            description: '企业、账号、套餐与智能服务，统一在一个清晰的工作空间。',
-            eyebrow: 'PLATFORM / 平台运营'),
-        const SizedBox(height: 24),
         Wrap(
           spacing: 12,
           runSpacing: 12,
@@ -1055,35 +1045,24 @@ class _PlatformSessionFooter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    // 图标轨只有 72 宽，文字按钮放不下，改成图标并保留原来的操作。
     return Column(
       mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (server.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
-            child: Text(
-              server,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.outline,
-              ),
-            ),
-          ),
-        TextButton.icon(
+        IconButton(
+          tooltip: server.isEmpty ? '刷新当前页' : '刷新当前页\n$server',
           onPressed: onRefresh,
-          icon: const Icon(Icons.refresh, size: 18),
-          label: const Text('刷新当前页'),
+          icon: const Icon(Icons.refresh, size: 20),
         ),
-        TextButton(
+        IconButton(
+          tooltip: '切换到客服登录',
           onPressed: onAgentLogin,
-          child: const Text('切换到客服登录'),
+          icon: const Icon(Icons.support_agent_outlined, size: 20),
         ),
-        FilledButton.tonal(
+        IconButton(
+          tooltip: '退出登录',
           onPressed: onSignOut,
-          child: const Text('退出登录'),
+          icon: const Icon(Icons.logout, size: 20),
         ),
       ],
     );

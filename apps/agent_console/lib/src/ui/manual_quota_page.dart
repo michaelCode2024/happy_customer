@@ -1,4 +1,3 @@
-import 'package:tongyu_agent_console/src/ui/design_a.dart';
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
@@ -164,15 +163,7 @@ class _ManualQuotaPageState extends State<ManualQuotaPage> {
             onPressed: _loading ? null : () => _load(),
             icon: const Icon(Icons.refresh))
       ]),
-      const SizedBox(height: 20),
-      if (widget.overview) ...[
-        const TongYuHero(
-            compact: true,
-            title: '看见服务全貌，让团队稳步前行。',
-            description: '企业服务、套餐额度与近期变更，在一个清晰的空间里管理。',
-            eyebrow: 'PLATFORM / 平台运营'),
-        const SizedBox(height: 20)
-      ],
+      const SizedBox(height: 12),
       if (!widget.history) ...[
         Container(
             padding: const EdgeInsets.all(16),

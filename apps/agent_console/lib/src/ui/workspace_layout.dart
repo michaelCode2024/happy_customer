@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// 表单、统计与团队页共享 A 方案标题，避免每个页面各用一套字号与底色。
+/// 页内工具条。外层已经有「企业 / 页面」路径，这里只留一行标题和操作，避免再叠一块大图标标题。
 class WorkspaceAppBar extends StatelessWidget implements PreferredSizeWidget {
   const WorkspaceAppBar(
       {super.key,
@@ -15,24 +15,19 @@ class WorkspaceAppBar extends StatelessWidget implements PreferredSizeWidget {
   final PreferredSizeWidget? bottom;
   @override
   Size get preferredSize =>
-      Size.fromHeight(88 + (bottom?.preferredSize.height ?? 0));
+      Size.fromHeight(52 + (bottom?.preferredSize.height ?? 0));
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return AppBar(
-      toolbarHeight: 88,
-      titleSpacing: 24,
+      toolbarHeight: 52,
+      titleSpacing: 16,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       shape: const Border(),
       bottom: bottom,
       title: Row(children: [
-        Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-                color: scheme.primaryContainer,
-                borderRadius: BorderRadius.circular(14)),
-            child: Icon(icon, color: scheme.primary, size: 22)),
-        const SizedBox(width: 12),
+        Icon(icon, color: scheme.primary, size: 18),
+        const SizedBox(width: 8),
         Expanded(
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -40,26 +35,25 @@ class WorkspaceAppBar extends StatelessWidget implements PreferredSizeWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                  fontSize: 21,
-                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
                   color: scheme.onSurface)),
-          const SizedBox(height: 4),
           Text(description,
-              maxLines: 2,
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                   fontSize: 12,
-                  height: 1.5,
+                  height: 1.2,
                   fontWeight: FontWeight.w400,
                   color: scheme.onSurfaceVariant)),
         ])),
       ]),
-      actions: [...actions, const SizedBox(width: 12)],
+      actions: [...actions, const SizedBox(width: 8)],
     );
   }
 }
 
-/// A3 页面共用标题与操作区，窄屏把操作换到下一行，保持正文可读。
+/// 页面标题与操作。窄屏把操作换到下一行，避免和标题挤在同一行。
 class WorkspacePageHeader extends StatelessWidget {
   const WorkspacePageHeader(
       {super.key,
@@ -74,28 +68,26 @@ class WorkspacePageHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context), scheme = theme.colorScheme;
     final heading = Row(children: [
-      Container(
-          padding: const EdgeInsets.all(11),
-          decoration: BoxDecoration(
-              color: scheme.primaryContainer,
-              borderRadius: BorderRadius.circular(16)),
-          child: Icon(icon, color: scheme.primary, size: 23)),
-      const SizedBox(width: 14),
+      Icon(icon, color: scheme.primary, size: 18),
+      const SizedBox(width: 8),
       Expanded(
           child:
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(title,
-            style: theme.textTheme.titleLarge
-                ?.copyWith(fontSize: 22, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 5),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleMedium
+                ?.copyWith(fontSize: 16, fontWeight: FontWeight.w600)),
         Text(description,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: theme.textTheme.bodySmall
-                ?.copyWith(color: scheme.onSurfaceVariant)),
+                ?.copyWith(color: scheme.onSurfaceVariant, height: 1.3)),
       ])),
     ]);
     return Container(
         color: Colors.transparent,
-        padding: const EdgeInsets.fromLTRB(28, 26, 28, 22),
+        padding: const EdgeInsets.fromLTRB(20, 12, 16, 8),
         child: LayoutBuilder(
             builder: (context, box) => box.maxWidth < 660
                 ? Column(
@@ -103,7 +95,7 @@ class WorkspacePageHeader extends StatelessWidget {
                     children: [
                         heading,
                         if (actions.isNotEmpty) ...[
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 8),
                           Wrap(spacing: 8, runSpacing: 8, children: actions)
                         ]
                       ])
@@ -182,11 +174,11 @@ class WorkspaceKpiCard extends StatelessWidget {
     final theme = Theme.of(context);
     final color = tone ?? theme.colorScheme.primary;
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
           color: theme.colorScheme.surface,
           border: Border.all(color: theme.colorScheme.outlineVariant),
-          borderRadius: BorderRadius.circular(16)),
+          borderRadius: BorderRadius.circular(10)),
       child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -207,7 +199,7 @@ class WorkspaceKpiCard extends StatelessWidget {
             const SizedBox(height: 10),
             Text(value,
                 style: theme.textTheme.headlineSmall
-                    ?.copyWith(fontSize: 28, fontWeight: FontWeight.w500)),
+                    ?.copyWith(fontSize: 22, fontWeight: FontWeight.w600)),
             if (caption != null) ...[
               const SizedBox(height: 8),
               Text(caption!,
@@ -249,16 +241,16 @@ class WorkspaceHeading extends StatelessWidget {
   final String description;
   @override
   Widget build(BuildContext context) => Padding(
-      padding: const EdgeInsets.only(bottom: 20),
+      padding: const EdgeInsets.only(bottom: 12),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(title,
             style: Theme.of(context)
                 .textTheme
-                .headlineSmall
-                ?.copyWith(fontSize: 22, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 8),
+                .titleMedium
+                ?.copyWith(fontSize: 16, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 4),
         Text(description,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: Theme.of(context).colorScheme.onSurfaceVariant)),
       ]));
 }

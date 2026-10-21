@@ -304,16 +304,6 @@ class _KnowledgePageState extends State<KnowledgePage> {
                       label: const Text('新增知识')),
               ],
             ),
-            LayoutBuilder(
-                builder: (context, box) => _tab != 0 || box.maxWidth < 900
-                    ? const SizedBox.shrink()
-                    : const Padding(
-                        padding: EdgeInsets.fromLTRB(28, 0, 28, 20),
-                        child: TongYuHero(
-                            compact: true,
-                            title: '你的团队经验，值得一个更好的家。',
-                            description: '把产品说明、接入指引与常见问答整理在一起，为每一次回答提供依据。',
-                            eyebrow: 'KNOWLEDGE / 团队知识'))),
             WorkspaceTabs(
                 labels: ['知识管理', if (canEdit) '分类与批量导入', if (canEdit) '未解决问题'],
                 selectedIndex: _tab,

@@ -364,9 +364,9 @@ class WorkspaceSidebar extends StatelessWidget {
   }
 }
 
-/// 客服工作台左侧导航轨。
+/// 客服工作台左侧图标轨。
 ///
-/// 定稿为「图标 + 中文名」展开态（约 88px），不再只露图标；窄屏仍走底部 NavigationBar。
+/// 宽屏只留图标和短标题，把横向空间留给会话；窄屏仍走底部 NavigationBar。
 class ConsoleIconRail extends StatelessWidget {
   const ConsoleIconRail({
     super.key,
@@ -391,33 +391,40 @@ class ConsoleIconRail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final dark = scheme.brightness == Brightness.dark;
+    final rail = dark ? const Color(0xFF151922) : const Color(0xFFF4F6FC);
+    final selected = dark ? const Color(0xFF243044) : const Color(0xFFE8EEFF);
     return Container(
-      width: 76,
-      color: const Color(0xFF182334),
+      width: 72,
+      decoration: BoxDecoration(
+        color: rail,
+        border: Border(right: BorderSide(color: scheme.outlineVariant)),
+      ),
       child: SafeArea(
         child: Column(children: [
-          const SizedBox(height: 24),
-          if (showBrand) const TongYuLogoMark(size: 36),
-          const SizedBox(height: 28),
+          const SizedBox(height: 14),
+          if (showBrand) const TongYuLogoMark(size: 32),
+          const SizedBox(height: 16),
           Expanded(
               child: ListView(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 6),
             children: [
               for (var i = 0; i < items.length; i++)
                 Padding(
-                    padding: const EdgeInsets.only(bottom: 7),
+                    padding: const EdgeInsets.only(bottom: 4),
                     child: Tooltip(
                         message: items[i].label,
                         child: Material(
                           color: i == selectedIndex
-                              ? const Color(0xFF2C3A52)
+                              ? selected
                               : Colors.transparent,
-                          borderRadius: BorderRadius.circular(10),
+                          borderRadius: BorderRadius.circular(8),
                           child: InkWell(
-                            borderRadius: BorderRadius.circular(10),
+                            borderRadius: BorderRadius.circular(8),
                             onTap: () => onSelected(i),
                             child: SizedBox(
-                                height: 58,
+                                height: 54,
                                 child: Stack(
                                     alignment: Alignment.center,
                                     children: [
@@ -426,35 +433,40 @@ class ConsoleIconRail extends StatelessWidget {
                                               MainAxisAlignment.center,
                                           children: [
                                             Icon(items[i].icon,
-                                                size: 21,
+                                                size: 20,
                                                 color: i == selectedIndex
-                                                    ? const Color(0xFF96AAFF)
-                                                    : const Color(0xFF8593A9)),
-                                            const SizedBox(height: 5),
+                                                    ? scheme.primary
+                                                    : scheme.onSurfaceVariant),
+                                            const SizedBox(height: 3),
                                             Text(_railLabel(items[i].label),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
                                                 style: TextStyle(
                                                     fontSize: 10,
+                                                    height: 1.1,
+                                                    fontWeight:
+                                                        i == selectedIndex
+                                                            ? FontWeight.w600
+                                                            : FontWeight.w400,
                                                     color: i == selectedIndex
-                                                        ? const Color(
-                                                            0xFFDCE5FF)
-                                                        : const Color(
-                                                            0xFF8593A9))),
+                                                        ? scheme.primary
+                                                        : scheme
+                                                            .onSurfaceVariant)),
                                           ]),
                                       if (items[i].count > 0)
                                         Positioned(
                                             top: 2,
-                                            right: 1,
+                                            right: 2,
                                             child: Container(
                                                 padding:
                                                     const EdgeInsets.symmetric(
                                                         horizontal: 4,
                                                         vertical: 1),
                                                 decoration: BoxDecoration(
-                                                    color:
-                                                        const Color(0xFF4263EB),
+                                                    color: scheme.primary,
                                                     borderRadius:
                                                         BorderRadius.circular(
-                                                            5)),
+                                                            6)),
                                                 child: Text(
                                                     items[i].count > 99
                                                         ? '99+'
@@ -467,12 +479,11 @@ class ConsoleIconRail extends StatelessWidget {
                         ))),
             ],
           )),
+          if (footer != null) footer!,
           if (avatar != null)
-            Padding(padding: const EdgeInsets.only(bottom: 16), child: avatar!),
-          if (footer != null)
             Padding(
-                padding: const EdgeInsets.fromLTRB(6, 0, 6, 16),
-                child: footer!),
+                padding: const EdgeInsets.only(bottom: 12, top: 4),
+                child: avatar!),
         ]),
       ),
     );
@@ -480,43 +491,43 @@ class ConsoleIconRail extends StatelessWidget {
 }
 
 /// 侧轨宽度有限：优先保留定稿里的短名，长名截到前两字。
+/// 图标下方只放得下四个字；长名称收成导航里已经在用的短名。
 String _railLabel(String label) {
   switch (label) {
     case '今天待办':
-      return '概览';
-    case '客户消息':
+    case '工作概览':
       return '工作台';
     case '我的设置':
-      return '设置';
-    case '接入网站':
-      return '接入';
-    case '渠道入口':
-      return '渠道';
-    case '同事账号':
-      return '企业';
-    case '自动接待':
-      return '自动';
-    case '工作概览':
-      return '概览';
-    case '收件箱':
-      return '工作台';
-    case '数据统计':
-      return '统计';
-    case '知识库':
-      return '知识库';
-    case '应用接入':
-      return '接入';
-    case '自动回复':
-      return '自动';
-    case '渠道管理':
-      return '渠道';
     case '个人设置':
       return '设置';
+    case '接入网站':
+    case '应用接入':
+    case '接入管理':
+      return '接入';
+    case '渠道入口':
+    case '渠道管理':
+      return '渠道';
+    case '同事账号':
     case '企业管理':
       return '企业';
-    case '群聊':
-      return '群聊';
+    case '自动接待':
+    case '自动回复':
+      return '自动';
+    case '收件箱':
+      return '消息';
+    case '数据统计':
+      return '统计';
+    case '平台概览':
+      return '概览';
+    case '企业与账号':
+      return '企业';
+    case '套餐与额度':
+      return '额度';
+    case '操作记录':
+      return '记录';
+    case '平台设置':
+      return '设置';
     default:
-      return label.length <= 3 ? label : label.substring(0, 2);
+      return label.length <= 4 ? label : label.substring(0, 2);
   }
 }
