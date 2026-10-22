@@ -94,7 +94,7 @@ export const DEFAULTS = {
   offlineMessage: '',
   placeholder: '请输入消息…',
   // 默认使用语聊品牌蓝；接入企业可覆盖，不改已有自定义主题。
-  primaryColor: '#4263EB',
+  primaryColor: '#3263FF',
   logoUrl: '',
   avatarUrl: '',
   customCss: '',

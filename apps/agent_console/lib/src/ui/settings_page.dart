@@ -397,95 +397,153 @@ class _SettingsPageState extends State<SettingsPage> {
             final navigation = Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                          color: theme.colorScheme.surface,
-                          borderRadius: BorderRadius.circular(12)),
-                      child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            CircleAvatar(
-                                radius: 24,
-                                child: Text(
-                                    (agent?.displayName.isNotEmpty == true
-                                            ? agent!.displayName
-                                            : '我')
-                                        .characters
-                                        .first)),
-                            const SizedBox(height: 12),
-                            Text(agent?.displayName ?? '个人设置',
-                                style: theme.textTheme.titleMedium),
-                            const SizedBox(height: 4),
-                            Text(_roleLabel(agent?.role ?? ''),
-                                style: theme.textTheme.bodySmall)
-                          ])),
-                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(6, 2, 6, 12),
+                    child: Row(children: [
+                      Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primary.withOpacity(.09),
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          (agent?.displayName.isNotEmpty == true
+                                  ? agent!.displayName
+                                  : '我')
+                              .characters
+                              .first,
+                          style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: theme.colorScheme.primary),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(agent?.displayName ?? '个人设置',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600)),
+                              Text(_roleLabel(agent?.role ?? ''),
+                                  style: TextStyle(
+                                      fontSize: 11.5,
+                                      color:
+                                          theme.colorScheme.onSurfaceVariant)),
+                            ]),
+                      ),
+                    ]),
+                  ),
                   for (var i = 0; i < labels.length; i++)
-                    Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: ListTile(
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16)),
-                            selected: _settingsTab == i,
-                            selectedTileColor: theme
-                                .colorScheme.primaryContainer
-                                .withAlpha(90),
-                            leading: Icon(icons[i], size: 20),
-                            title: Text(labels[i]),
-                            onTap: () => setState(() => _settingsTab = i)))
+                    _SettingsNavItem(
+                      icon: icons[i],
+                      label: labels[i],
+                      selected: _settingsTab == i,
+                      onTap: () => setState(() => _settingsTab = i),
+                    ),
                 ]);
             final content = ListView(
                 key: ValueKey(_settingsTab),
-                padding: EdgeInsets.all(compact ? 16 : 20),
+                padding: EdgeInsets.fromLTRB(
+                    compact ? 16 : 22, 16, compact ? 16 : 22, 32),
                 children: [
-                  Text(labels[_settingsTab],
-                      style: theme.textTheme.titleMedium),
-                  const SizedBox(height: 6),
-                  Text(
-                      [
-                        '设置客户看到的名字，查看所属企业与客服入口',
-                        '选择是否接收新的会话分配',
-                        '更新登录密码，管理本次登录',
-                        '按你的工作习惯设置界面与提醒'
-                      ][_settingsTab],
-                      style: theme.textTheme.bodySmall),
-                  const SizedBox(height: 16),
+                  Row(children: [
+                    Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.primary.withOpacity(.08),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(icons[_settingsTab],
+                          size: 16, color: theme.colorScheme.primary),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(labels[_settingsTab],
+                              style: theme.textTheme.titleMedium
+                                  ?.copyWith(fontSize: 16)),
+                          const SizedBox(height: 2),
+                          Text(
+                              [
+                                '设置客户看到的名字，查看所属企业与客服入口',
+                                '选择是否接收新的会话分配',
+                                '更新登录密码，管理本次登录',
+                                '按你的工作习惯设置界面与提醒'
+                              ][_settingsTab],
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant)),
+                        ],
+                      ),
+                    ),
+                  ]),
+                  const SizedBox(height: 14),
                   if (_settingsTab == 3)
-                    PwaPanel(api: widget.session.api, settingsOnly: true),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: PwaPanel(
+                          api: widget.session.api, settingsOnly: true),
+                    ),
                   for (final i in groups[_settingsTab])
                     Padding(
-                        padding: const EdgeInsets.only(bottom: 16),
-                        child: sections[i]!)
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: sections[i]!),
+                  const SizedBox(height: 4),
+                  Text('通语工作台 · 协议版本 v1',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.outline, fontSize: 11)),
                 ]);
             if (compact)
               return Column(children: [
-                Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Wrap(spacing: 8, runSpacing: 6, children: [
-                      for (var i = 0; i < labels.length; i++)
-                        Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: ChoiceChip(
-                                label: Text(labels[i]),
-                                selected: _settingsTab == i,
-                                onSelected: (_) =>
-                                    setState(() => _settingsTab = i)))
-                    ])),
+                Container(
+                  width: double.infinity,
+                  color: theme.colorScheme.surface,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(children: [
+                      for (var i = 0; i < labels.length; i++) ...[
+                        if (i > 0) const SizedBox(width: 6),
+                        _SettingsTabChip(
+                          icon: icons[i],
+                          label: labels[i],
+                          selected: _settingsTab == i,
+                          onTap: () => setState(() => _settingsTab = i),
+                        ),
+                      ]
+                    ]),
+                  ),
+                ),
                 Expanded(child: content)
               ]);
-            return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               Container(
-                  width: 220,
-                  color: theme.colorScheme.surface,
+                  width: 216,
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surface,
+                    border: Border(
+                        right: BorderSide(
+                            color: theme.colorScheme.outlineVariant)),
+                  ),
                   child: SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 0, 16),
+                      padding: const EdgeInsets.fromLTRB(12, 16, 12, 16),
                       child: navigation)),
               Expanded(
                   child: Align(
                       alignment: Alignment.topLeft,
                       child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 900),
+                          constraints: const BoxConstraints(maxWidth: 880),
                           child: content)))
             ]);
           });
@@ -543,26 +601,16 @@ class _Section extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border:
-            Border.all(color: theme.colorScheme.outlineVariant.withAlpha(120)),
-      ),
+    return WorkspaceCard(
+      title: title,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Text(
-            title,
-            style: theme.textTheme.labelMedium?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 10),
-          ...children,
+          for (var i = 0; i < children.length; i++) ...[
+            if (i > 0) const SizedBox(height: 10),
+            children[i],
+          ],
         ],
       ),
     );
@@ -588,6 +636,7 @@ class _InfoRow extends StatelessWidget {
             child: Text(
               label,
               style: theme.textTheme.labelSmall?.copyWith(
+                fontSize: 11.5,
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
@@ -595,10 +644,116 @@ class _InfoRow extends StatelessWidget {
           Expanded(
             child: SelectableText(
               value.isEmpty ? '—' : value,
-              style: theme.textTheme.bodySmall,
+              style: theme.textTheme.bodySmall?.copyWith(fontSize: 12.5),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 设置页左侧导航项：选中时浅蓝底 + 左侧 2px 主色指示条。
+class _SettingsNavItem extends StatelessWidget {
+  const _SettingsNavItem({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Material(
+        color: selected ? scheme.primary.withOpacity(.07) : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border(
+                left: BorderSide(
+                  width: 2.4,
+                  color: selected ? scheme.primary : Colors.transparent,
+                ),
+              ),
+            ),
+            child: Row(children: [
+              Icon(icon,
+                  size: 17,
+                  color: selected ? scheme.primary : scheme.onSurfaceVariant),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(label,
+                    style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight:
+                            selected ? FontWeight.w600 : FontWeight.w400,
+                        color: selected
+                            ? scheme.primary
+                            : scheme.onSurface)),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 窄屏设置页顶部的分段切换。
+class _SettingsTabChip extends StatelessWidget {
+  const _SettingsTabChip({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: selected ? scheme.primary.withOpacity(.08) : Colors.transparent,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+                color: selected ? scheme.primary.withOpacity(.28) : scheme.outlineVariant),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon,
+                size: 15,
+                color: selected ? scheme.primary : scheme.onSurfaceVariant),
+            const SizedBox(width: 6),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                    color: selected ? scheme.primary : scheme.onSurface)),
+          ]),
+        ),
       ),
     );
   }

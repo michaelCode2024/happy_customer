@@ -1,5 +1,5 @@
-import 'package:tongyu_agent_console/src/ui/design_a.dart';
 import 'package:tongyu_agent_console/src/ui/error_banner.dart';
+import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
 import 'package:tongyu_agent_console/src/ui/ai_assist_panel.dart';
 import 'dart:async';
 import 'package:tongyu_agent_console/src/ui/reception_guidance.dart';
@@ -753,7 +753,29 @@ class _ChatPanelState extends State<ChatPanel> {
               ),
             Expanded(
               // 消息区浅灰底：对齐微信 / 腾讯 IM，和白底列表、白底输入区分层。
-              child: ColoredBox(
+              child: Column(
+                children: [
+                  // v2：消息流顶部斜切彩条（静态装饰，不遮挡内容）
+                  Transform(
+                    transform: Matrix4.skewY(-0.01),
+                    alignment: Alignment.center,
+                    child: Container(
+                      height: 3.5,
+                      width: double.infinity,
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            Color(0xFF5B8CFF),
+                            Color(0xFF845EF7),
+                            Color(0xFF12B886),
+                            Color(0xFFF59F00),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: ColoredBox(
                 color: MediaQuery.sizeOf(context).width < 760 &&
                         Theme.of(context).brightness == Brightness.light
                     ? const Color(0xFFF2F3F5)
@@ -776,6 +798,9 @@ class _ChatPanelState extends State<ChatPanel> {
                       showJumpToBottom: !_stickToBottom,
                       onJumpToBottom: () => _scrollToBottom(force: true),
                     )),
+              ),
+                  ),
+                ],
               ),
             ),
             if (workbench.threadError != null)
@@ -916,31 +941,15 @@ class _EmptyThread extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    // 空态也用消息区画布色，避免中间一块「营销卡片」打断三栏工作台。
+    final scheme = Theme.of(context).colorScheme;
+    // 空态不占满整块画布：用统一的空状态块，避免中间出现「营销卡片」。
     return ColoredBox(
       color: RelayTheme.chatCanvas(scheme),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const TongYuArtwork(size: 200),
-            const SizedBox(height: 18),
-            Text(
-              '选择左侧会话开始聊天',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '客户消息、已读与送达状态会显示在气泡下方',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
-            ),
-          ],
+      child: const Center(
+        child: WorkspaceEmptyState(
+          icon: Icons.chat_bubble_outline_rounded,
+          title: '选择一个会话开始接待',
+          description: '从左侧打开客户消息，或等待新进线。空闲时可以复习接待规范与接入说明。',
         ),
       ),
     );
@@ -971,10 +980,10 @@ class _ThreadHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final compact = MediaQuery.sizeOf(context).width < 760;
     return Container(
-      height: MediaQuery.sizeOf(context).width < 760 ? 60 : 76,
-      padding: EdgeInsets.fromLTRB(
-          MediaQuery.sizeOf(context).width < 760 ? 4 : 24, 0, 4, 0),
+      height: 58,
+      padding: EdgeInsets.fromLTRB(compact ? 2 : 14, 0, 8, 0),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         border: Border(
@@ -983,12 +992,34 @@ class _ThreadHeader extends StatelessWidget {
       ),
       child: Row(
         children: <Widget>[
-          if (MediaQuery.sizeOf(context).width < 760)
+          if (compact)
             IconButton(
               tooltip: '返回会话列表',
+              visualDensity: VisualDensity.compact,
               onPressed: onBack ?? workbench.clearSelection,
-              icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
+              icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 17),
             ),
+          if (!compact) ...<Widget>[
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primary.withOpacity(.08),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                conversation.title.trim().isEmpty
+                    ? '客'
+                    : conversation.title.trim().substring(0, 1),
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: theme.colorScheme.primary),
+              ),
+            ),
+            const SizedBox(width: 9),
+          ],
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1004,7 +1035,7 @@ class _ThreadHeader extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleSmall?.copyWith(
                           fontWeight: FontWeight.w600,
-                          fontSize: 15,
+                          fontSize: 14,
                         ),
                       ),
                     ),
@@ -1076,11 +1107,49 @@ class _ThreadHeader extends StatelessWidget {
               MediaQuery.sizeOf(context).width >= 760)
             Padding(
                 padding: const EdgeInsets.only(left: 8),
-                child: FilledButton(
-                  onPressed: () => workbench
-                      .setStatus(conversation.isResolved ? 'OPEN' : 'RESOLVED'),
-                  child: Text(conversation.isResolved ? '重新接待' : '完成会话'),
-                )),
+                child: conversation.isResolved
+                    ? Semantics(
+                        button: true,
+                        label: '重新打开',
+                        identifier: 'desk.resolve.reopen',
+                        child: OutlinedButton(
+                          key: const ValueKey('desk-resolve-reopen'),
+                          onPressed: () => workbench.setStatus('OPEN'),
+                          child: const Text('重新打开'),
+                        ),
+                      )
+                    : Semantics(
+                        button: true,
+                        label: '标记解决',
+                        identifier: 'desk.resolve.mark',
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: RelayTheme.tealGradient,
+                            borderRadius: BorderRadius.circular(12),
+                            boxShadow: [
+                              BoxShadow(
+                                color: RelayTheme.teal.withOpacity(0.28),
+                                blurRadius: 18,
+                                offset: const Offset(0, 8),
+                              ),
+                            ],
+                          ),
+                          child: FilledButton(
+                            key: const ValueKey('desk-resolve-mark'),
+                            onPressed: () => _markResolved(context),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: Colors.transparent,
+                              shadowColor: Colors.transparent,
+                              foregroundColor: Colors.white,
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: const Text('标记解决'),
+                          ),
+                        ),
+                      )),
           // 仅未领取或「派给自己、待确认」才显示接单；他人会话只可转派，避免点了也失败。
           if (conversation.canClaim(workbench.selfId))
             Padding(
@@ -1092,10 +1161,26 @@ class _ThreadHeader extends StatelessWidget {
               ),
             ),
           if (MediaQuery.sizeOf(context).width >= 760)
-            IconButton(
-              tooltip: conversation.isUnassigned ? '分配给客服' : '转派客服',
-              onPressed: () => _showTransfer(context),
-              icon: const Icon(Icons.support_agent),
+            Padding(
+              // Keep clear of top-bar notification bell hit area.
+              padding: const EdgeInsets.only(left: 10, right: 6),
+              child: Semantics(
+                button: true,
+                label: '转交',
+                identifier: 'desk.transfer.open',
+                child: TextButton.icon(
+                  key: const ValueKey('desk-transfer-open'),
+                  onPressed: () => _showTransfer(context),
+                  icon: const Icon(Icons.swap_horiz, size: 18),
+                  label: const Text('转交'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: theme.colorScheme.onSurfaceVariant,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    minimumSize: const Size(48, 40),
+                    tapTargetSize: MaterialTapTargetSize.padded,
+                  ),
+                ),
+              ),
             ),
           if (onOpenProfile != null && MediaQuery.sizeOf(context).width >= 760)
             IconButton(
@@ -1125,7 +1210,7 @@ class _ThreadHeader extends StatelessWidget {
                 case 'profile':
                   onOpenProfile?.call();
                 case 'resolve':
-                  workbench.setStatus('RESOLVED');
+                  _markResolved(context);
                 case 'reopen':
                   workbench.setStatus('OPEN');
                 case 'pending':
@@ -1154,15 +1239,17 @@ class _ThreadHeader extends StatelessWidget {
                 const PopupMenuItem(value: 'search', child: Text('搜索会话内容')),
               if (!conversation.isResolved)
                 const PopupMenuItem<String>(
+                  key: ValueKey('desk-menu-resolve'),
                   value: 'resolve',
                   child: ListTile(
                     dense: true,
                     leading: Icon(Icons.check_circle_outline, size: 18),
-                    title: Text('标记已解决'),
+                    title: Text('标记解决'),
                   ),
                 )
               else
                 const PopupMenuItem<String>(
+                  key: ValueKey('desk-menu-reopen'),
                   value: 'reopen',
                   child: ListTile(
                     dense: true,
@@ -1193,11 +1280,12 @@ class _ThreadHeader extends StatelessWidget {
               ),
               const PopupMenuDivider(),
               const PopupMenuItem<String>(
+                key: ValueKey('desk-menu-transfer'),
                 value: 'transfer',
                 child: ListTile(
                   dense: true,
                   leading: Icon(Icons.swap_horiz, size: 18),
-                  title: Text('转接给同事'),
+                  title: Text('转交'),
                 ),
               ),
               const PopupMenuItem<String>(
@@ -1223,9 +1311,31 @@ class _ThreadHeader extends StatelessWidget {
     );
   }
 
+  Future<void> _markResolved(BuildContext context) async {
+    await workbench.setStatus('RESOLVED');
+    if (!context.mounted) {
+      return;
+    }
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: const Text('已标记解决'),
+        action: SnackBarAction(
+          key: const ValueKey('desk-resolve-view-resolved'),
+          label: '查看已解决',
+          onPressed: () {
+            workbench.setIncludeResolved(true);
+          },
+        ),
+      ),
+    );
+  }
+
   Future<void> _showTransfer(BuildContext context) async {
     final selected = await showDialog<(String, String)>(
       context: context,
+      barrierColor: const Color(0x6B0C1D40),
       builder: (context) => _TransferDialog(workbench: workbench),
     );
     if (selected != null) {
@@ -1259,15 +1369,17 @@ class _HeaderChip extends StatelessWidget {
       _ChipTone.danger => scheme.error,
     };
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withAlpha(28),
-        borderRadius: BorderRadius.circular(5),
-        border: Border.all(color: color.withAlpha(90)),
+        color: color.withAlpha(24),
+        borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
         label,
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(color: color),
+        style: Theme.of(context)
+            .textTheme
+            .labelSmall
+            ?.copyWith(color: color, fontSize: 10.5, height: 1.35),
       ),
     );
   }
@@ -2074,32 +2186,56 @@ class _BubbleShell extends StatelessWidget {
         ? RelayTheme.agentBubble(scheme)
         : RelayTheme.visitorBubble(scheme);
     return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 720),
+      constraints: const BoxConstraints(maxWidth: 620),
       child: FractionallySizedBox(
-        widthFactor: mobile ? .83 : _bubbleWidthFactor,
+        widthFactor: mobile ? .84 : _bubbleWidthFactor,
         alignment: isAgent ? Alignment.centerRight : Alignment.centerLeft,
         child: GestureDetector(
             onLongPress: mobile ? onLongPress : null,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 250),
-              padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
               decoration: BoxDecoration(
-                color: mobile && scheme.brightness == Brightness.light
-                    ? (isAgent ? const Color(0xFFDFE8FF) : Colors.white)
-                    : bubbleColor,
+                gradient: isAgent && !(mobile && scheme.brightness == Brightness.light)
+                    ? RelayTheme.actionGradient
+                    : null,
+                color: isAgent
+                    ? (mobile && scheme.brightness == Brightness.light
+                        ? const Color(0xFFDFE8FF)
+                        : null)
+                    : (mobile && scheme.brightness == Brightness.light
+                        ? Colors.white
+                        : bubbleColor),
                 borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(isAgent ? 10 : 2),
-                  topRight: Radius.circular(isAgent ? 2 : 10),
-                  bottomLeft: const Radius.circular(10),
-                  bottomRight: const Radius.circular(10),
+                  topLeft: Radius.circular(isAgent ? 16 : 16),
+                  topRight: Radius.circular(isAgent ? 16 : 16),
+                  bottomLeft: Radius.circular(isAgent ? 16 : 6),
+                  bottomRight: Radius.circular(isAgent ? 6 : 16),
                 ),
-                border:
-                    flash ? Border.all(color: scheme.primary, width: 2) : null,
+                border: Border.all(
+                  color: flash
+                      ? scheme.primary
+                      : (isAgent
+                          ? Colors.transparent
+                          : scheme.outlineVariant.withOpacity(.85)),
+                  width: flash ? 2 : 1,
+                ),
+                boxShadow: isAgent && !(mobile && scheme.brightness == Brightness.light)
+                    ? RelayTheme.agentBubbleShadow()
+                    : [
+                        BoxShadow(
+                          color: const Color(0xFF3263FF).withOpacity(0.05),
+                          blurRadius: 18,
+                          offset: const Offset(0, 8),
+                        ),
+                      ],
               ),
               child: DefaultTextStyle.merge(
                 style: TextStyle(
-                  color: isAgent && scheme.brightness == Brightness.dark
-                      ? Colors.white
+                  color: isAgent
+                      ? (mobile && scheme.brightness == Brightness.light
+                          ? scheme.onSurface
+                          : Colors.white)
                       : scheme.onSurface,
                 ),
                 child: child,
@@ -2920,33 +3056,39 @@ class _Composer extends StatelessWidget {
     return Container(
         decoration: BoxDecoration(
           color: scheme.surface,
-          border: Border.all(color: scheme.outlineVariant),
-          borderRadius: BorderRadius.circular(12),
+          border: Border(
+            top: BorderSide(color: scheme.outlineVariant),
+          ),
         ),
-        margin: EdgeInsets.fromLTRB(
-            compact ? 12 : 24, 8, compact ? 12 : 24, compact ? 8 : 20),
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
         child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
               Row(children: [
-                TextButton(
-                    onPressed: () => onToggleNote(false),
-                    style: TextButton.styleFrom(
-                        foregroundColor: noteMode
-                            ? scheme.onSurfaceVariant
-                            : scheme.primary),
-                    child: const Text('回复客户')),
-                TextButton(
-                    onPressed: () => onToggleNote(true),
-                    style: TextButton.styleFrom(
-                        foregroundColor: noteMode
-                            ? scheme.primary
-                            : scheme.onSurfaceVariant),
-                    child: const Text('内部备注')),
+                _ComposerModeTab(
+                  label: '回复客户',
+                  selected: !noteMode,
+                  tone: scheme.primary,
+                  onTap: () => onToggleNote(false),
+                ),
+                const SizedBox(width: 6),
+                _ComposerModeTab(
+                  label: '内部备注',
+                  selected: noteMode,
+                  tone: const Color(0xFFF97316),
+                  onTap: () => onToggleNote(true),
+                ),
+                const Spacer(),
+                if (!lockPublicReply && supportsFiles) ...[
+                  Text(
+                    'Ctrl + Enter 发送',
+                    style: theme.textTheme.labelSmall
+                        ?.copyWith(fontSize: 10.5, color: scheme.outline),
+                  ),
+                ],
               ]),
-              if (!compact) const Divider(),
+              const SizedBox(height: 8),
               if (statusHint != null)
                 Container(
                   margin: const EdgeInsets.only(bottom: 8),
@@ -3045,19 +3187,21 @@ class _Composer extends StatelessWidget {
                               filled: true,
                               fillColor: noteMode
                                   ? scheme.tertiaryContainer.withAlpha(35)
-                                  : scheme.surface,
+                                  : scheme.surfaceContainerLow,
                               border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(6),
-                                borderSide: BorderSide.none,
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide:
+                                    BorderSide(color: scheme.outlineVariant),
                               ),
                               enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(6),
-                                borderSide: BorderSide.none,
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide:
+                                    BorderSide(color: scheme.outlineVariant),
                               ),
                               focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(6),
+                                borderRadius: BorderRadius.circular(8),
                                 borderSide:
-                                    BorderSide(color: scheme.primary, width: 1),
+                                    BorderSide(color: scheme.primary, width: 1.2),
                               ),
                               contentPadding: const EdgeInsets.symmetric(
                                   vertical: 10, horizontal: 12),
@@ -3143,6 +3287,52 @@ class _Composer extends StatelessWidget {
                 Text('当前客户端支持发送图片；其他文件可通过开放接口发送。',
                     style: theme.textTheme.bodySmall),
             ]));
+  }
+}
+
+/// 输入区模式切换：实心淡底 + 主色文字，替代散落的纯文本按钮。
+class _ComposerModeTab extends StatelessWidget {
+  const _ComposerModeTab({
+    required this.label,
+    required this.selected,
+    required this.tone,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final Color tone;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: selected ? tone.withOpacity(.09) : Colors.transparent,
+      borderRadius: BorderRadius.circular(7),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(7),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(7),
+            border: Border.all(
+              color: selected ? tone.withOpacity(.24) : Colors.transparent,
+            ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              height: 1.3,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+              color: selected ? tone : scheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -3509,8 +3699,6 @@ class _TransferDialogState extends State<_TransferDialog> {
   @override
   void initState() {
     super.initState();
-    // Agents may not be loaded yet on a cold start; loading here keeps the
-    // dialog usable without blocking the workbench.
     if (widget.workbench.agents.isEmpty) {
       widget.workbench.loadAgents();
     }
@@ -3522,71 +3710,312 @@ class _TransferDialogState extends State<_TransferDialog> {
     super.dispose();
   }
 
+  String _presenceLabel(AgentSummary agent) {
+    switch (agent.presence.toUpperCase()) {
+      case 'ONLINE':
+        return '在线';
+      case 'BUSY':
+        return '忙碌';
+      case 'AWAY':
+        return '离开';
+      default:
+        return '离线';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(
-          widget.workbench.selected?.isUnassigned == true ? '分配会话' : '转派会话'),
-      content: SizedBox(
-        width: 380,
-        child: ListenableBuilder(
-          listenable: widget.workbench,
-          builder: (context, _) {
-            final current = widget.workbench.selected?.assigneeId;
-            final candidates = widget.workbench.agents
-                .where((agent) => agent.id != current)
-                .toList(growable: false);
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                if (candidates.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 12),
-                    child: Text('没有可分配的客服，请先给团队成员分配此客服入口。'),
-                  )
-                else
-                  DropdownButtonFormField<String>(
-                    value: _agentId,
-                    decoration: const InputDecoration(labelText: '选择接待客服'),
-                    items: <DropdownMenuItem<String>>[
-                      for (final agent in candidates)
-                        DropdownMenuItem<String>(
-                          value: agent.id,
-                          child: Text(
-                            '${agent.displayName} · ${agent.isOnline ? '在线' : '离线'}'
-                            '（进行中 ${agent.openConversations}）',
-                          ),
-                        ),
+    final scheme = Theme.of(context).colorScheme;
+    final assigning = widget.workbench.selected?.isUnassigned == true;
+    final title = assigning ? '分配会话' : '转交会话';
+    final lead = assigning
+        ? '选择继续跟进的同事，并填写备注。对方将看到完整会话记录。'
+        : '选择继续跟进的同事，并填写转交备注。对方将看到完整会话记录。';
+
+    return Semantics(
+      identifier: 'desk.transfer.dialog',
+      label: '转交会话',
+      namesRoute: true,
+      scopesRoute: true,
+      explicitChildNodes: true,
+      child: Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 440),
+        child: Material(
+          color: Colors.white.withOpacity(0.96),
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: BorderSide(color: scheme.outlineVariant.withOpacity(0.95)),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                height: 4,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Color(0xFF5B8CFF),
+                      Color(0xFF845EF7),
+                      Color(0xFF12B886),
                     ],
-                    onChanged: (value) => setState(() => _agentId = value),
-                  ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: _note,
-                  minLines: 2,
-                  maxLines: 4,
-                  decoration: const InputDecoration(
-                    labelText: '交接说明（会作为内部备注记录）',
                   ),
                 ),
-              ],
-            );
-          },
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(22, 18, 22, 18),
+                child: ListenableBuilder(
+                  listenable: widget.workbench,
+                  builder: (context, _) {
+                    final current = widget.workbench.selected?.assigneeId;
+                    final candidates = widget.workbench.agents
+                        .where((agent) => agent.id != current)
+                        .toList(growable: false);
+                    return Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          lead,
+                          style: TextStyle(
+                            fontSize: 12,
+                            height: 1.7,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        Text(
+                          assigning ? '分配给' : '转交给',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        if (candidates.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            child: Text(
+                              '没有可分配的客服，请先给团队成员分配此客服入口。',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                          )
+                        else
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 200),
+                            child: ListView.separated(
+                              shrinkWrap: true,
+                              itemCount: candidates.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(height: 6),
+                              itemBuilder: (context, index) {
+                                final agent = candidates[index];
+                                final selected = _agentId == agent.id;
+                                return Material(
+                                  color: Colors.transparent,
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(12),
+                                    onTap: () =>
+                                        setState(() => _agentId = agent.id),
+                                    child: AnimatedContainer(
+                                      duration:
+                                          const Duration(milliseconds: 160),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 12, vertical: 10),
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(
+                                          color: selected
+                                              ? const Color(0xFFB8C9FF)
+                                              : scheme.outlineVariant,
+                                        ),
+                                        gradient: LinearGradient(
+                                          begin: Alignment.topLeft,
+                                          end: Alignment.bottomRight,
+                                          colors: selected
+                                              ? const [
+                                                  Color(0xFFE8EFFF),
+                                                  Color(0xFFE0E9FF),
+                                                ]
+                                              : const [
+                                                  Color(0xFFFFFFFF),
+                                                  Color(0xFFF7F9FF),
+                                                ],
+                                        ),
+                                        boxShadow: selected
+                                            ? [
+                                                BoxShadow(
+                                                  color: const Color(0xFF3263FF)
+                                                      .withOpacity(0.08),
+                                                  blurRadius: 18,
+                                                  offset: const Offset(0, 8),
+                                                ),
+                                              ]
+                                            : null,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Container(
+                                            width: 32,
+                                            height: 32,
+                                            alignment: Alignment.center,
+                                            decoration: BoxDecoration(
+                                              color: RelayTheme.avatarTray(
+                                                  agent.id),
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
+                                            ),
+                                            child: Text(
+                                              initials(agent.displayName),
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w600,
+                                                color: RelayTheme.avatarInk(
+                                                    agent.id),
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  agent.displayName,
+                                                  style: const TextStyle(
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 2),
+                                                Text(
+                                                  '客服 · ${_presenceLabel(agent)} · 接待中 ${agent.openConversations}',
+                                                  style: TextStyle(
+                                                    fontSize: 11,
+                                                    color: scheme
+                                                        .onSurfaceVariant,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          if (selected)
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 3),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFFEDF2FF),
+                                                borderRadius:
+                                                    BorderRadius.circular(999),
+                                              ),
+                                              child: const Text(
+                                                '已选',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Color(0xFF3263FF),
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        const SizedBox(height: 14),
+                        Text(
+                          '转交备注',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Semantics(
+                          identifier: 'desk.transfer.note',
+                          label: '转交备注',
+                          textField: true,
+                          child: TextField(
+                            key: const ValueKey('desk-transfer-note'),
+                            controller: _note,
+                            minLines: 2,
+                            maxLines: 4,
+                            decoration: const InputDecoration(
+                              hintText: '说明转交原因，便于同事接手（选填）',
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            TextButton(
+                              onPressed: () => Navigator.of(context).pop(),
+                              child: const Text('取消'),
+                            ),
+                            const SizedBox(width: 8),
+                            DecoratedBox(
+                              decoration: BoxDecoration(
+                                gradient: RelayTheme.actionGradient,
+                                borderRadius: BorderRadius.circular(12),
+                                boxShadow: RelayTheme.popShadow(),
+                              ),
+                              child: FilledButton(
+                                key: const ValueKey('desk-transfer-confirm'),
+                                onPressed: _agentId == null
+                                    ? null
+                                    : () => Navigator.of(context).pop(
+                                          (_agentId!, _note.text.trim()),
+                                        ),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: Colors.transparent,
+                                  disabledBackgroundColor: Colors.transparent,
+                                  shadowColor: Colors.transparent,
+                                  foregroundColor: Colors.white,
+                                  elevation: 0,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                child: Text(assigning ? '确认分配' : '确认转交'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
-        ),
-        FilledButton(
-          onPressed: _agentId == null
-              ? null
-              : () => Navigator.of(context).pop((_agentId!, _note.text.trim())),
-          child: const Text('确认分配'),
-        ),
-      ],
+    ),
     );
   }
 }

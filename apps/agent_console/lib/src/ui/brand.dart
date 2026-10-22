@@ -104,7 +104,7 @@ class _TongYuMarkPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     canvas.save();
     canvas.scale(size.width / 36, size.height / 36);
-    final blue = Paint()..color = const Color(0xFF4263EB);
+    final blue = Paint()..color = const Color(0xFF3263FF);
     canvas.drawRRect(
         RRect.fromRectAndRadius(
             const Rect.fromLTWH(2, 3, 25, 23), const Radius.circular(9)),
@@ -364,7 +364,7 @@ class WorkspaceSidebar extends StatelessWidget {
   }
 }
 
-/// 客服工作台左侧图标轨。
+/// 客服工作台左侧图标轨：对齐 Stitch B 规范（w-14 / 58px 高密图标轨、左侧 3px 竖条指示、极浅底色）。
 ///
 /// 宽屏只留图标和短标题，把横向空间留给会话；窄屏仍走底部 NavigationBar。
 class ConsoleIconRail extends StatelessWidget {
@@ -393,96 +393,167 @@ class ConsoleIconRail extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final dark = scheme.brightness == Brightness.dark;
-    final rail = dark ? const Color(0xFF151922) : const Color(0xFFF4F6FC);
-    final selected = dark ? const Color(0xFF243044) : const Color(0xFFE8EEFF);
+    // Stitch B：#f2f3ff 浅底色与 #e2e7ff 细边框
+    final rail = dark ? const Color(0xFF151922) : const Color(0xFFF2F3FF);
+    final border = dark ? const Color(0xFF283142) : const Color(0xFFE2E7FF);
+    final activeBg = dark ? const Color(0xFF1E283D) : const Color(0xFFEDF2FF);
+    final primary = dark ? const Color(0xFF5BA3FF) : const Color(0xFF3263FF);
+
     return Container(
-      width: 72,
+      width: 78,
       decoration: BoxDecoration(
-        color: rail,
-        border: Border(right: BorderSide(color: scheme.outlineVariant)),
+        gradient: dark
+            ? null
+            : const LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xC7FFFFFF), Color(0xEBF2F4FF)],
+              ),
+        color: dark ? rail : null,
+        border: Border(right: BorderSide(color: border.withOpacity(0.85))),
+        boxShadow: dark
+            ? null
+            : [
+                BoxShadow(
+                  color: const Color(0xFF3263FF).withOpacity(0.03),
+                  blurRadius: 24,
+                  offset: const Offset(4, 0),
+                ),
+              ],
       ),
       child: SafeArea(
         child: Column(children: [
-          const SizedBox(height: 14),
-          if (showBrand) const TongYuLogoMark(size: 32),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
+          if (showBrand)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 4),
+              child: TongYuLogoMark(size: 32),
+            ),
+          const SizedBox(height: 10),
           Expanded(
               child: ListView(
-            padding: const EdgeInsets.symmetric(horizontal: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 8),
             children: [
               for (var i = 0; i < items.length; i++)
                 Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
+                    padding: const EdgeInsets.only(bottom: 3),
                     child: Tooltip(
                         message: items[i].label,
                         child: Material(
-                          color: i == selectedIndex
-                              ? selected
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(8),
+                          color: Colors.transparent,
                           child: InkWell(
-                            borderRadius: BorderRadius.circular(8),
                             onTap: () => onSelected(i),
-                            child: SizedBox(
-                                height: 54,
-                                child: Stack(
-                                    alignment: Alignment.center,
-                                    children: [
-                                      Column(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
-                                          children: [
-                                            Icon(items[i].icon,
-                                                size: 20,
+                            borderRadius: BorderRadius.circular(14),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 160),
+                              width: 58,
+                              padding: const EdgeInsets.only(top: 9, bottom: 6),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(14),
+                                gradient: i == selectedIndex && !dark
+                                    ? const LinearGradient(
+                                        begin: Alignment.topCenter,
+                                        end: Alignment.bottomCenter,
+                                        colors: [
+                                          Color(0xFFE8EFFF),
+                                          Color(0xFFDFE8FF)
+                                        ],
+                                      )
+                                    : null,
+                                color: i == selectedIndex
+                                    ? (dark ? activeBg : null)
+                                    : Colors.transparent,
+                                boxShadow: i == selectedIndex && !dark
+                                    ? [
+                                        BoxShadow(
+                                          color: const Color(0xFF3263FF)
+                                              .withOpacity(0.10),
+                                          blurRadius: 18,
+                                          offset: const Offset(0, 8),
+                                        ),
+                                      ]
+                                    : null,
+                                border: i == selectedIndex && !dark
+                                    ? Border.all(
+                                        color: Colors.white.withOpacity(0.6))
+                                    : null,
+                              ),
+                              child: Stack(
+                                alignment: Alignment.center,
+                                clipBehavior: Clip.none,
+                                children: [
+                                  Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(items[i].icon,
+                                            size: 17,
+                                            color: i == selectedIndex
+                                                ? primary
+                                                : const Color(0xFF637B9E)),
+                                        const SizedBox(height: 3),
+                                        Text(_railLabel(items[i].label),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                                fontSize: 10,
+                                                height: 1.2,
+                                                fontWeight: i == selectedIndex
+                                                    ? FontWeight.w600
+                                                    : FontWeight.w400,
                                                 color: i == selectedIndex
-                                                    ? scheme.primary
-                                                    : scheme.onSurfaceVariant),
-                                            const SizedBox(height: 3),
-                                            Text(_railLabel(items[i].label),
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: TextStyle(
-                                                    fontSize: 10,
-                                                    height: 1.1,
-                                                    fontWeight:
-                                                        i == selectedIndex
-                                                            ? FontWeight.w600
-                                                            : FontWeight.w400,
-                                                    color: i == selectedIndex
-                                                        ? scheme.primary
-                                                        : scheme
-                                                            .onSurfaceVariant)),
-                                          ]),
-                                      if (items[i].count > 0)
-                                        Positioned(
-                                            top: 2,
-                                            right: 2,
-                                            child: Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                        horizontal: 4,
-                                                        vertical: 1),
-                                                decoration: BoxDecoration(
-                                                    color: scheme.primary,
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                            6)),
-                                                child: Text(
-                                                    items[i].count > 99
-                                                        ? '99+'
-                                                        : '${items[i].count}',
-                                                    style: const TextStyle(
-                                                        color: Colors.white,
-                                                        fontSize: 9)))),
-                                    ])),
+                                                    ? primary
+                                                    : const Color(0xFF637B9E))),
+                                      ]),
+                                  if (items[i].count > 0)
+                                    Positioned(
+                                        top: -2,
+                                        right: 2,
+                                        child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 5, vertical: 1),
+                                            decoration: BoxDecoration(
+                                                gradient: const LinearGradient(
+                                                  colors: [
+                                                    Color(0xFFFF7A9A),
+                                                    Color(0xFFE64980)
+                                                  ],
+                                                ),
+                                                borderRadius:
+                                                    BorderRadius.circular(9),
+                                                boxShadow: [
+                                                  BoxShadow(
+                                                    color: const Color(0xFFE64980)
+                                                        .withOpacity(0.28),
+                                                    blurRadius: 8,
+                                                    offset: const Offset(0, 3),
+                                                  ),
+                                                ]),
+                                            child: Text(
+                                                items[i].count > 99
+                                                    ? '99+'
+                                                    : '${items[i].count}',
+                                                style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 9,
+                                                    fontWeight: FontWeight.w600)))),
+                                ],
+                              ),
+                            ),
                           ),
                         ))),
             ],
           )),
-          if (footer != null) footer!,
+          if (footer != null)
+            Container(
+              decoration: BoxDecoration(
+                border: Border(top: BorderSide(color: border)),
+              ),
+              padding: const EdgeInsets.only(top: 4),
+              child: footer!,
+            ),
           if (avatar != null)
             Padding(
-                padding: const EdgeInsets.only(bottom: 12, top: 4),
+                padding: const EdgeInsets.only(bottom: 8, top: 2),
                 child: avatar!),
         ]),
       ),

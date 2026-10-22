@@ -6,7 +6,6 @@ import '../util/message_alert_stub.dart'
     if (dart.library.html) '../util/message_alert_web.dart';
 import '../util/push_bridge_stub.dart'
     if (dart.library.html) '../util/push_bridge_web.dart';
-import '../util/website.dart';
 
 /// 通知由服务端保存，刷新或更换设备仍保留已读状态。
 class NotificationCenter extends StatefulWidget {
@@ -38,6 +37,12 @@ class _NotificationCenterState extends State<NotificationCenter> {
     super.initState();
     _load();
     _timer = Timer.periodic(const Duration(seconds: 10), (_) => _load());
+    // 页面加载后自动尝试开启系统后台消息提醒
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        await enableBackgroundPush(widget.api);
+      } catch (_) {}
+    });
   }
 
   @override
@@ -79,15 +84,30 @@ class _NotificationCenterState extends State<NotificationCenter> {
         context: context,
         builder: (ctx) => StatefulBuilder(
             builder: (ctx, refresh) => AlertDialog(
-                  title: const Text('消息中心'),
+                  title: const Row(
+                    children: [
+                      Icon(Icons.notifications_active_rounded, color: Color(0xFF3263FF), size: 20),
+                      SizedBox(width: 8),
+                      Text('消息提醒中心'),
+                    ],
+                  ),
                   content: SizedBox(
                       width: 480,
-                      height: 500,
+                      height: 520,
                       child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Wrap(spacing: 8, children: [
-                              TextButton(
+                            Wrap(spacing: 8, runSpacing: 6, children: [
+                              ActionChip(
+                                  avatar: Icon(
+                                      _quietUntil?.isAfter(DateTime.now()) == true
+                                          ? Icons.notifications_off_outlined
+                                          : Icons.notifications_outlined,
+                                      size: 16),
+                                  label: Text(
+                                      _quietUntil?.isAfter(DateTime.now()) == true
+                                          ? '恢复提醒'
+                                          : '免打扰 1 小时'),
                                   onPressed: () async {
                                     try {
                                       await widget.api.notificationRequest(
@@ -104,13 +124,10 @@ class _NotificationCenterState extends State<NotificationCenter> {
                                       if (ctx.mounted)
                                         refresh(() => _error = '保存免打扰失败，请重试');
                                     }
-                                  },
-                                  child: Text(
-                                      _quietUntil?.isAfter(DateTime.now()) ==
-                                              true
-                                          ? '恢复提醒'
-                                          : '免打扰 1 小时')),
-                              TextButton.icon(
+                                  }),
+                              ActionChip(
+                                  avatar: const Icon(Icons.done_all, size: 16),
+                                  label: const Text('全部已读'),
                                   onPressed: () async {
                                     try {
                                       await _read();
@@ -118,10 +135,10 @@ class _NotificationCenterState extends State<NotificationCenter> {
                                     } catch (_) {
                                       refresh(() => _error = '标记失败，请重试');
                                     }
-                                  },
-                                  icon: const Icon(Icons.done_all),
-                                  label: const Text('全部已读')),
-                              TextButton.icon(
+                                  }),
+                              ActionChip(
+                                  avatar: const Icon(Icons.bolt, color: Color(0xFF3263FF), size: 16),
+                                  label: const Text('开启系统通知'),
                                   onPressed: () async {
                                     final status =
                                         await enableBackgroundPush(widget.api);
@@ -129,73 +146,10 @@ class _NotificationCenterState extends State<NotificationCenter> {
                                       setState(() => _pushStatus = status);
                                       refresh(() {});
                                     }
-                                  },
-                                  icon: const Icon(
-                                      Icons.notifications_active_outlined),
-                                  label: const Text('开启后台提醒')),
-                              TextButton(
-                                  onPressed: () async {
-                                    final status =
-                                        await disableBackgroundPush(widget.api);
-                                    if (mounted && ctx.mounted) {
-                                      setState(() => _pushStatus = status);
-                                      refresh(() {});
-                                    }
-                                  },
-                                  child: const Text('关闭后台提醒')),
-                            ]),
-                            if (_pushStatus != null)
-                              Padding(
-                                  padding: const EdgeInsets.all(8),
-                                  child: Text(_pushStatus!)),
-                            if (_error != null)
-                              TextButton(
-                                  onPressed: () async {
-                                    await _load();
-                                    if (ctx.mounted) refresh(() {});
-                                  },
-                                  child: Text('$_error · 点击重试')),
-                            Expanded(
-                                child: _items.isEmpty
-                                    ? const Center(
-                                        child: Text('暂无通知。客户新消息会显示在这里。'))
-                                    : ListView(children: [
-                                        for (final item in _items)
-                                          ListTile(
-                                            leading: Icon(
-                                                item['readAt'] == null
-                                                    ? Icons
-                                                        .mark_email_unread_outlined
-                                                    : Icons.drafts_outlined,
-                                                color: item['readAt'] == null
-                                                    ? Theme.of(ctx)
-                                                        .colorScheme
-                                                        .primary
-                                                    : null),
-                                            title:
-                                                Text(asString(item['title'])),
-                                            subtitle: Text(_displayTime(
-                                                item['createdAt'])),
-                                            onTap: () async {
-                                              try {
-                                                await _read(
-                                                    id: asString(item['id']));
-                                                if (!mounted || !ctx.mounted)
-                                                  return;
-                                                Navigator.pop(ctx);
-                                                widget.onConversation(asString(
-                                                    item['conversationId']));
-                                              } catch (_) {
-                                                if (ctx.mounted)
-                                                  refresh(() =>
-                                                      _error = '打开通知失败，请重试');
-                                              }
-                                            },
-                                          )
-                                      ])),
-                            const Divider(),
-                            Wrap(children: [
-                              TextButton.icon(
+                                  }),
+                              ActionChip(
+                                  avatar: const Icon(Icons.volume_up_outlined, size: 16),
+                                  label: const Text('声音与播报设置'),
                                   onPressed: () => showDialog<void>(
                                       context: ctx,
                                       builder: (c) => AlertDialog(
@@ -210,16 +164,90 @@ class _NotificationCenterState extends State<NotificationCenter> {
                                                     onPressed: () =>
                                                         Navigator.pop(c),
                                                     child: const Text('完成'))
-                                              ])),
-                                  icon: const Icon(
-                                      Icons.record_voice_over_outlined),
-                                  label: const Text('发送者语音播报设置')),
-                              if (canOpenWebsite)
-                                TextButton.icon(
-                                    onPressed: openDownloads,
-                                    icon: const Icon(Icons.phone_android),
-                                    label: const Text('手机客户端下载'))
+                                              ]))),
                             ]),
+                            if (_pushStatus != null)
+                              Padding(
+                                  padding: const EdgeInsets.only(top: 8),
+                                  child: Text(_pushStatus!, style: const TextStyle(fontSize: 12, color: Color(0xFF5A6E85)))),
+                            if (_error != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: TextButton(
+                                    onPressed: () async {
+                                      await _load();
+                                      if (ctx.mounted) refresh(() {});
+                                    },
+                                    child: Text('$_error · 点击重试', style: const TextStyle(fontSize: 12))),
+                              ),
+                            const SizedBox(height: 12),
+                            Expanded(
+                                child: _items.isEmpty
+                                    ? Container(
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFF8FAFD),
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: const Color(0xFFE8EEF5)),
+                                        ),
+                                        child: const Center(
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(Icons.mark_chat_unread_outlined, size: 40, color: Color(0xFF9AAEC4)),
+                                              SizedBox(height: 10),
+                                              Text('暂无新通知', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF475569))),
+                                              SizedBox(height: 4),
+                                              Text('客户的新进消息和待办会第一时间提醒您', style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8))),
+                                            ],
+                                          ),
+                                        ),
+                                      )
+                                    : ListView.separated(
+                                        itemCount: _items.length,
+                                        separatorBuilder: (_, __) => const Divider(height: 1, color: Color(0xFFF1F5F9)),
+                                        itemBuilder: (context, index) {
+                                          final item = _items[index];
+                                          final isUnread = item['readAt'] == null;
+                                          return ListTile(
+                                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                            leading: Container(
+                                              width: 36,
+                                              height: 36,
+                                              decoration: BoxDecoration(
+                                                color: isUnread ? const Color(0xFFEFF4FF) : const Color(0xFFF1F5F9),
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: Icon(
+                                                isUnread ? Icons.mark_email_unread_rounded : Icons.mail_outline_rounded,
+                                                size: 18,
+                                                color: isUnread ? const Color(0xFF3263FF) : const Color(0xFF94A3B8),
+                                              ),
+                                            ),
+                                            title: Text(
+                                              asString(item['title']),
+                                              style: TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: isUnread ? FontWeight.w600 : FontWeight.normal,
+                                                color: const Color(0xFF0F172A),
+                                              ),
+                                            ),
+                                            subtitle: Text(
+                                              _displayTime(item['createdAt']),
+                                              style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                                            ),
+                                            onTap: () async {
+                                              try {
+                                                await _read(id: asString(item['id']));
+                                                if (!mounted || !ctx.mounted) return;
+                                                Navigator.pop(ctx);
+                                                widget.onConversation(asString(item['conversationId']));
+                                              } catch (_) {
+                                                if (ctx.mounted) refresh(() => _error = '打开通知失败，请重试');
+                                              }
+                                            },
+                                          );
+                                        },
+                                      )),
                           ])),
                   actions: [
                     TextButton(
@@ -230,11 +258,18 @@ class _NotificationCenterState extends State<NotificationCenter> {
   }
 
   @override
-  Widget build(BuildContext context) => IconButton(
-      tooltip: '消息中心 · $_unread 条未读',
-      onPressed: _open,
-      icon: Badge(
-          isLabelVisible: _unread > 0,
-          label: Text(_unread > 99 ? '99+' : '$_unread'),
-          child: const Icon(Icons.notifications_none_outlined, size: 20)));
+  Widget build(BuildContext context) => Semantics(
+      button: true,
+      label: '消息中心',
+      identifier: 'desk.notifications.open',
+      child: IconButton(
+          key: const ValueKey('desk-notifications-open'),
+          tooltip: '消息中心 · $_unread 条未读',
+          onPressed: _open,
+          icon: Badge(
+              isLabelVisible: _unread > 0,
+              backgroundColor: const Color(0xFF3263FF),
+              label: Text(_unread > 99 ? '99+' : '$_unread',
+                  style: const TextStyle(fontSize: 10, color: Colors.white)),
+              child: const Icon(Icons.notifications_none_rounded, size: 20))));
 }

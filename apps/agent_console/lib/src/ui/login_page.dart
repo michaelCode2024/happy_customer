@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+﻿import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'package:tongyu_agent_console/src/state/session_controller.dart';
@@ -39,7 +39,16 @@ class _LoginPageState extends State<LoginPage> {
     _server = TextEditingController(text: hint);
     // Web 已能从页面 origin 推断地址时默认收起；桌面端空地址则展开，避免找不到字段。
     _advancedOpen = hint.trim().isEmpty && !kIsWeb;
-    _tenant.text = '';
+    _tenant.text = 'demo';
+    _email.text = 'agent@tongyu.local';
+    _password.text = 'TongYu@2026';
+    
+    // 首次进入自动登录进入工作台内页
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !widget.session.busy && widget.session.phase == SessionPhase.loggedOut) {
+        _submit();
+      }
+    });
   }
 
   @override

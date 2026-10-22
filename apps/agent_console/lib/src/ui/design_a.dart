@@ -70,7 +70,7 @@ class TongYuHero extends StatelessWidget {
             gradient: LinearGradient(
                 colors: dark
                     ? [scheme.primaryContainer.withOpacity(.4), scheme.surface]
-                    : const [Color(0xFFEDF2FF), Color(0xFFE8EFFD)]),
+                    : const [Color(0xFFEDF2FF), Color(0xFFF3F0FF), Color(0xFFE8EFFD)]),
             border: Border.all(color: scheme.primary.withOpacity(.08)),
             borderRadius: BorderRadius.circular(20)),
         child: narrow && !compact

@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:tongyu_agent_console/src/state/session_controller.dart';
+import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
 
 class GroupsPage extends StatefulWidget {
   const GroupsPage({super.key, required this.session});
@@ -553,75 +554,106 @@ class _GroupsPageState extends State<GroupsPage> {
     return LayoutBuilder(builder: (context, box) {
       final narrow = box.maxWidth < 760;
       final list = Column(children: [
-        Padding(
-            padding: const EdgeInsets.all(12),
+        Container(
+            padding: const EdgeInsets.fromLTRB(16, 14, 10, 10),
             child: Row(children: [
-              const Expanded(
-                  child: Text('群聊',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w600, fontSize: 18))),
+              const Text('群聊',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+              const SizedBox(width: 8),
+              if (groups.isNotEmpty)
+                WorkspaceTag(text: '${groups.length}'),
+              const Spacer(),
               IconButton(
                   tooltip: '刷新群聊',
+                  visualDensity: VisualDensity.compact,
                   onPressed: refresh,
-                  icon: const Icon(Icons.refresh)),
+                  icon: const Icon(Icons.refresh_rounded, size: 18)),
+              const SizedBox(width: 2),
               FilledButton.icon(
                   onPressed: create,
-                  icon: const Icon(Icons.add, size: 18),
+                  icon: const Icon(Icons.add_rounded, size: 16),
                   label: const Text('建群'))
             ])),
         Expanded(
             child: groups.isEmpty
-                ? const Center(child: Text('创建内部协作群或客户服务群'))
-                : ListView(children: [
-                    for (final g in groups)
-                      ListTile(
-                          selected: g['id'] == selected,
-                          selectedTileColor:
-                              Theme.of(context).colorScheme.primaryContainer,
-                          leading: CircleAvatar(
-                              backgroundColor: Theme.of(context)
-                                  .colorScheme
-                                  .primaryContainer,
-                              child: Icon(Icons.groups_outlined,
-                                  color:
-                                      Theme.of(context).colorScheme.primary)),
-                          title: Text('${g['name']}'),
-                          subtitle: Text(
-                              '${g['kind'] == 'INTERNAL' ? '内部协作' : '客户服务'} · ${g['memberCount']}人${g['dissolved'] == true ? ' · 已解散' : g['archived'] == true ? ' · 已归档' : ''}'),
-                          trailing: (g['unread'] as num) > 0
-                              ? Badge(
-                                  backgroundColor:
-                                      Theme.of(context).colorScheme.primary,
-                                  label: Text('${g['unread']}'))
-                              : null,
-                          onTap: () {
-                            setState(() {
-                              selected = g['id'] as String;
-                              messages = [];
-                              search.clear();
-                              draft.clear();
-                            });
-                            load();
-                          })
-                  ]))
+                ? const WorkspaceEmptyState(
+                    icon: Icons.forum_outlined,
+                    title: '还没有群聊',
+                    description: '创建内部协作群，或把客户邀请进服务群。',
+                    compact: true)
+                : ListView(
+                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+                    children: [
+                        for (final g in groups)
+                          _GroupListRow(
+                            name: '${g['name']}',
+                            subtitle:
+                                '${g['kind'] == 'INTERNAL' ? '内部协作' : '客户服务'} · ${g['memberCount']} 人'
+                                '${g['dissolved'] == true ? ' · 已解散' : g['archived'] == true ? ' · 已归档' : ''}',
+                            unread: (g['unread'] as num).toInt(),
+                            selected: g['id'] == selected,
+                            onTap: () {
+                              setState(() {
+                                selected = g['id'] as String;
+                                messages = [];
+                                search.clear();
+                                draft.clear();
+                              });
+                              load();
+                            },
+                          )
+                      ]))
       ]);
       final thread = Column(children: [
-        Padding(
-            padding: const EdgeInsets.all(12),
+        Container(
+            padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              border: Border(
+                  bottom: BorderSide(
+                      color: Theme.of(context).colorScheme.outlineVariant)),
+            ),
             child: Row(children: [
               if (narrow)
                 IconButton(
+                    visualDensity: VisualDensity.compact,
                     onPressed: () => setState(() => selected = null),
-                    icon: const Icon(Icons.arrow_back)),
+                    icon: const Icon(Icons.arrow_back_rounded, size: 18)),
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary.withOpacity(.08),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(Icons.forum_rounded,
+                    size: 17, color: Theme.of(context).colorScheme.primary),
+              ),
+              const SizedBox(width: 9),
               Expanded(
-                  child: Text('${group?['name'] ?? '群聊'}',
-                      style: const TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.w600))),
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    Text('${group?['name'] ?? '群聊'}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.w600)),
+                    Text(
+                        '${group?['kind'] == 'INTERNAL' ? '内部协作群' : '客户服务群'}'
+                        '${group?['memberCount'] != null ? ' · ${group?['memberCount']} 人' : ''}',
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant)),
+                  ])),
               IconButton(
                   tooltip: '语音与视频通话',
+                  visualDensity: VisualDensity.compact,
                   onPressed:
                       group?['archived'] == true ? null : () => callWindow(),
-                  icon: const Icon(Icons.call_outlined)),
+                  icon: const Icon(Icons.call_outlined, size: 18)),
               PopupMenuButton<String>(
                   tooltip: '更多群聊操作',
                   onSelected: (action) {
@@ -659,48 +691,63 @@ class _GroupsPageState extends State<GroupsPage> {
                                   style: TextStyle(color: Colors.red))),
                       ])
             ])),
-        Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        Container(
+            color: Theme.of(context).colorScheme.surface,
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
             child: Align(
                 alignment: Alignment.centerLeft,
-                child: Wrap(spacing: 8, runSpacing: 8, children: [
+                child: Wrap(spacing: 6, runSpacing: 6, children: [
                   OutlinedButton.icon(
                       onPressed: manage,
-                      icon: const Icon(Icons.group_outlined, size: 18),
+                      icon: const Icon(Icons.group_outlined, size: 16),
                       label: const Text('群成员')),
                   if (owner &&
                       group?['kind'] == 'SERVICE' &&
                       group?['archived'] != true)
                     FilledButton.tonalIcon(
                         onPressed: invite,
-                        icon: const Icon(Icons.link, size: 18),
+                        icon: const Icon(Icons.link, size: 16),
                         label: const Text('邀请客户')),
                 ]))),
         if ((group?['announcement'] ?? '') != '')
           Container(
-              margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              padding: const EdgeInsets.all(12),
+              margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primaryContainer,
+                  color: Theme.of(context).colorScheme.primary.withOpacity(.05),
                   border: Border.all(
-                      color: Theme.of(context).colorScheme.outlineVariant),
-                  borderRadius: BorderRadius.circular(10)),
+                      color: Theme.of(context).colorScheme.primary.withOpacity(.16)),
+                  borderRadius: BorderRadius.circular(8)),
               child: Row(children: [
                 Icon(Icons.campaign_outlined,
+                    size: 16,
                     color: Theme.of(context).colorScheme.primary),
-                const SizedBox(width: 10),
-                Expanded(child: Text('群公告：${group?['announcement']}')),
+                const SizedBox(width: 8),
+                Expanded(
+                    child: Text('群公告：${group?['announcement']}',
+                        style: const TextStyle(fontSize: 12, height: 1.5))),
               ])),
         if (error != null)
           Padding(
-              padding: const EdgeInsets.all(12),
-              child: Text(error!, style: const TextStyle(color: Colors.red))),
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: Text(error!,
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.error))),
         Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.fromLTRB(12, 2, 12, 8),
             child: TextField(
                 controller: search,
-                decoration: const InputDecoration(
-                    hintText: '搜索群消息', prefixIcon: Icon(Icons.search)),
+                style: const TextStyle(fontSize: 12.5),
+                decoration: InputDecoration(
+                    isDense: true,
+                    hintText: '搜索群消息',
+                    fillColor: Theme.of(context).colorScheme.surfaceContainerLow,
+                    prefixIcon: const Icon(Icons.search_rounded, size: 17),
+                    prefixIconConstraints:
+                        const BoxConstraints(minWidth: 34, minHeight: 34),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 9)),
                 onChanged: (_) {
                   debounce?.cancel();
                   debounce = Timer(const Duration(milliseconds: 300), load);
@@ -712,55 +759,102 @@ class _GroupsPageState extends State<GroupsPage> {
         if (messages.length >= 100 && search.text.isEmpty)
           TextButton(onPressed: older, child: const Text('加载更早消息')),
         Expanded(
-            child: ListView(
-                reverse: true,
-                controller: threadScroll,
-                padding: const EdgeInsets.all(16),
-                children: messages.reversed
-                    .map((m) => Padding(
-                        padding: const EdgeInsets.only(bottom: 16),
-                        child: Column(
-                            crossAxisAlignment:
-                                m['actorId'] == widget.session.agent?.id
-                                    ? CrossAxisAlignment.end
-                                    : CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                  '${m['name']} · ${m['kind'] == 'widget' ? '客户' : '同事'}',
-                                  style:
-                                      Theme.of(context).textTheme.labelSmall),
-                              const SizedBox(height: 4),
-                              Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                      color: m['actorId'] ==
-                                              widget.session.agent?.id
-                                          ? Theme.of(context)
-                                              .colorScheme
-                                              .primaryContainer
-                                          : Theme.of(context)
-                                              .colorScheme
-                                              .surfaceContainerHighest,
-                                      borderRadius: BorderRadius.circular(12)),
-                                  child: SelectableText(m['recalled'] == true
-                                      ? '该消息已被撤回'
-                                      : '${m['content']}')),
-                              if (m['actorId'] == widget.session.agent?.id &&
-                                  m['recalled'] != true)
-                                TextButton(
-                                    onPressed: () => recall(m),
-                                    child: const Text('撤回',
-                                        style: TextStyle(fontSize: 12)))
-                            ])))
-                    .toList())),
+            child: ColoredBox(
+                color: Theme.of(context).scaffoldBackgroundColor,
+                child: ListView(
+                    reverse: true,
+                    controller: threadScroll,
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                    children: messages.reversed
+                        .map((m) {
+                          final mine =
+                              m['actorId'] == widget.session.agent?.id;
+                          final recalled = m['recalled'] == true;
+                          return Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: Column(
+                                  crossAxisAlignment: mine
+                                      ? CrossAxisAlignment.end
+                                      : CrossAxisAlignment.start,
+                                  children: [
+                                    Padding(
+                                      padding: const EdgeInsets.only(
+                                          left: 2, right: 2, bottom: 3),
+                                      child: Text(
+                                          '${m['name']} · ${m['kind'] == 'widget' ? '客户' : '同事'}',
+                                          style: TextStyle(
+                                              fontSize: 10.5,
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .onSurfaceVariant)),
+                                    ),
+                                    Container(
+                                        constraints:
+                                            const BoxConstraints(maxWidth: 520),
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 12, vertical: 9),
+                                        decoration: BoxDecoration(
+                                            color: mine
+                                                ? Theme.of(context)
+                                                    .colorScheme
+                                                    .primary
+                                                : Theme.of(context)
+                                                    .colorScheme
+                                                    .surface,
+                                            border: mine
+                                                ? null
+                                                : Border.all(
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .outlineVariant),
+                                            borderRadius: BorderRadius.only(
+                                              topLeft: const Radius.circular(10),
+                                              topRight: const Radius.circular(10),
+                                              bottomLeft: Radius.circular(
+                                                  mine ? 10 : 3),
+                                              bottomRight: Radius.circular(
+                                                  mine ? 3 : 10),
+                                            )),
+                                        child: SelectableText(
+                                            recalled ? '该消息已被撤回' : '${m['content']}',
+                                            style: TextStyle(
+                                                fontSize: 13,
+                                                height: 1.55,
+                                                color: mine
+                                                    ? Colors.white
+                                                    : Theme.of(context)
+                                                        .colorScheme
+                                                        .onSurface))),
+                                    if (mine && !recalled)
+                                      TextButton(
+                                          style: TextButton.styleFrom(
+                                              minimumSize: const Size(0, 26),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 6),
+                                              tapTargetSize:
+                                                  MaterialTapTargetSize
+                                                      .shrinkWrap),
+                                          onPressed: () => recall(m),
+                                          child: const Text('撤回',
+                                              style: TextStyle(fontSize: 11)))
+                                  ]));
+                        })
+                        .toList()))),
         if (group?['archived'] == true)
           Padding(
               padding: const EdgeInsets.all(20),
               child: Text(
                   group?['dissolved'] == true ? '群已解散，仅可查看历史' : '群已归档，仅可查看历史'))
         else
-          Padding(
-              padding: const EdgeInsets.all(12),
+          Container(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                border: Border(
+                    top: BorderSide(
+                        color: Theme.of(context).colorScheme.outlineVariant)),
+              ),
               child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
                 Expanded(
                     child: TextField(
@@ -768,6 +862,7 @@ class _GroupsPageState extends State<GroupsPage> {
                         minLines: 1,
                         maxLines: 4,
                         maxLength: 4000,
+                        style: const TextStyle(fontSize: 13),
                         decoration: const InputDecoration(
                             hintText: '发送群消息…', counterText: ''))),
                 const SizedBox(width: 8),
@@ -782,27 +877,27 @@ class _GroupsPageState extends State<GroupsPage> {
             child: selected == null ? list : thread);
       return Row(children: [
         SizedBox(
-            width: 294,
-            child: ColoredBox(
-                color: Theme.of(context).colorScheme.surface, child: list)),
-        const VerticalDivider(width: 1),
+            width: 288,
+            child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface,
+                  border: Border(
+                      right: BorderSide(
+                          color: Theme.of(context).colorScheme.outlineVariant)),
+                ),
+                child: list)),
         Expanded(
             child: selected == null
-                ? Center(
-                    child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.forum_outlined,
-                        size: 44, color: Theme.of(context).colorScheme.outline),
-                    const SizedBox(height: 16),
-                    const Text('选择群聊，开始协作'),
-                    const SizedBox(height: 8),
-                    Text('与同事协作，或为客户提供群服务',
-                        style: Theme.of(context).textTheme.bodySmall),
-                  ]))
+                ? const WorkspaceEmptyState(
+                    icon: Icons.forum_outlined,
+                    title: '选择群聊，开始协作',
+                    description: '与同事协作，或把客户邀请进服务群统一答复。')
                 : ColoredBox(
                     color: Theme.of(context).colorScheme.surface,
                     child: thread)),
         if (box.maxWidth >= 1040 && selected != null) ...[
-          const VerticalDivider(width: 1),
+          VerticalDivider(
+              width: 1, color: Theme.of(context).colorScheme.outlineVariant),
           SizedBox(
               width: 280,
               child: ColoredBox(
@@ -870,5 +965,89 @@ class _GroupsPageState extends State<GroupsPage> {
                               Text('${group?['announcement']}'),
                             ])))),
         ]));
+  }
+}
+
+/// 群聊列表行：统一 30 图标块、两行文本与未读计数。
+class _GroupListRow extends StatelessWidget {
+  const _GroupListRow({
+    required this.name,
+    required this.subtitle,
+    required this.unread,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String name;
+  final String subtitle;
+  final int unread;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Material(
+        color: selected ? scheme.primary.withOpacity(.06) : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border(
+                left: BorderSide(
+                  width: 2.4,
+                  color: selected ? scheme.primary : Colors.transparent,
+                ),
+              ),
+            ),
+            child: Row(children: [
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: selected ? scheme.primary.withOpacity(.12) : scheme.primary.withOpacity(.07),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(Icons.forum_rounded, size: 16, color: scheme.primary),
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 12.5,
+                            height: 1.35,
+                            fontWeight: selected ? FontWeight.w600 : FontWeight.w500)),
+                    const SizedBox(height: 1),
+                    Text(subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 11,
+                            height: 1.35,
+                            color: scheme.onSurfaceVariant)),
+                  ],
+                ),
+              ),
+              if (unread > 0) ...[
+                const SizedBox(width: 6),
+                WorkspaceTag(text: unread > 99 ? '99+' : '$unread', solid: true, dense: true),
+              ],
+            ]),
+          ),
+        ),
+      ),
+    );
   }
 }

@@ -343,21 +343,20 @@ class _IntegrationPageState extends State<IntegrationPage> {
                         Text(_error!),
                         TextButton(onPressed: _load, child: const Text('重试'))
                       ]))
-                    : ListView(padding: const EdgeInsets.all(16), children: [
-                        Container(
-                            padding: const EdgeInsets.all(22),
-                            decoration: BoxDecoration(
-                                color: theme.colorScheme.surface,
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                    color: theme.colorScheme.outlineVariant)),
+                    : ListView(
+                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                        children: [
+                          WorkspaceCard(
+                            padding:
+                                const EdgeInsets.fromLTRB(18, 16, 18, 18),
                             child: switch (_tab) {
                               0 => _inboxTab(theme),
                               1 => _keyTab(theme),
                               3 => _guide(theme),
                               _ => _hookTab(theme)
-                            }),
-                      ])),
+                            },
+                          ),
+                        ])),
       ]),
     );
   }
@@ -754,26 +753,39 @@ location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent
                 )),
       ]);
 
-  Widget _copyRow(String label, String value) => Padding(
+  Widget _copyRow(String label, String value) {
+    final theme = Theme.of(context);
+    return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label),
-          const SizedBox(height: 6),
           Row(children: [
             Expanded(
-                child: SelectableText(value,
+                child: Text(label,
                     style: const TextStyle(
-                        fontFamily: 'monospace', fontSize: 12))),
-            IconButton(
-                tooltip: '复制$label',
-                icon: const Icon(Icons.copy_outlined),
-                onPressed: () => _copy(value))
+                        fontSize: 12, fontWeight: FontWeight.w600))),
+            TextButton.icon(
+                onPressed: () => _copy(value),
+                icon: const Icon(Icons.copy_rounded, size: 14),
+                label: const Text('复制', style: TextStyle(fontSize: 11.5))),
           ]),
-          const Divider(),
+          const SizedBox(height: 4),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: theme.colorScheme.outlineVariant),
+            ),
+            child: SelectableText(value,
+                style: const TextStyle(
+                    fontFamily: 'monospace', fontSize: 11.5, height: 1.55)),
+          ),
         ],
       ));
+  }
 
   Future<void> _deliveries(String id) async {
     try {

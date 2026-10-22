@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:tongyu_agent_console/src/theme.dart';
 
 import 'package:tongyu_agent_console/src/api/models.dart';
 import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
@@ -376,17 +377,28 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
           height: 54,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-              color: HSLColor.fromAHSL(
-                      1, avatarHue(visitor.id).toDouble(), .30, .92)
-                  .toColor(),
-              borderRadius: BorderRadius.circular(18)),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  RelayTheme.avatarTray(visitor.id),
+                  Color.lerp(
+                      RelayTheme.avatarTray(visitor.id), Colors.white, 0.12)!,
+                ],
+              ),
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF12B886).withOpacity(0.18),
+                  blurRadius: 18,
+                  offset: const Offset(0, 8),
+                ),
+              ]),
           child: Text(initials(visitor.label),
               style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.w600,
-                  color: HSLColor.fromAHSL(
-                          1, avatarHue(visitor.id).toDouble(), .24, .48)
-                      .toColor()))),
+                  color: RelayTheme.avatarInk(visitor.id)))),
       const SizedBox(height: 10),
       Text(visitor.label,
           textAlign: TextAlign.center, style: theme.textTheme.titleMedium),

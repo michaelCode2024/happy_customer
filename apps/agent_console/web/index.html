@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <!--
     If you are serving your web app in a path other than the root, change the
     href value below to reflect the base path you are serving from.
@@ -19,16 +22,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <script>
-    // Keep embedded host sessions on Flutter. Normal web entry uses the dedicated layouts.
-    (() => {
-      const q = new URLSearchParams(location.search);
-      if (q.get('embedded') === '1' || q.get('layout') === 'flutter') return;
-      const platform = q.get('surface') === 'platform' || (!q.has('surface') && sessionStorage.getItem('tongyu.consoleSurface') === 'platform');
-      const mobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
-      const mobile = !platform && q.get('layout') !== 'desktop' && (mobileDevice || matchMedia('(max-width: 760px)').matches && matchMedia('(pointer: coarse)').matches);
-      if (platform && !q.has('surface')) q.set('surface','platform');
-      location.replace('/console/' + (mobile ? 'mobile.html' : 'desktop.html') + (q.size ? '?' + q.toString() : '') + location.hash);
-    })();
+    // 纯 Flutter Web / H5 运行，不重定向到外部草稿
   </script>
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="通语工作台与平台运营后台">
@@ -53,7 +47,7 @@
       margin: 0;
       background-color: var(--tongyu-page-bg, #ffffff);
       height: 100%;
-      font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC",
+      font-family: "Plus Jakarta Sans", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC",
         "Noto Sans SC", "Segoe UI", sans-serif;
     }
 
@@ -68,10 +62,10 @@
     .tongyu-start-english{font-size:10px;letter-spacing:4px;opacity:.55;margin:0 0 29px;padding-left:4px}
     .tongyu-start-tagline{font-size:13px;letter-spacing:1px;opacity:.65;margin:0}
     .tongyu-start-activity{position:relative;overflow:hidden;width:70px;height:3px;background:#edf0f6;border-radius:8px;margin:34px auto 0}
-    .tongyu-start-activity:after{content:'';display:block;width:26px;height:100%;border-radius:8px;background:#4263eb;animation:tongyu-travel 1.7s ease-in-out infinite}
+    .tongyu-start-activity:after{content:'';display:block;width:26px;height:100%;border-radius:8px;background:#3263ff;animation:tongyu-travel 1.7s ease-in-out infinite}
     .tongyu-start-foot{position:absolute;bottom:calc(24px + env(safe-area-inset-bottom,0px));left:20px;right:20px;text-align:center;font-size:10px;letter-spacing:2px;opacity:.45}
     .tongyu-start-status{font-size:12px;line-height:1.9;opacity:.7;max-width:280px;margin:22px auto 0}
-    #tongyu-load-retry{display:block;margin:16px auto 0;border:0;border-radius:9px;background:#4263eb;color:#fff;font:14px inherit;padding:12px 28px;cursor:pointer}
+    #tongyu-load-retry{display:block;margin:16px auto 0;border:0;border-radius:9px;background:#3263ff;color:#fff;font:14px inherit;padding:12px 28px;cursor:pointer}
     @keyframes tongyu-breathe{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
     @keyframes tongyu-travel{0%,100%{transform:translateX(-28px)}50%{transform:translateX(44px)}}
     @media(prefers-reduced-motion:reduce){#tongyu-loading,.tongyu-start-icon svg,.tongyu-start-activity:after{animation:none;transition:none}}
@@ -131,31 +125,62 @@
     });
   </script>
   <script>
-    // 固定引导地址交由HTTP条件请求检查更新，主脚本仍按编译版本缓存。
-    // 下载失败必须提供重试，不能让用户一直停留在加载占位页。
+    // Keep splash dismiss and failure retry deterministic for local web-server preview.
+    window.tongyuEnsureRetry = function (label) {
+      const status = document.getElementById('tongyu-start-status');
+      if (!status) return;
+      let retry = document.getElementById('tongyu-load-retry');
+      if (!retry) {
+        retry = document.createElement('button');
+        retry.id = 'tongyu-load-retry';
+        retry.type = 'button';
+        retry.setAttribute('aria-label', '重新打开通语');
+        retry.onclick = function () {
+          try { sessionStorage.setItem('tongyu.manualReload', '1'); } catch (_) {}
+          location.reload();
+        };
+        status.appendChild(retry);
+      }
+      retry.textContent = label || '重新加载';
+    };
     window.tongyuLoadingFailed = function () {
       if (window.tongyuFirstFrameReady) return;
       const loading = document.getElementById('tongyu-loading');
       if (!loading) return;
       loading.querySelector('.tongyu-start-activity')?.remove();
       const status = document.getElementById('tongyu-start-status');
-      status.setAttribute('role','alert');
+      if (!status) return;
+      status.setAttribute('role', 'alert');
       status.textContent = '暂时无法打开通语，请检查网络后重试。';
-      if (!document.getElementById('tongyu-load-retry')) {
-        const retry = document.createElement('button');retry.id='tongyu-load-retry';retry.textContent='重新加载';
-        retry.onclick = () => location.reload();status.appendChild(retry);
-      }
+      window.tongyuEnsureRetry('重新加载');
     };
     const bootstrap = document.createElement('script');
     bootstrap.src = 'flutter_bootstrap.js';
     bootstrap.async = true;
     bootstrap.onerror = window.tongyuLoadingFailed;
     document.body.appendChild(bootstrap);
-    setTimeout(() => {
+    setTimeout(function () {
       if (window.tongyuFirstFrameReady || document.getElementById('tongyu-load-retry')) return;
       const status = document.getElementById('tongyu-start-status');
-      if (status) status.textContent = '连接时间较长，请检查网络。正在继续尝试连接…';
-    },8000);
+      if (status) {
+        status.textContent = '连接时间较长，请检查网络。正在继续尝试连接…';
+        window.tongyuEnsureRetry('重试打开');
+      }
+    }, 8000);
+    setTimeout(function () {
+      if (window.tongyuFirstFrameReady) return;
+      // One soft bootstrap retry before hard failure, helps stuck local web-server boots.
+      if (!window.tongyuBootstrapRetried) {
+        window.tongyuBootstrapRetried = true;
+        const again = document.createElement('script');
+        again.src = 'flutter_bootstrap.js?retry=' + Date.now();
+        again.async = true;
+        again.onerror = window.tongyuLoadingFailed;
+        document.body.appendChild(again);
+        return;
+      }
+      window.tongyuLoadingFailed();
+    }, 22000);
     setTimeout(window.tongyuLoadingFailed, 45000);
   </script>
   <script src="pwa-client.js"></script>

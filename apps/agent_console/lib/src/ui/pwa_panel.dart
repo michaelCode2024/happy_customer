@@ -237,6 +237,7 @@ class _PwaPanelState extends State<PwaPanel> {
             ));
   }
 
+  // ignore: unused_element
   void _details() => showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -299,68 +300,48 @@ class _PwaPanelState extends State<PwaPanel> {
   @override
   Widget build(BuildContext context) {
     if (!kIsWeb) return const SizedBox.shrink();
-    final ready = _status['ready'] == true;
     final update = _status['update'] == true;
-    final error = (_status['error'] ?? '').toString();
-    final storageFailed = widget.api?.offlineStore?.writeFailed == true;
-    final text = storageFailed
-        ? '本机存储不足或不可用，草稿可能未保存，请勿关闭页面'
-        : _offline
-            ? '离线 · 查看已缓存会话，回复仅保存草稿'
-            : update
-                ? '新版本已就绪，请保存草稿后更新'
-                : error.isNotEmpty
-                    ? '当前页面暂时无法准备离线安装'
-                    : ready
-                        ? '离线资源已就绪'
-                        : '正在准备离线资源…';
+
+    // 只保留热更新提示，不展示任何离线、离线安装恢复相关横幅
     if (widget.settingsOnly) {
       return ListTile(
-        leading: const Icon(Icons.install_mobile_outlined),
-        title: const Text('安装与离线'),
-        subtitle: Text(text),
+        leading: const Icon(Icons.system_update_alt_rounded),
+        title: const Text('系统更新'),
+        subtitle: Text(update ? '新版本已就绪，请保存草稿后更新' : '已是最新版本'),
         trailing: const Icon(Icons.chevron_right),
-        onTap: _details,
+        onTap: () => _action('checkUpdate'),
       );
     }
-    if (widget.hideUpdateBanner &&
-        !_offline &&
-        error.isEmpty &&
-        !storageFailed) {
+
+    // 仅在有新版本就绪时才展示热更新条
+    if (!update || widget.hideUpdateBanner) {
       return const SizedBox.shrink();
     }
-    // 正常就绪和准备过程不占工作区；只展示需要处理的异常或更新。
-    if (!_offline && !update && error.isEmpty && !storageFailed) {
-      return const SizedBox.shrink();
-    }
+
     return Material(
-        color: _offline
-            ? Theme.of(context).colorScheme.errorContainer
-            : Theme.of(context).colorScheme.surfaceContainerLow,
-        child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            child: Wrap(
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 8,
+        color: const Color(0xFFEFF4FF),
+        child: Container(
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: Color(0xFFD3E0FD))),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
                 children: [
-                  Icon(
-                      _offline
-                          ? Icons.cloud_off_outlined
-                          : Icons.install_mobile_outlined,
-                      size: 16),
-                  Text(text, style: Theme.of(context).textTheme.bodySmall),
-                  TextButton(onPressed: _details, child: const Text('安装与离线')),
-                  if (_offline && widget.api != null)
-                    TextButton(
-                        onPressed: _busy ? null : _reconnect,
-                        child: Text(_busy ? '同步中…' : '重新连接')),
-                  if (error.isNotEmpty && !_offline)
-                    TextButton(
-                        onPressed: () => _action('retry'),
-                        child: const Text('重试')),
-                  if (update)
-                    TextButton(
-                        onPressed: _confirmUpdate, child: const Text('更新应用')),
+                  const Icon(Icons.auto_awesome, size: 16, color: Color(0xFF3263FF)),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      '通语工作台新版本已就绪，保存草稿后即可立即应用',
+                      style: TextStyle(fontSize: 13, color: Color(0xFF0C1D40), fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                  TextButton(
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFF3263FF),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      ),
+                      onPressed: _confirmUpdate,
+                      child: const Text('立即更新', style: TextStyle(fontWeight: FontWeight.w600))),
                 ])));
   }
 }

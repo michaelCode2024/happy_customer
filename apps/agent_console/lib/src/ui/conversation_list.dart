@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
 
 import 'package:tongyu_agent_console/src/api/models.dart';
 import 'package:tongyu_agent_console/src/state/session_controller.dart';
@@ -19,10 +20,13 @@ class ConversationListPanel extends StatefulWidget {
     super.key,
     required this.workbench,
     required this.session,
+    this.onOpenKnowledge,
   });
 
   final WorkbenchController workbench;
   final SessionController session;
+  /// 空态「打开知识库」：仅在有真实工作台分区时传入。
+  final VoidCallback? onOpenKnowledge;
 
   @override
   State<ConversationListPanel> createState() => _ConversationListPanelState();
@@ -80,12 +84,13 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
           children: <Widget>[
             // 对齐腾讯 IM：顶栏「会话」+ 筛选 Tab + 搜索，列表信息密度更高。
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 12, 6),
+              padding: const EdgeInsets.fromLTRB(14, 12, 6, 4),
               child: Row(
                 children: [
                   Text(
                     '客户消息',
                     style: theme.textTheme.titleMedium?.copyWith(
+                      fontSize: 14,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -135,20 +140,40 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
                       onTap: () => workbench.setFilter(entry.$1),
                     ),
                   const Spacer(),
-                  Tooltip(
-                    message: workbench.includeResolved ? '隐藏已解决' : '显示已解决',
-                    child: IconButton(
-                      iconSize: 18,
-                      visualDensity: VisualDensity.compact,
-                      onPressed: () => workbench
-                          .setIncludeResolved(!workbench.includeResolved),
-                      icon: Icon(
-                        workbench.includeResolved
-                            ? Icons.check_circle
-                            : Icons.check_circle_outline,
-                        color: workbench.includeResolved
-                            ? theme.colorScheme.primary
-                            : theme.colorScheme.onSurfaceVariant,
+                  Semantics(
+                    button: true,
+                    label: '含已解决',
+                    identifier: 'desk.filter.includeResolved',
+                    toggled: workbench.includeResolved,
+                    child: Tooltip(
+                      message: workbench.includeResolved
+                          ? '列表已含已解决会话，点击可隐藏'
+                          : '列表不含已解决会话，点击可包含',
+                      child: TextButton(
+                        key: const ValueKey('desk-filter-include-resolved'),
+                        onPressed: () => workbench
+                            .setIncludeResolved(!workbench.includeResolved),
+                        style: TextButton.styleFrom(
+                          foregroundColor: workbench.includeResolved
+                              ? theme.colorScheme.primary
+                              : theme.colorScheme.onSurfaceVariant,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          minimumSize: const Size(0, 32),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          textStyle: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        child: Text(
+                          '含已解决',
+                          style: TextStyle(
+                            decoration: workbench.includeResolved
+                                ? TextDecoration.underline
+                                : TextDecoration.none,
+                            decorationColor: theme.colorScheme.primary,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -156,22 +181,25 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 18),
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
               child: TextField(
                 controller: _search,
                 textInputAction: TextInputAction.search,
+                style: const TextStyle(fontSize: 12.5),
                 decoration: InputDecoration(
-                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
                   hintText: '搜索客户、内容',
-                  prefixIcon: const Icon(Icons.search, size: 18),
+                  prefixIcon: const Icon(Icons.search_rounded, size: 17),
+                  prefixIconConstraints:
+                      const BoxConstraints(minWidth: 34, minHeight: 34),
                   filled: true,
-                  fillColor: theme.colorScheme.surfaceContainerHighest,
+                  fillColor: theme.colorScheme.surfaceContainerLow,
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.circular(8),
                     borderSide: BorderSide.none,
                   ),
                   enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.circular(8),
                     borderSide: BorderSide.none,
                   ),
                   suffixIcon: _search.text.isEmpty
@@ -263,20 +291,25 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
       );
     }
     if (workbench.conversations.isEmpty) {
+      final canOpenKnowledge = widget.onOpenKnowledge != null &&
+          workbench.search.isEmpty &&
+          workbench.filter == QueueFilter.mine;
       return _Notice(
         icon: Icons.inbox_outlined,
         title: workbench.search.isNotEmpty
             ? '没有找到相关会话'
             : switch (workbench.filter) {
-                QueueFilter.mine => '暂时没有分配给你的会话',
+                QueueFilter.mine => '暂无进行中的会话',
                 QueueFilter.unassigned => '待接待队列是空的',
                 QueueFilter.all => '没有符合条件的会话',
               },
         message: workbench.search.isNotEmpty
-            ? '搜索仅在当前筛选和客服入口内进行，可切换全部或显示已解决。'
+            ? '搜索仅在当前筛选和客服入口内进行，可切换全部或打开「含已解决」。'
             : workbench.filter == QueueFilter.mine
-                ? '切到「待接待」认领会话，或等待自动分配。'
+                ? '新客户进线后会出现在待接待列表。也可以先整理知识库。'
                 : '有新会话时会实时出现在这里。',
+        actionLabel: canOpenKnowledge ? '打开知识库' : null,
+        onAction: canOpenKnowledge ? widget.onOpenKnowledge : null,
       );
     }
     return RefreshIndicator(
@@ -335,18 +368,26 @@ class _ConversationRow extends StatelessWidget {
     ].join(' · ');
 
     return Material(
-      color: selected ? RelayTheme.listSelected(scheme) : Colors.transparent,
-      borderRadius: BorderRadius.circular(10),
+      color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.fromLTRB(12, 15, 12, 15),
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-                color: selected
-                    ? scheme.primary.withOpacity(0.12)
-                    : Colors.transparent),
+            gradient: selected
+                ? const LinearGradient(
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                    colors: [Color(0xFFEAF0FF), Color(0xFFF3F6FF)],
+                  )
+                : null,
+            border: Border(
+              left: BorderSide(
+                color: selected ? scheme.primary : Colors.transparent,
+                width: 3,
+              ),
+              bottom: const BorderSide(color: Color(0xFFF1F3F7)),
+            ),
           ),
           child: Row(
             children: <Widget>[
@@ -451,23 +492,35 @@ class _Avatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hue = avatarHue(seed);
-    final background =
-        HSLColor.fromAHSL(1, hue.toDouble(), 0.30, 0.92).toColor();
     return Container(
       width: size,
       height: size,
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: background,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            RelayTheme.avatarTray(seed),
+            Color.lerp(RelayTheme.avatarTray(seed), Colors.white, 0.15)!,
+          ],
+        ),
         borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.white.withOpacity(0.5),
+            blurRadius: 0,
+            spreadRadius: 1,
+            offset: Offset.zero,
+          ),
+        ],
       ),
       child: Text(
         initials(name),
         style: TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.w600,
-          color: HSLColor.fromAHSL(1, hue.toDouble(), .24, .48).toColor(),
+          color: RelayTheme.avatarInk(seed),
         ),
       ),
     );
@@ -596,31 +649,14 @@ class _Notice extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Icon(icon, size: 40, color: theme.colorScheme.outline),
-            const SizedBox(height: 14),
-            Text(title, style: theme.textTheme.titleSmall),
-            const SizedBox(height: 6),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-            if (actionLabel != null && onAction != null) ...<Widget>[
-              const SizedBox(height: 16),
-              OutlinedButton(onPressed: onAction, child: Text(actionLabel!)),
-            ],
-          ],
-        ),
-      ),
+    return WorkspaceEmptyState(
+      title: title,
+      description: message,
+      icon: icon,
+      compact: true,
+      action: (actionLabel != null && onAction != null)
+          ? FilledButton(onPressed: onAction, child: Text(actionLabel!))
+          : null,
     );
   }
 }

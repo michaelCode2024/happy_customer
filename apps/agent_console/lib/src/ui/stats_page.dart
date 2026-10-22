@@ -67,7 +67,7 @@ class _StatsPageState extends State<StatsPage> {
     final theme = Theme.of(context);
     final overview = _overview;
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      backgroundColor: Theme.of(context).brightness == Brightness.dark ? Theme.of(context).scaffoldBackgroundColor : const Color(0xFFEEF2FB),
       appBar: WorkspaceAppBar(
         title: '数据统计',
         description: '了解会话趋势、响应效率和团队工作量',
@@ -121,7 +121,7 @@ class _StatsPageState extends State<StatsPage> {
               : overview == null
                   ? const Center(child: Text('暂无数据'))
                   : ListView(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
                       children: <Widget>[
                         if (!overview.isTenantWide) ...<Widget>[
                           _SingleCard(
@@ -131,16 +131,19 @@ class _StatsPageState extends State<StatsPage> {
                           ),
                         ] else ...<Widget>[
                           _cardGrid(context, overview),
-                          const SizedBox(height: 20),
+                          const SizedBox(height: 14),
                           _TrendCard(overview: overview),
-                          const SizedBox(height: 20),
+                          const SizedBox(height: 14),
                           _LeaderboardCard(rows: overview.leaderboard),
                         ],
                         const SizedBox(height: 16),
-                        Text(
-                          '会话趋势按天汇总，队列与在线状态显示当前数据。',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: theme.colorScheme.outline,
+                        Center(
+                          child: Text(
+                            '会话趋势按天汇总，队列与在线状态显示当前数据。',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              fontSize: 11,
+                              color: theme.colorScheme.outline,
+                            ),
                           ),
                         ),
                       ],
@@ -151,33 +154,39 @@ class _StatsPageState extends State<StatsPage> {
   Widget _cardGrid(BuildContext context, StatsOverview overview) {
     // 调度台只留核心 KPI；其余量在趋势表 / 排行里看，避免一排分析卡片。
     final cards = <_Metric>[
-      _Metric('进行中', '${overview.openConversations}'),
-      _Metric('待分配', '${overview.queued}'),
-      _Metric('在线坐席', '${overview.onlineAgents}'),
-      _Metric('首响', durationText(overview.avgFirstResponseSeconds)),
-      _Metric('AI 解决率', percentText(overview.aiDeflectionRate)),
+      _Metric('进行中', '${overview.openConversations}', Icons.chat_bubble_outline_rounded,
+          const Color(0xFF3263FF)),
+      _Metric('待分配', '${overview.queued}', Icons.inbox_outlined,
+          const Color(0xFFF97316)),
+      _Metric('在线坐席', '${overview.onlineAgents}', Icons.people_outline_rounded,
+          const Color(0xFF31977C)),
+      _Metric('首响', durationText(overview.avgFirstResponseSeconds),
+          Icons.schedule_rounded, const Color(0xFF7C5CFC)),
+      _Metric('AI 解决率', percentText(overview.aiDeflectionRate),
+          Icons.auto_awesome_outlined, const Color(0xFF0EA5E9)),
       _Metric(
         '评分',
         overview.avgRating <= 0 ? '—' : overview.avgRating.toStringAsFixed(1),
+        Icons.sentiment_satisfied_alt_rounded,
+        const Color(0xFFEC4899),
       ),
     ];
     return LayoutBuilder(
       builder: (context, constraints) {
-        final columns = constraints.maxWidth > 900
-            ? 3
-            : constraints.maxWidth > 600
+        final columns = constraints.maxWidth > 1080
+            ? 6
+            : constraints.maxWidth > 760
                 ? 3
                 : 2;
-        return GridView(
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: columns,
-              mainAxisExtent: 120,
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12),
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          children: <Widget>[
-            for (final metric in cards) _MetricCard(metric: metric),
+        const gap = 12.0;
+        final width =
+            (constraints.maxWidth - (columns - 1) * gap) / columns;
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: [
+            for (final metric in cards)
+              SizedBox(width: width, child: _MetricCard(metric: metric)),
           ],
         );
       },
@@ -186,10 +195,12 @@ class _StatsPageState extends State<StatsPage> {
 }
 
 class _Metric {
-  const _Metric(this.label, this.value);
+  const _Metric(this.label, this.value, this.icon, this.tone);
 
   final String label;
   final String value;
+  final IconData icon;
+  final Color tone;
 }
 
 class _MetricCard extends StatelessWidget {
@@ -199,16 +210,11 @@ class _MetricCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final icon = switch (metric.label) {
-      '进行中' => Icons.chat_bubble_outline,
-      '待分配' => Icons.inbox_outlined,
-      '在线坐席' => Icons.people_outline,
-      '首响' => Icons.schedule,
-      '评分' => Icons.sentiment_satisfied_alt,
-      _ => Icons.auto_awesome_outlined,
-    };
     return WorkspaceKpiCard(
-        label: metric.label, value: metric.value, icon: icon);
+        label: metric.label,
+        value: metric.value,
+        icon: metric.icon,
+        tone: metric.tone);
   }
 }
 
@@ -226,32 +232,19 @@ class _SingleCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border:
-            Border.all(color: theme.colorScheme.outlineVariant.withAlpha(120)),
-      ),
+    return WorkspaceCard(
+      title: title,
+      icon: Icons.insights_rounded,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text(title, style: theme.textTheme.titleSmall),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: theme.textTheme.displaySmall?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            caption,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
+          Text(value,
+              style: theme.textTheme.headlineSmall
+                  ?.copyWith(fontSize: 32, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 6),
+          Text(caption,
+              style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant, height: 1.55)),
         ],
       ),
     );
@@ -273,42 +266,32 @@ class _TrendCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final series = overview.series;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border:
-            Border.all(color: theme.colorScheme.outlineVariant.withAlpha(120)),
-      ),
+    return WorkspaceCard(
+      title: '会话趋势',
+      subtitle: '按天汇总的新会话与消息量',
+      icon: Icons.show_chart_rounded,
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+      actions: <Widget>[
+        _Legend(color: theme.colorScheme.primary, label: '新会话'),
+        const SizedBox(width: 10),
+        _Legend(color: const Color(0xFF7C5CFC), label: '消息数'),
+      ],
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Row(
-            children: <Widget>[
-              Text('会话趋势', style: theme.textTheme.titleSmall),
-              const Spacer(),
-              _Legend(color: theme.colorScheme.primary, label: '新会话'),
-              const SizedBox(width: 14),
-              _Legend(color: theme.colorScheme.secondary, label: '消息数'),
-            ],
-          ),
-          const SizedBox(height: 14),
           if (series.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 28),
-              child: Center(
-                child: Text(
-                  '所选区间内还没有统计数据',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
+            const SizedBox(
+              height: 160,
+              child: WorkspaceEmptyState(
+                icon: Icons.bar_chart_rounded,
+                title: '所选区间内还没有统计数据',
+                description: '客户产生会话后，这里会按天补齐趋势。',
+                compact: true,
               ),
             )
           else
             SizedBox(
-              height: 190,
+              height: 186,
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final started = series
@@ -385,7 +368,7 @@ class _TrendColumn extends StatelessWidget {
                 _Bar(
                   value: point.messagesIn + point.messagesOut,
                   max: maxMessages,
-                  color: theme.colorScheme.secondary,
+                  color: const Color(0xFF7C5CFC),
                 ),
               ],
             ),
@@ -473,37 +456,25 @@ class _LeaderboardCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border:
-            Border.all(color: theme.colorScheme.outlineVariant.withAlpha(120)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text('坐席排行（近 30 天）', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 8),
-          if (rows.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 18),
-              child: Text(
-                '还没有坐席数据',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
+    return WorkspaceCard(
+      title: '坐席排行',
+      subtitle: '近 30 天已解决量与响应效率',
+      icon: Icons.leaderboard_outlined,
+      padding: EdgeInsets.zero,
+      child: rows.isEmpty
+          ? const WorkspaceEmptyState(
+              icon: Icons.people_outline_rounded,
+              title: '还没有坐席数据',
+              description: '团队完成接待后，这里会按解决量排序。',
+              compact: true,
             )
-          else
-            SingleChildScrollView(
+          : SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: DataTable(
-                columnSpacing: 28,
-                headingRowHeight: 36,
-                dataRowMinHeight: 40,
-                dataRowMaxHeight: 44,
+                columnSpacing: 26,
+                headingRowHeight: 38,
+                dataRowMinHeight: 42,
+                dataRowMaxHeight: 46,
                 columns: const <DataColumn>[
                   DataColumn(label: Text('坐席')),
                   DataColumn(label: Text('已解决'), numeric: true),
@@ -515,7 +486,28 @@ class _LeaderboardCard extends StatelessWidget {
                   for (final row in rows)
                     DataRow(
                       cells: <DataCell>[
-                        DataCell(Text(row.displayName)),
+                        DataCell(Row(children: [
+                          Container(
+                            width: 22,
+                            height: 22,
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.primary.withOpacity(.08),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            alignment: Alignment.center,
+                            child: Text(
+                              row.displayName.isEmpty
+                                  ? '?'
+                                  : row.displayName.characters.first,
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: theme.colorScheme.primary),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(row.displayName),
+                        ])),
                         DataCell(Text('${row.resolved}')),
                         DataCell(Text('${row.open}')),
                         DataCell(
@@ -532,8 +524,6 @@ class _LeaderboardCard extends StatelessWidget {
                 ],
               ),
             ),
-        ],
-      ),
     );
   }
 }

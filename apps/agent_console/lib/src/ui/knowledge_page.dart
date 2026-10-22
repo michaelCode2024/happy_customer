@@ -284,7 +284,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
     final theme = Theme.of(context);
     final canEdit = widget.session.agent?.canManageKnowledge ?? false;
     return Scaffold(
-        backgroundColor: Colors.transparent,
+        backgroundColor: Theme.of(context).brightness == Brightness.dark ? Theme.of(context).scaffoldBackgroundColor : const Color(0xFFEEF2FB),
         body: LayoutBuilder(builder: (context, viewport) {
           final content =
               Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -421,37 +421,52 @@ class _KnowledgePageState extends State<KnowledgePage> {
       LayoutBuilder(builder: (context, box) {
         if (box.maxWidth < 900) return const SizedBox.shrink();
         return SizedBox(
-            height: 104,
+            height: 72,
             child: ListView.separated(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
                 scrollDirection: Axis.horizontal,
                 itemCount: _categories.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                separatorBuilder: (_, __) => const SizedBox(width: 10),
                 itemBuilder: (context, index) {
                   final c = _categories[index],
                       id = asString(_categories[index]['id']);
                   final count =
                       _entries.where((e) => e.categoryId == id).length;
+                  final selected = _categoryFilter == id;
                   return SizedBox(
-                      width: 210,
+                      width: 186,
                       child: Material(
-                          color: _categoryFilter == id
-                              ? theme.colorScheme.primaryContainer
+                          color: selected
+                              ? theme.colorScheme.primary.withOpacity(.07)
                               : theme.colorScheme.surface,
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
+                              borderRadius: BorderRadius.circular(10),
                               side: BorderSide(
-                                  color: theme.colorScheme.outlineVariant)),
+                                  color: selected
+                                      ? theme.colorScheme.primary
+                                          .withOpacity(.30)
+                                      : theme.colorScheme.outlineVariant)),
                           child: InkWell(
-                              borderRadius: BorderRadius.circular(14),
+                              borderRadius: BorderRadius.circular(10),
                               onTap: () => setState(() => _categoryFilter =
-                                  _categoryFilter == id ? '' : id),
+                                  selected ? '' : id),
                               child: Padding(
-                                  padding: const EdgeInsets.all(14),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 9),
                                   child: Row(children: [
-                                    Icon(Icons.folder_open_outlined,
-                                        color: theme.colorScheme.primary),
-                                    const SizedBox(width: 12),
+                                    Container(
+                                      width: 26,
+                                      height: 26,
+                                      decoration: BoxDecoration(
+                                          color: theme.colorScheme.primary
+                                              .withOpacity(.08),
+                                          borderRadius:
+                                              BorderRadius.circular(7)),
+                                      child: Icon(Icons.folder_open_outlined,
+                                          size: 15,
+                                          color: theme.colorScheme.primary),
+                                    ),
+                                    const SizedBox(width: 9),
                                     Expanded(
                                         child: Column(
                                             crossAxisAlignment:
@@ -463,69 +478,96 @@ class _KnowledgePageState extends State<KnowledgePage> {
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
                                               style: const TextStyle(
-                                                  fontWeight: FontWeight.w600)),
-                                          const SizedBox(height: 5),
-                                          Text('$count 篇 · 查看知识 ↗',
-                                              style: theme.textTheme.bodySmall),
+                                                  fontSize: 12.5,
+                                                  fontWeight:
+                                                      FontWeight.w600)),
+                                          const SizedBox(height: 1),
+                                          Text('$count 篇知识',
+                                              style: theme.textTheme
+                                                  .labelSmall
+                                                  ?.copyWith(
+                                                      fontSize: 10.5,
+                                                      color: theme.colorScheme
+                                                          .onSurfaceVariant)),
                                         ])),
                                   ])))));
                 }));
       });
 
   Widget _summary(ThemeData theme, String title, String value) => Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
           color: theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(6)),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: theme.colorScheme.outlineVariant)),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Text(title, style: theme.textTheme.bodySmall),
-        const SizedBox(width: 10),
+        Text(title,
+            style: theme.textTheme.bodySmall?.copyWith(fontSize: 11.5)),
+        const SizedBox(width: 8),
         Text(value,
             style: theme.textTheme.titleSmall
-                ?.copyWith(color: theme.colorScheme.primary))
+                ?.copyWith(fontSize: 13, color: theme.colorScheme.primary))
       ]));
 
   Widget _buildList(ThemeData theme, bool canEdit) {
     return Container(
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
+      clipBehavior: Clip.antiAlias,
       child: Column(
         children: <Widget>[
-          Padding(
-              padding: const EdgeInsets.fromLTRB(18, 18, 18, 4),
+          Container(
+              padding: const EdgeInsets.fromLTRB(14, 11, 12, 10),
+              decoration: BoxDecoration(
+                  border: Border(
+                      bottom: BorderSide(
+                          color: theme.colorScheme.outlineVariant
+                              .withOpacity(.7)))),
               child: Row(children: [
-                const Icon(Icons.article_outlined, size: 18),
+                Container(
+                  width: 26,
+                  height: 26,
+                  decoration: BoxDecoration(
+                      color: theme.colorScheme.primary.withOpacity(.08),
+                      borderRadius: BorderRadius.circular(7)),
+                  child: Icon(Icons.article_outlined,
+                      size: 15, color: theme.colorScheme.primary),
+                ),
                 const SizedBox(width: 8),
-                Text('知识条目', style: theme.textTheme.titleSmall),
-                const Spacer(),
-                Text('${_visibleEntries.length} 条',
-                    style: theme.textTheme.bodySmall),
+                Text('知识条目',
+                    style: theme.textTheme.titleSmall?.copyWith(fontSize: 13)),
+                const SizedBox(width: 8),
+                WorkspaceTag(text: '${_visibleEntries.length} 条'),
               ])),
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
             child: Row(
               children: <Widget>[
                 Expanded(
                   child: TextField(
                     controller: _search,
+                    style: const TextStyle(fontSize: 12.5),
                     decoration: const InputDecoration(
                       hintText: '搜索标题或内容',
-                      prefixIcon: Icon(Icons.search, size: 18),
+                      prefixIcon: Icon(Icons.search_rounded, size: 17),
+                      prefixIconConstraints:
+                          BoxConstraints(minWidth: 34, minHeight: 34),
                       contentPadding:
-                          EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          EdgeInsets.symmetric(horizontal: 8, vertical: 9),
                       isDense: true,
                     ),
                     onSubmitted: (_) => _load(),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 IconButton(
                   tooltip: '搜索',
+                  visualDensity: VisualDensity.compact,
                   onPressed: _load,
-                  icon: const Icon(Icons.search, size: 20),
+                  icon: const Icon(Icons.arrow_forward_rounded, size: 18),
                 ),
               ],
             ),
@@ -604,127 +646,174 @@ class _KnowledgePageState extends State<KnowledgePage> {
                         ),
                       )
                     : _visibleEntries.isEmpty
-                        ? Center(
-                            child: Padding(
-                              padding: const EdgeInsets.all(24),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: <Widget>[
-                                  Icon(
-                                    Icons.menu_book_outlined,
-                                    size: 38,
-                                    color: theme.colorScheme.outline,
-                                  ),
-                                  const SizedBox(height: 10),
-                                  Text(
-                                    '还没有知识条目',
-                                    style: theme.textTheme.titleSmall,
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '添加产品说明和常见问答，作为 AI 推荐回复的参考。',
-                                    textAlign: TextAlign.center,
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color: theme.colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
+                        ? const WorkspaceEmptyState(
+                            icon: Icons.menu_book_outlined,
+                            title: '还没有知识条目',
+                            description: '添加产品说明和常见问答，作为 AI 推荐回复的参考。',
                           )
                         : ListView.separated(
+                            padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
                             itemCount: _visibleEntries.length,
                             separatorBuilder: (_, __) =>
-                                const Divider(height: 1, indent: 16),
+                                Divider(height: 1, color: theme.colorScheme.outlineVariant.withOpacity(.7)),
                             itemBuilder: (context, index) {
                               final entry = _visibleEntries[index];
                               final expanded = _expandedEntry == entry.id;
                               return Padding(
-                                  padding: const EdgeInsets.all(14),
+                                  padding: const EdgeInsets.fromLTRB(
+                                      10, 10, 10, 8),
                                   child: Column(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
                                         InkWell(
+                                            borderRadius:
+                                                BorderRadius.circular(6),
                                             onTap: () => setState(() =>
                                                 _expandedEntry =
                                                     expanded ? null : entry.id),
                                             child: Row(children: [
-                                              Icon(Icons.article_outlined,
-                                                  color:
-                                                      theme.colorScheme.primary,
-                                                  size: 20),
-                                              const SizedBox(width: 10),
+                                              Container(
+                                                width: 26,
+                                                height: 26,
+                                                decoration: BoxDecoration(
+                                                    color: theme.colorScheme
+                                                        .primary
+                                                        .withOpacity(.07),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            7)),
+                                                child: Icon(
+                                                    Icons.article_outlined,
+                                                    color: theme
+                                                        .colorScheme.primary,
+                                                    size: 14),
+                                              ),
+                                              const SizedBox(width: 9),
                                               Expanded(
                                                   child: Text(entry.title,
+                                                      maxLines: 1,
+                                                      overflow: TextOverflow
+                                                          .ellipsis,
                                                       style: theme.textTheme
-                                                          .titleSmall)),
-                                              Icon(expanded
-                                                  ? Icons.expand_less
-                                                  : Icons.expand_more)
+                                                          .titleSmall
+                                                          ?.copyWith(
+                                                              fontSize: 13))),
+                                              WorkspaceTag(
+                                                text: entry.status == 'ACTIVE'
+                                                    ? '已启用'
+                                                    : '已停用',
+                                                tone: entry.status == 'ACTIVE'
+                                                    ? const Color(0xFF31977C)
+                                                    : theme.colorScheme.outline,
+                                                dense: true,
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Icon(
+                                                  expanded
+                                                      ? Icons.expand_less_rounded
+                                                      : Icons.expand_more_rounded,
+                                                  size: 18,
+                                                  color: theme.colorScheme
+                                                      .onSurfaceVariant)
                                             ])),
-                                        const SizedBox(height: 8),
-                                        Wrap(
-                                            spacing: 12,
-                                            runSpacing: 4,
-                                            children: [
-                                              Text(
-                                                  _categoryLabel(
-                                                      entry.categoryId),
-                                                  style: theme
-                                                      .textTheme.labelSmall),
-                                              Text(
-                                                  entry.status == 'ACTIVE'
-                                                      ? '已启用'
-                                                      : '已停用',
-                                                  style: theme
-                                                      .textTheme.labelSmall
-                                                      ?.copyWith(
-                                                          color: entry.status ==
-                                                                  'ACTIVE'
-                                                              ? Colors.green
-                                                              : theme
-                                                                  .colorScheme
-                                                                  .outline)),
-                                              Text('检索命中 ${entry.hitCount} 次',
-                                                  style: theme
-                                                      .textTheme.labelSmall),
-                                              if (entry.updatedAt != null)
+                                        const SizedBox(height: 5),
+                                        Padding(
+                                          padding:
+                                              const EdgeInsets.only(left: 35),
+                                          child: Wrap(
+                                              spacing: 10,
+                                              runSpacing: 3,
+                                              children: [
                                                 Text(
-                                                    '更新 ${entry.updatedAt!.toLocal().toString().split(' ').first}',
-                                                    style: theme
-                                                        .textTheme.labelSmall)
-                                            ]),
-                                        const SizedBox(height: 8),
-                                        if (expanded)
-                                          SelectableText(entry.content)
-                                        else
-                                          Text(entry.content,
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: theme.textTheme.bodySmall
-                                                  ?.copyWith(
+                                                    _categoryLabel(
+                                                        entry.categoryId),
+                                                    style: theme.textTheme
+                                                        .labelSmall
+                                                        ?.copyWith(
+                                                            fontSize: 10.5,
+                                                            color: theme
+                                                                .colorScheme
+                                                                .onSurfaceVariant)),
+                                                Text(
+                                                    '检索命中 ${entry.hitCount} 次',
+                                                    style: theme.textTheme
+                                                        .labelSmall
+                                                        ?.copyWith(
+                                                            fontSize: 10.5,
+                                                            color: theme
+                                                                .colorScheme
+                                                                .onSurfaceVariant)),
+                                                if (entry.updatedAt != null)
+                                                  Text(
+                                                      '更新 ${entry.updatedAt!.toLocal().toString().split(' ').first}',
+                                                      style: theme.textTheme
+                                                          .labelSmall
+                                                          ?.copyWith(
+                                                              fontSize: 10.5,
+                                                              color: theme
+                                                                  .colorScheme
+                                                                  .onSurfaceVariant))
+                                              ]),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Padding(
+                                          padding:
+                                              const EdgeInsets.only(left: 35),
+                                          child: expanded
+                                              ? SelectableText(entry.content,
+                                                  style: const TextStyle(
+                                                      fontSize: 12.5,
+                                                      height: 1.6))
+                                              : Text(entry.content,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: TextStyle(
+                                                      fontSize: 12,
                                                       color: theme.colorScheme
                                                           .onSurfaceVariant)),
+                                        ),
                                         if (expanded) ...[
-                                          const SizedBox(height: 12),
-                                          Text('相似问法',
-                                              style:
-                                                  theme.textTheme.labelMedium),
-                                          const SizedBox(height: 6),
-                                          if (entry.questionExamples.isEmpty)
-                                            const Text('尚未填写相似问法，建议补充客户常用表达。'),
-                                          Wrap(
-                                              spacing: 6,
-                                              runSpacing: 6,
-                                              children: [
-                                                for (final q
-                                                    in entry.questionExamples)
-                                                  ActionChip(
-                                                      label: Text(q),
-                                                      onPressed: () =>
-                                                          _fillQuestion(q))
-                                              ])
+                                          const SizedBox(height: 10),
+                                          Padding(
+                                            padding:
+                                                const EdgeInsets.only(left: 35),
+                                            child: Text('相似问法',
+                                                style: theme
+                                                    .textTheme.labelMedium
+                                                    ?.copyWith(fontSize: 11.5)),
+                                          ),
+                                          const SizedBox(height: 5),
+                                          Padding(
+                                            padding:
+                                                const EdgeInsets.only(left: 35),
+                                            child: entry.questionExamples.isEmpty
+                                                ? const Text('尚未填写相似问法，建议补充客户常用表达。',
+                                                    style: TextStyle(
+                                                        fontSize: 12,
+                                                        color: Color(
+                                                            0xFF6B7A90)))
+                                                : Wrap(
+                                                    spacing: 5,
+                                                    runSpacing: 5,
+                                                    children: [
+                                                      for (final q
+                                                          in entry
+                                                              .questionExamples)
+                                                        ActionChip(
+                                                            visualDensity:
+                                                                VisualDensity
+                                                                    .compact,
+                                                            label: Text(q,
+                                                                style: const TextStyle(
+                                                                    fontSize:
+                                                                        11)),
+                                                            onPressed: () =>
+                                                                _fillQuestion(
+                                                                    q))
+                                                    ]),
+                                          )
                                         ],
                                         Wrap(spacing: 6, children: [
                                           TextButton.icon(
