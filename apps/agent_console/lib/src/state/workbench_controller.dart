@@ -73,6 +73,8 @@ class WorkbenchController extends ChangeNotifier {
   String _receptionNoticePreview = '';
   int _receptionQueueRequest = 0;
   String? _claimingId;
+  /// 解决反馈条展示期间先藏起右下角到访卡片，避免两块提示叠在一起。
+  bool _suppressReceptionFab = false;
 
   int get receptionWaiting => _receptionWaiting;
   List<Conversation> get receptionQueue => _receptionQueue;
@@ -80,9 +82,16 @@ class WorkbenchController extends ChangeNotifier {
   String get receptionNoticePreview => _receptionNoticePreview;
   int get receptionQueueRequest => _receptionQueueRequest;
   bool get claiming => _claimingId != null;
+  bool get suppressReceptionFab => _suppressReceptionFab;
 
   void dismissReceptionNotice() {
     _receptionNotice = null;
+    _notify();
+  }
+
+  void setSuppressReceptionFab(bool value) {
+    if (_suppressReceptionFab == value) return;
+    _suppressReceptionFab = value;
     _notify();
   }
 

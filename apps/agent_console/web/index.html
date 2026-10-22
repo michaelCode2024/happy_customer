@@ -154,11 +154,17 @@
       status.textContent = '暂时无法打开通语，请检查网络后重试。';
       window.tongyuEnsureRetry('重新加载');
     };
-    const bootstrap = document.createElement('script');
-    bootstrap.src = 'flutter_bootstrap.js';
-    bootstrap.async = true;
-    bootstrap.onerror = window.tongyuLoadingFailed;
-    document.body.appendChild(bootstrap);
+    function tongyuAppendBootstrap(src) {
+      // 显式声明 JS 类型，避免把误返回的 HTML 当成脚本解析。
+      const el = document.createElement('script');
+      el.type = 'text/javascript';
+      el.src = src;
+      el.async = true;
+      el.onerror = window.tongyuLoadingFailed;
+      document.body.appendChild(el);
+      return el;
+    }
+    tongyuAppendBootstrap('flutter_bootstrap.js');
     setTimeout(function () {
       if (window.tongyuFirstFrameReady || document.getElementById('tongyu-load-retry')) return;
       const status = document.getElementById('tongyu-start-status');
@@ -169,14 +175,13 @@
     }, 8000);
     setTimeout(function () {
       if (window.tongyuFirstFrameReady) return;
-      // One soft bootstrap retry before hard failure, helps stuck local web-server boots.
+      // 只在第一次脚本没跑起来时软重试。解析到一半再注入会重复声明变量。
       if (!window.tongyuBootstrapRetried) {
         window.tongyuBootstrapRetried = true;
-        const again = document.createElement('script');
-        again.src = 'flutter_bootstrap.js?retry=' + Date.now();
-        again.async = true;
-        again.onerror = window.tongyuLoadingFailed;
-        document.body.appendChild(again);
+        if (window.__tongyuBootstrapApplied) {
+          return;
+        }
+        tongyuAppendBootstrap('flutter_bootstrap.js?retry=' + Date.now());
         return;
       }
       window.tongyuLoadingFailed();

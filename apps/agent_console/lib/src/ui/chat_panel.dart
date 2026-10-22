@@ -1317,19 +1317,55 @@ class _ThreadHeader extends StatelessWidget {
       return;
     }
     final messenger = ScaffoldMessenger.of(context);
+    // 顶栏反馈避开右下角等待卡片；本轮标记只关掉自己的条，避免 6 秒后误关下一次反馈。
     messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(
-      SnackBar(
+    messenger.clearMaterialBanners();
+    workbench.setSuppressReceptionFab(true);
+    var pending = true;
+
+    void dismissResolveFeedback() {
+      if (!pending) return;
+      pending = false;
+      messenger.hideCurrentMaterialBanner();
+      workbench.setSuppressReceptionFab(false);
+    }
+
+    messenger.showMaterialBanner(
+      MaterialBanner(
+        key: const ValueKey('desk-resolve-feedback-banner'),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         content: const Text('已标记解决'),
-        action: SnackBarAction(
-          key: const ValueKey('desk-resolve-view-resolved'),
-          label: '查看已解决',
-          onPressed: () {
-            workbench.setIncludeResolved(true);
-          },
-        ),
+        actions: <Widget>[
+          Semantics(
+            button: true,
+            label: '查看已解决',
+            identifier: 'desk.resolve.viewResolved',
+            child: TextButton(
+              key: const ValueKey('desk-resolve-view-resolved'),
+              onPressed: () {
+                workbench.setIncludeResolved(true);
+                dismissResolveFeedback();
+              },
+              child: const Text('查看已解决'),
+            ),
+          ),
+          TextButton(
+            key: const ValueKey('desk-resolve-feedback-dismiss'),
+            onPressed: dismissResolveFeedback,
+            child: const Text('关闭'),
+          ),
+        ],
       ),
     );
+    Future<void>.delayed(const Duration(seconds: 6), () {
+      if (!pending) return;
+      if (!context.mounted) {
+        pending = false;
+        workbench.setSuppressReceptionFab(false);
+        return;
+      }
+      dismissResolveFeedback();
+    });
   }
 
   Future<void> _showTransfer(BuildContext context) async {

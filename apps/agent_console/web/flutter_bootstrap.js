@@ -1,17 +1,26 @@
 {{flutter_js}}
 {{flutter_build_config}}
 
-// 编译版本进入主脚本地址，避免长开的后台一直命中旧 main.dart.js。
-const releaseVersion = {{flutter_service_worker_version}};
-for (const build of _flutter.buildConfig.builds) {
-  if (build.mainJsPath) {
-    build.mainJsPath += '?release=' + releaseVersion;
+// 主脚本带上编译版本，避免长开的页面一直命中旧 main.dart.js。
+// 软重试可能再次执行本文件，用标记挡住重复声明。
+(function () {
+  if (window.__tongyuBootstrapApplied) {
+    return;
   }
-}
-// 当前 Flutter 只提供 CanvasKit 构建。继续指定 html 渲染器时加载会直接失败，页面停在开屏。
-// 中文仍走主题里的系统字体回退，不依赖页面去拉一套网页字体。
-_flutter.loader.load({
-  config: { renderer: 'canvaskit' },
-}).catch(function () {
-  window.tongyuLoadingFailed?.();
-});
+  window.__tongyuBootstrapApplied = true;
+  var tongyuReleaseVersion = {{flutter_service_worker_version}};
+  if (_flutter.buildConfig && Array.isArray(_flutter.buildConfig.builds)) {
+    for (var i = 0; i < _flutter.buildConfig.builds.length; i++) {
+      var build = _flutter.buildConfig.builds[i];
+      if (build.mainJsPath && String(build.mainJsPath).indexOf('?release=') < 0) {
+        build.mainJsPath += '?release=' + tongyuReleaseVersion;
+      }
+    }
+  }
+  // 当前 Flutter 只提供 CanvasKit。指定 html 渲染器会停在开屏。
+  _flutter.loader.load({
+    config: { renderer: 'canvaskit' },
+  }).catch(function () {
+    window.tongyuLoadingFailed && window.tongyuLoadingFailed();
+  });
+})();
