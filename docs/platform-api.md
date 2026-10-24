@@ -48,7 +48,8 @@ Content-Type: application/json
   "name": "示例企业",
   "slug": "example",
   "ownerEmail": "owner@example.com",
-  "ownerName": "管理员",
+  "ownerName": "客服主管",
+  "ownerPassword": "由调用方安全提供的初始密码",
   "inboxName": "示例企业 网站客服",
   "publicKey": "example-web",
   "plan": "TRIAL",
@@ -79,6 +80,7 @@ Content-Type: application/json
 - `trialDays` 留空为 14，取值必须在 1–90 之间。
 - `slug` 重复返回 `409 SLUG_TAKEN`。邮箱的唯一性按企业划分
   （`uk_agent_email` 是 `(tenant_id, lower(email))`），同一邮箱可以开通多家企业。
+- 不传 `ownerPassword` 时系统随机生成初始密码，并只在成功响应的 `initialPassword` 中返回一次；响应同时包含 tenantId、ownerId、inboxId、publicKey 和 scriptUrl。不要把整段响应写入普通日志。
 - `initialPassword` 只在这一次响应中出现，必须立即转交客户。
 
 ## 手工分配额度（暂不接支付）
@@ -110,8 +112,7 @@ Content-Type: application/json
 - AI自动回复、助手及知识库回答测试统一计量。调用前原子预留，失败/空回复退款；流式助手产生内容后计一次，取消后也保留该次用量。进程中断未退款的预留会保留，避免并发超领。
 - 企业管理员通过 `/api/v1/admin/subscription` 只读查看有效总额度、已用数量和服务有效期。套餐功能限制、到期限制、坐席限制及消息/AI额度均由服务端执行。
 
-`status: "SUSPENDED"` 会同时注销该企业全部坐席的登录状态，并推送
-`tenant.suspended` 事件。
+企业停用使用 `PATCH /api/v1/platform/tenants/{id}` 的企业状态 `SUSPENDED`，会注销相关坐席会话。额度接口的订阅 `status` 只接受 `ACTIVE`、`PAST_DUE`、`CANCELED`；不要把企业停用状态传给额度接口。
 
 ## 重置客服主管
 

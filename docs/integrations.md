@@ -86,17 +86,9 @@ card字段：kind为PRODUCT/ORDER；id是稳定商品或订单ID；title为1至1
 
 群卡片使用 `POST /api/v1/marketplace/shops/{shopId}/groups/{id}/cards`，body为externalId、clientMessageId、card；同样检查群成员及发言模式。订单分享额外要求shareOrder:true，宿主必须先确认订单可分享给群成员。群消息与私聊统一返回messageType:CARD及metadata.card，现有Widget、客服工作台、群页面和Flutter客服组件支持展示。重试使用同一clientMessageId，避免重复消息；不能用新ID重发同一网络重试。
 
-### 本地验收与交付边界
+历史专项环境与宿主联调记录见 [2026-10-14 归档](历史资料/20261014_商城与Flutter接入联调.md)，不作为当前通用环境配置。
 
-`examples/marketplace/server.py` 和同目录index.html是可运行的买家/店主联调示例，仅允许本机服务，模拟登录不是生产认证。先启动隔离通语API，再在进程环境配置DEMO_ADMIN_EMAIL、DEMO_ADMIN_PASSWORD和可选TONGYU_URL；运行 `python examples/marketplace/server.py` 后打开 `http://127.0.0.1:18090/`。密钥只在后端内存，前端只持有短期身份。
-
-`cmd/commerce-load`是可重复千人在线压测工具。必须显式配置LOAD_DATABASE_URL（数据库名以_test结尾）、LOAD_URLS（两个本机测试实例，逗号分隔）、LOAD_TOKEN_SECRET（与测试实例相同）、可选LOAD_REPORT。它写入隔离租户、1000名成员，建立1000条真实WebSocket连接，广播20条消息，验证20000次通知、1000次历史查询/已读上报、100次重连补拉；保持在线至少60秒。结果是此场景的实测值，不代表生产上限、长时间稳定性或任意消息吞吐。
-
-Go回归测试使用独立TONGYU_TEST_DATABASE，先完成迁移；不要与正在运行的联调API共用数据库，否则后台接待通知任务可能并发消费测试数据。检索测试自动初始化演示知识库。消息幂等校验绑定发送者及消息用途，复用内部备注的标识不能把备注正文返回给访客。
-
-Flutter的sports_new本次只接客服：通过TONGYU_ENDPOINT、TONGYU_INBOX_KEY构建参数启用原生客服页，首页客服入口不再依赖旧客服查询；未配置时继续原有入口。当前配置接入是匿名咨询，缓存按当前业务用户隔离；关联正式账号需宿主后端签发identityToken，再传入TongYuServicePage，不能把业务userId当聊天凭证。App原有店主、群聊、订单业务保持原路径，后续再接。独立客服预览入口为apps/sports_new/lib/tongyu_service_preview.dart；它与正式入口共用组件，用于不启动登录/支付业务的验收。已做浏览器收发和回执联调，原生手机真机权限/网络验收需对应设备。
-
-## 后续开发者中心
+## 后续开发者中心（尚未实现）
 
 1. 每个企业下管理多个“应用”：应用 ID、接入端（网站 / H5 / App / 服务端）、关联的客服入口、允许域名与启停状态。应用与企业绑定，不允许跨企业读取密钥或身份映射。
 2. 身份票据已实现企业、入口和客户 ID 绑定；下一阶段增加独立应用层、票据撤销和细粒度权限。
@@ -105,14 +97,3 @@ Flutter的sports_new本次只接客服：通过TONGYU_ENDPOINT、TONGYU_INBOX_KE
 5. 真正对接腾讯 IM 等外部通道时，通过独立适配器完成双向身份映射、消息 ID 去重、回调验签和失败补偿；不把第三方的 UserSig 或回调格式混进通语客服核心会话模型。
 
 腾讯云文档参考：[REST API 简介](https://cloud.tencent.com/document/product/269/1519)、[第三方回调与安全](https://cloud.tencent.com/document/product/269/1522)。以上“下一阶段”尚未实现，不能将现有 Open API 当作可直接运行的腾讯 IM SDK。
-
-
-### Flutter 复用 SaaS 完整页面（2026-10-14）
-
-用户端 `sports_new` 与店主端 `sports_shop` 的客服入口统一承载 `/h5/{inboxKey}?source=APP`，不重新实现聊天界面。商城后端 `/system/tongyu/session/support` 或 `/shop` 返回 `h5Url` 和短期 `identityToken`；`/staff` 返回 `/console/?embedded=1` 与店员会话票据。服务端密钥仅配置在商城后端。
-
-Web 宿主以精确 `parentOrigin` 和 iframe 来源验证桥消息；身份以 `authenticate` 指令传入，不进入 URL 或持久存储。店主工作台验证票据后使用当前店铺租户，宿主会话不恢复普通工作台保存的账号。返回事件为 `{source:"tongyu",type:"close"}`。App 使用 WebView 桥并由系统提示用户授权录音或拍摄。
-
-本机完整客服预览：18092；用户 App：18093；店主 App：18094；原彩站客服 H5 与对应工作台均为 8080。本机模拟商城双端完整 H5/工作台身份联调为 18090，连接隔离测试 SaaS 18080。两组服务的账号和会话不可混用。
-
-验证边界：本机模拟买家与店主身份已验证完整 SaaS 页面接入；真实商城账号需商城测试后端启用并配置 SaaS 密钥。原商城红包包含余额扣款、领取、到期退款与群权限校验，目前未迁移至 SaaS，不应把原红包入口仍可用视为 SaaS 红包联调完成。真机录音和跨域 iframe 返回按钮的手动验收仍需执行。

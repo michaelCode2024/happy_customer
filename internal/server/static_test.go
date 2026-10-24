@@ -66,4 +66,11 @@ func TestStaticRoutes(t *testing.T) {
 	if redirect.Code != http.StatusPermanentRedirect || redirect.Header().Get("Location") != "/console/" {
 		t.Fatalf("console redirect: %d %q", redirect.Code, redirect.Header().Get("Location"))
 	}
+	for _, path := range []string{"/console/desktop.html?surface=agent", "/console/mobile.html?surface=platform"} {
+		legacy := httptest.NewRecorder()
+		mux.ServeHTTP(legacy, httptest.NewRequest(http.MethodGet, path, nil))
+		if legacy.Code != http.StatusPermanentRedirect || !strings.HasPrefix(legacy.Header().Get("Location"), "/console/?") {
+			t.Fatalf("legacy shell %s: %d %q", path, legacy.Code, legacy.Header().Get("Location"))
+		}
+	}
 }

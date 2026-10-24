@@ -121,6 +121,7 @@ class InboxInfo {
     required this.name,
     required this.publicKey,
     required this.autoAssign,
+    this.autoAccept = false,
     required this.aiEnabled,
   });
 
@@ -129,6 +130,7 @@ class InboxInfo {
         name: asString(json['name']),
         publicKey: asString(json['publicKey']),
         autoAssign: asBool(json['autoAssign']),
+        autoAccept: asBool(json['autoAccept']),
         aiEnabled: asBool(json['aiEnabled']),
       );
 
@@ -136,6 +138,7 @@ class InboxInfo {
   final String name;
   final String publicKey;
   final bool autoAssign;
+  final bool autoAccept;
   final bool aiEnabled;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -143,6 +146,7 @@ class InboxInfo {
         'name': name,
         'publicKey': publicKey,
         'autoAssign': autoAssign,
+        'autoAccept': autoAccept,
         'aiEnabled': aiEnabled,
       };
 }
@@ -535,6 +539,9 @@ class ChatMessage {
       asBool(metadata['transfer']) || asBool(metadata['ai_handoff']);
 
   bool get isAi => asBool(metadata['ai']) || senderId == 'bot';
+
+  /// 关键词 / 收到消息后的自动回复（服务端以 SYSTEM + metadata.automation 落库）。
+  bool get isAutomation => asBool(metadata['automation']);
 
   /// The duration a sender's device measured for a voice note. The audio
   /// element cannot report a duration for a stream it has not buffered, so the

@@ -142,7 +142,9 @@ class WorkbenchController extends ChangeNotifier {
       }
       _receptionBaseline = ids;
       _receptionQueue = queue;
-      _receptionWaiting = page.receptionWaiting;
+      _receptionWaiting = page.receptionWaiting > 0
+          ? page.receptionWaiting
+          : queue.length;
       if (_receptionNotice != null) {
         final matches = queue.where((c) => c.id == _receptionNotice!.id);
         _receptionNotice = matches.isEmpty ? null : matches.first;

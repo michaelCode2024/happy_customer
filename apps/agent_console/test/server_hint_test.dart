@@ -25,4 +25,21 @@ void main() {
       'https://chat.lookfunny.xyz',
     );
   });
+
+  test('local flutter web preview points at the local API port', () {
+    expect(
+      initialServerHint('',
+          web: true, location: Uri.parse('http://127.0.0.1:8092/')),
+      'http://127.0.0.1:18790',
+    );
+  });
+
+  test('production web host keeps its own origin', () {
+    expect(
+      initialServerHint('',
+          web: true,
+          location: Uri.parse('https://chat.lookfunny.xyz/console/')),
+      'https://chat.lookfunny.xyz',
+    );
+  });
 }

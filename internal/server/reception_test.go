@@ -192,3 +192,63 @@ func TestReceptionAcceptanceAndTimeout(t *testing.T) {
 		t.Fatal("queued manual claim failed", err)
 	}
 }
+
+func TestInboxAutoAcceptOnAssign(t *testing.T) {
+	dsn := os.Getenv("TONGYU_TEST_DATABASE")
+	if dsn == "" {
+		t.Skip("database not configured")
+	}
+	ctx := context.Background()
+	db, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err = database.Migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.Exec(ctx, q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tenant, inbox, visitor, conversation, agent := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	exec(`insert into tenant(id,name,slug,status) values($1,'auto-accept',$2,'ACTIVE')`, tenant, tenant.String())
+	exec(`insert into inbox(id,tenant_id,name,public_key,status,auto_assign,auto_accept) values($1,$2,'auto-accept',$3,'ACTIVE',true,true)`, inbox, tenant, inbox.String())
+	exec(`insert into visitor(id,tenant_id,inbox_id) values($1,$2,$3)`, visitor, tenant, inbox)
+	exec(`insert into conversation(id,tenant_id,inbox_id,visitor_id,status) values($1,$2,$3,$4,'OPEN')`, conversation, tenant, inbox, visitor)
+	exec(`insert into agent(id,tenant_id,email,display_name,role,status,password_hash) values($1,$2,$3,'甲','AGENT','ACTIVE','x')`, agent, tenant, agent.String())
+	exec(`insert into agent_inbox values($1,$2)`, agent, inbox)
+	exec(`insert into agent_presence(agent_id,status,last_seen_at) values($1,'ONLINE',now())`, agent)
+	defer func() {
+		for _, q := range []string{
+			`delete from conversation where tenant_id=$1`,
+			`delete from visitor where tenant_id=$1`,
+			`delete from agent where tenant_id=$1`,
+			`delete from inbox where tenant_id=$1`,
+			`delete from tenant where id=$1`,
+		} {
+			_, _ = db.Exec(ctx, q, tenant)
+		}
+	}()
+	a := &API{db: db, logger: slog.Default(), bus: realtime.NewBus(db, realtime.NewHub(slog.Default()), slog.Default()), webhooks: webhook.NewDispatcher(db, 3, slog.Default())}
+	owner, msg, err := a.completeHandoff(ctx, tenant, conversation)
+	if err != nil || owner == nil || *owner != agent {
+		t.Fatalf("handoff: owner=%v err=%v", owner, err)
+	}
+	var accepted *time.Time
+	var expires *time.Time
+	if err = db.QueryRow(ctx, `select accepted_at, assignment_expires_at from conversation where id=$1`, conversation).Scan(&accepted, &expires); err != nil {
+		t.Fatal(err)
+	}
+	if accepted == nil || expires != nil {
+		t.Fatalf("auto_accept must accept immediately: accepted=%v expires=%v", accepted, expires)
+	}
+	if !strings.Contains(msg, "已在接待中") && !strings.Contains(msg, "已接入") {
+		t.Fatalf("visitor message should reflect accepted state: %q", msg)
+	}
+	if _, err = a.appendMessage(ctx, tenant, conversation, messageInput{SenderType: "AGENT", SenderID: &agent, MessageType: "TEXT", Content: "您好"}); err != nil {
+		t.Fatal("auto-accepted agent must be able to reply", err)
+	}
+}

@@ -570,7 +570,10 @@ func (a *API) completeHandoff(ctx context.Context, tenantID, conversationID uuid
 	if strings.TrimSpace(name) == "" {
 		name = "人工客服"
 	}
-	if accepted != nil {
+	// 分配后可能已按入口 auto_accept 直接接单，需重新读取，不能沿用进事务时的 accepted。
+	var nowAccepted *time.Time
+	_ = a.db.QueryRow(ctx, `select accepted_at from conversation where id=$1`, conversationID).Scan(&nowAccepted)
+	if accepted != nil || nowAccepted != nil {
 		return assignee, fmt.Sprintf("客服「%s」已在接待中，请直接描述您的问题。", name), nil
 	}
 	return assignee, fmt.Sprintf("已分配给客服「%s」，等待客服接待。", name), nil
@@ -635,14 +638,40 @@ func (a *API) setAssignee(ctx context.Context, tx pgx.Tx, tenantID, conversation
 	if err := tx.QueryRow(ctx, `select display_name from agent ag where id=$1 and tenant_id=$2 and status='ACTIVE' and exists(select 1 from agent_inbox ai join conversation c on c.inbox_id=ai.inbox_id where ai.agent_id=ag.id and c.id=$3) and exists(select 1 from agent_presence ap where ap.agent_id=ag.id and ap.status='ONLINE') and not exists(select 1 from reception_timeout rt where rt.agent_id=ag.id and rt.conversation_id=$3)`, agentID, tenantID, conversationID).Scan(&name); err != nil {
 		return err
 	}
-	tag, err := tx.Exec(ctx, `update conversation c set assignee_id=$3,assigned_at=now(),accepted_at=null,bot_paused=true,handoff_requested_at=coalesce(handoff_requested_at,now()),assignment_expires_at=now()+make_interval(secs=>coalesce((select acceptance_timeout_seconds from routing_rule rr where rr.tenant_id=$2 and rr.enabled and (rr.inbox_id=c.inbox_id or rr.inbox_id is null) order by rr.inbox_id nulls last limit 1),60)),updated_at=now() where id=$1 and tenant_id=$2 and assignee_id is null`, conversationID, tenantID, agentID)
+	// 入口开关 auto_accept：默认 false，分配后仍要手动点接待；开启则直接写入 accepted_at。
+	var autoAccept bool
+	_ = tx.QueryRow(ctx, `
+		select coalesce(i.auto_accept, false)
+		  from conversation c
+		  join inbox i on i.id = c.inbox_id
+		 where c.id = $1`, conversationID).Scan(&autoAccept)
+
+	assignSQL := `update conversation c set assignee_id=$3,assigned_at=now(),accepted_at=null,bot_paused=true,handoff_requested_at=coalesce(handoff_requested_at,now()),assignment_expires_at=now()+make_interval(secs=>coalesce((select acceptance_timeout_seconds from routing_rule rr where rr.tenant_id=$2 and rr.enabled and (rr.inbox_id=c.inbox_id or rr.inbox_id is null) order by rr.inbox_id nulls last limit 1),60)),updated_at=now() where id=$1 and tenant_id=$2 and assignee_id is null`
+	if autoAccept {
+		assignSQL = `update conversation c set assignee_id=$3,assigned_at=now(),accepted_at=now(),bot_paused=true,handoff_requested_at=coalesce(handoff_requested_at,now()),assignment_expires_at=null,updated_at=now() where id=$1 and tenant_id=$2 and assignee_id is null`
+	}
+	tag, err := tx.Exec(ctx, assignSQL, conversationID, tenantID, agentID)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
 		return pgx.ErrNoRows
 	}
-	if err = receptionNotice(ctx, tx, tenantID, conversationID, fmt.Sprintf("已分配给客服「%s」，等待客服接待。", name), "ASSIGNED"); err != nil {
+	if autoAccept {
+		if err = receptionNotice(ctx, tx, tenantID, conversationID, fmt.Sprintf("客服「%s」已接入，请继续描述您的问题。", name), "ACCEPTED"); err != nil {
+			return err
+		}
+		// 自动接单也要通知坐席，避免只看到访客消息却不知道会话已落到自己名下。
+		if _, err = tx.Exec(ctx, `with inserted as (
+			insert into agent_notification(tenant_id,agent_id,conversation_id,kind,title)
+			values($1,$2,$3,'ASSIGNED','新会话已自动接入，可直接回复')
+			returning id,agent_id
+			) insert into push_delivery(notification_id,subscription_id)
+			select n.id,s.id from inserted n join push_subscription s on s.agent_id=n.agent_id`,
+			tenantID, agentID, conversationID); err != nil {
+			return err
+		}
+	} else if err = receptionNotice(ctx, tx, tenantID, conversationID, fmt.Sprintf("已分配给客服「%s」，等待客服接待。", name), "ASSIGNED"); err != nil {
 		return err
 	}
 
@@ -652,7 +681,7 @@ func (a *API) setAssignee(ctx context.Context, tx pgx.Tx, tenantID, conversation
 	// and it refuses the statement outright.
 	_, err = tx.Exec(ctx, `insert into conversation_event(id, tenant_id, conversation_id, event_type, actor_type, actor_id, detail)
 		values($1,$2,$3,'assigned','SYSTEM',$4,$5)`,
-		uuid.New(), tenantID, conversationID, agentID, map[string]any{"assigneeId": agentID})
+		uuid.New(), tenantID, conversationID, agentID, map[string]any{"assigneeId": agentID, "autoAccept": autoAccept})
 	return err
 }
 

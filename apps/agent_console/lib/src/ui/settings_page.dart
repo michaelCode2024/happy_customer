@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
 import 'pwa_panel.dart';
 import 'package:tongyu_agent_console/src/util/message_alert_stub.dart'
@@ -6,6 +8,10 @@ import 'package:flutter/material.dart';
 
 import 'package:tongyu_agent_console/src/api/api_exception.dart';
 import 'package:tongyu_agent_console/src/state/session_controller.dart';
+import 'package:tongyu_agent_console/src/util/app_platform.dart';
+import 'package:tongyu_agent_console/src/util/app_update.dart';
+import 'package:tongyu_agent_console/src/util/website.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 /// Account and connection settings.
 ///
@@ -47,6 +53,8 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _settingPresence = false;
   bool _savingName = false;
   bool _savingPassword = false;
+  bool _checkingUpdate = false;
+  String _versionLabel = '读取中…';
   String? _nameError;
   String? _passwordError;
   bool _obscure = true;
@@ -66,6 +74,26 @@ class _SettingsPageState extends State<SettingsPage> {
   void initState() {
     super.initState();
     _displayName.text = widget.session.agent?.displayName ?? '';
+    unawaited(_loadVersionLabel());
+  }
+
+  Future<void> _loadVersionLabel() async {
+    final label = await localAppVersionLabel();
+    if (mounted) setState(() => _versionLabel = label);
+  }
+
+  Future<void> _checkAndroidUpdate() async {
+    if (_checkingUpdate) return;
+    setState(() => _checkingUpdate = true);
+    try {
+      await promptAndroidAppUpdateIfNeeded(
+        context,
+        serverBase: widget.session.api.server,
+        manual: true,
+      );
+    } finally {
+      if (mounted) setState(() => _checkingUpdate = false);
+    }
   }
 
   @override
@@ -326,7 +354,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     title: Text(inbox.name),
                     subtitle: Text(
                       '标识 ${inbox.publicKey}'
-                      '${inbox.autoAssign ? ' · 自动分配' : ''}'
+                      '${inbox.autoAssign ? (inbox.autoAccept ? ' · 自动分配并接单' : ' · 自动分配') : ''}'
                       '${inbox.aiEnabled ? ' · AI 已开启' : ''}',
                     ),
                   ),
@@ -337,30 +365,11 @@ class _SettingsPageState extends State<SettingsPage> {
               children: <Widget>[
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
-                  child: SegmentedButton<ThemeMode>(
-                    showSelectedIcon: false,
-                    segments: const <ButtonSegment<ThemeMode>>[
-                      ButtonSegment<ThemeMode>(
-                        value: ThemeMode.system,
-                        label: Text('跟随系统'),
-                        icon: Icon(Icons.brightness_auto_outlined, size: 16),
-                      ),
-                      ButtonSegment<ThemeMode>(
-                        value: ThemeMode.light,
-                        label: Text('浅色'),
-                        icon: Icon(Icons.light_mode_outlined, size: 16),
-                      ),
-                      ButtonSegment<ThemeMode>(
-                        value: ThemeMode.dark,
-                        label: Text('深色'),
-                        icon: Icon(Icons.dark_mode_outlined, size: 16),
-                      ),
-                    ],
-                    selected: <ThemeMode>{widget.themeMode},
-                    onSelectionChanged: widget.onThemeModeChanged == null
-                        ? null
-                        : (selection) =>
-                            widget.onThemeModeChanged!(selection.first),
+                  child: Text(
+                    '当前为浅色模式',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ),
               ],
@@ -371,12 +380,20 @@ class _SettingsPageState extends State<SettingsPage> {
               label: const Text('退出登录'),
             ),
             'notifications': messageAlertSettings(),
-            'version': Text(
-              '版本信息：通语工作台 · 协议版本 v1',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.outline,
-              ),
+            'version': _VersionCard(
+              versionLabel: _versionLabel,
+              checking: _checkingUpdate,
+              showAndroidCheck: runningOnAndroid,
+              onCheckUpdate: _checkAndroidUpdate,
+              onOpenDownloads: () async {
+                if (canOpenWebsite) {
+                  openDownloads();
+                  return;
+                }
+                final uri = Uri.parse(widget.session.api.server)
+                    .resolve('/downloads/');
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              },
             ),
           };
           final groups = <List<String>>[
@@ -754,6 +771,89 @@ class _SettingsTabChip extends StatelessWidget {
                     color: selected ? scheme.primary : scheme.onSurface)),
           ]),
         ),
+      ),
+    );
+  }
+}
+
+class _VersionCard extends StatelessWidget {
+  const _VersionCard({
+    required this.versionLabel,
+    required this.checking,
+    required this.showAndroidCheck,
+    required this.onCheckUpdate,
+    required this.onOpenDownloads,
+  });
+
+  final String versionLabel;
+  final bool checking;
+  final bool showAndroidCheck;
+  final VoidCallback onCheckUpdate;
+  final Future<void> Function() onOpenDownloads;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.info_outline_rounded,
+                  size: 18, color: theme.colorScheme.primary),
+              const SizedBox(width: 8),
+              Text('应用版本',
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w600)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '当前版本 $versionLabel',
+            style: theme.textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            showAndroidCheck
+                ? '安卓安装包会对照服务器发行清单检查更新；有新版本时将提示下载安装。'
+                : '网页 / 桌面安装版请使用上方「安装与离线」中的检查更新。',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (showAndroidCheck)
+                FilledButton.tonalIcon(
+                  onPressed: checking ? null : onCheckUpdate,
+                  icon: checking
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.system_update_rounded, size: 16),
+                  label: Text(checking ? '检查中…' : '检查更新'),
+                ),
+              OutlinedButton.icon(
+                onPressed: () => unawaited(onOpenDownloads()),
+                icon: const Icon(Icons.download_outlined, size: 16),
+                label: const Text('打开下载页'),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

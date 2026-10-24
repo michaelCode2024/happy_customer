@@ -51,9 +51,9 @@ class RelayTheme {
   static const Color chatCanvasLight = Color(0xFFF4F7FF);
   static const Color chatCanvasDark = Color(0xFF111418);
 
-  /// 坐席 / 访客气泡。
-  static const Color agentBubbleLight = Color(0xFF3263FF);
-  static const Color agentBubbleDark = Color(0xFF3263FF);
+  /// 坐席 / 访客气泡。浅色主题用淡蓝底深色字，避免实心蓝过重、字对比度差。
+  static const Color agentBubbleLight = Color(0xFFDFE8FF);
+  static const Color agentBubbleDark = Color(0xFF3B6AF5);
   static const Color visitorBubbleLight = Color(0xFFFFFFFF);
   static const Color visitorBubbleDark = Color(0xFF2A2F38);
 
@@ -179,17 +179,9 @@ class RelayTheme {
   }
 
   static ThemeData dark() {
-    final scheme = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF5BA3FF),
-      brightness: Brightness.dark,
-    );
-    return _base(scheme.copyWith(
-      primary: const Color(0xFF5BA3FF),
-      primaryContainer: const Color(0xFF1A2A40),
-      surface: const Color(0xFF171B22),
-      surfaceContainerHighest: const Color(0xFF222733),
-      outlineVariant: const Color(0xFF303848),
-    ));
+    // Light-only product: keep the method for MaterialApp wiring,
+    // but never expose a dark palette to agents.
+    return light();
   }
 
   static const List<String> _fontFamily = <String>[

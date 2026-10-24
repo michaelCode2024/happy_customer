@@ -184,6 +184,8 @@ class _KnowledgePageState extends State<KnowledgePage> {
       return false;
     }
     if (!mounted) return false;
+    final canManageCategories =
+        widget.session.agent?.canManageKnowledge ?? false;
     final saved = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
@@ -191,6 +193,13 @@ class _KnowledgePageState extends State<KnowledgePage> {
             existing: existing,
             initialQuestion: initialQuestion,
             categories: categories,
+            // 无分类时引导到「分类与批量导入」；关闭弹窗再切页签，避免叠层。
+            onManageCategories: canManageCategories
+                ? () {
+                    Navigator.of(context).pop(false);
+                    setState(() => _tab = 1);
+                  }
+                : null,
             onSave: (draft) async {
               if (existing == null) {
                 await widget.workbench.api.createKnowledge(
@@ -1103,14 +1112,19 @@ class _KnowledgeDraft {
 }
 
 class _KnowledgeDialog extends StatefulWidget {
-  const _KnowledgeDialog(
-      {this.existing,
-      this.initialQuestion = '',
-      required this.onSave,
-      required this.categories});
+  const _KnowledgeDialog({
+    this.existing,
+    this.initialQuestion = '',
+    required this.onSave,
+    required this.categories,
+    this.onManageCategories,
+  });
   final String initialQuestion;
   final List<Map<String, dynamic>> categories;
   final Future<void> Function(_KnowledgeDraft) onSave;
+
+  /// 企业尚无分类时，跳转到知识库「分类与批量导入」。
+  final VoidCallback? onManageCategories;
 
   final KnowledgeEntry? existing;
 
@@ -1175,6 +1189,29 @@ class _KnowledgeDialogState extends State<_KnowledgeDialog> {
                           child: Text(c['name'].toString()))
                   ],
                   onChanged: (v) => setState(() => _category = v ?? '')),
+              if (widget.categories.isEmpty) ...[
+                const SizedBox(height: 6),
+                if (widget.onManageCategories != null)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: _busy ? null : widget.onManageCategories,
+                      icon: const Icon(Icons.category_outlined, size: 16),
+                      label: const Text('还没有分类，去添加'),
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
+                  )
+                else
+                  Text(
+                    '还没有知识分类。分类由主管在知识库中添加。',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+              ],
               const SizedBox(height: 12),
               TextField(
                 controller: _title,

@@ -1,4 +1,19 @@
 {
   "enabled": true,
-  "inboxKey": "tongyu-official-support"
+  "entries": {
+    "business": {
+      "inboxKey": "",
+      "title": "通语商务咨询",
+      "subtitle": "AI 即时解答，可转商务顾问",
+      "placeholder": "想了解什么，直接问我…",
+      "subject": "官网商务咨询"
+    },
+    "support": {
+      "inboxKey": "tongyu-official-support",
+      "title": "通语技术支持",
+      "subtitle": "AI 即时解答，复杂问题转技术同事",
+      "placeholder": "描述一下你遇到的问题…",
+      "subject": "官网技术支持"
+    }
+  }
 }

@@ -1097,7 +1097,15 @@ export class ChatStore {
               localId: streamId,
               conversationId,
               senderType: 'AGENT',
-              senderName: 'AI 助手',
+              // 流式占位跟嵌入入口走，避免访客看到产品内部「AI 助手」。
+              senderName:
+                this.#state.automation?.channelTitle?.trim() ||
+                (this.#options.title?.trim() &&
+                this.#options.title.trim() !== '通语客服' &&
+                this.#options.title.trim() !== '语聊客服'
+                  ? this.#options.title.trim()
+                  : '') ||
+                '在线客服',
               sequence: 0,
               messageType: 'TEXT',
               content: token,

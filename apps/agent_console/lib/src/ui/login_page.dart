@@ -1,4 +1,4 @@
-﻿import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'package:tongyu_agent_console/src/state/session_controller.dart';
@@ -39,16 +39,11 @@ class _LoginPageState extends State<LoginPage> {
     _server = TextEditingController(text: hint);
     // Web 已能从页面 origin 推断地址时默认收起；桌面端空地址则展开，避免找不到字段。
     _advancedOpen = hint.trim().isEmpty && !kIsWeb;
-    _tenant.text = 'demo';
-    _email.text = 'agent@tongyu.local';
-    _password.text = 'TongYu@2026';
-    
-    // 首次进入自动登录进入工作台内页
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && !widget.session.busy && widget.session.phase == SessionPhase.loggedOut) {
-        _submit();
-      }
-    });
+    // 登录字段默认空白。禁止把演示账号/密码写进 defaultValue，否则会打进正式包。
+    // 仅本机联调可用 --dart-define=TONGYU_TENANT/EMAIL/PASSWORD 显式预填；密码仍不要进发布构建。
+    _tenant.text = const String.fromEnvironment('TONGYU_TENANT');
+    _email.text = const String.fromEnvironment('TONGYU_EMAIL');
+    _password.text = const String.fromEnvironment('TONGYU_PASSWORD');
   }
 
   @override

@@ -51,6 +51,71 @@ function unmount(): void {
   mounted = undefined;
 }
 
+/**
+ * 嵌入宿主（iframe）已声明 parentOrigin 且尚无 identityToken 时，先发 host-ready，
+ * 等 authenticate 再 mount，避免先 upsert 匿名 visitor 再切登录身份。
+ * App 顶层 WebView 无 parent，改走 __tongyuHostIdentity 合并。
+ */
+function mountWhenReady(api: TongYuGlobal, settings: TongYuWidgetOptions): void {
+  const parentOrigin = settings.parentOrigin;
+  const needsHostAuth =
+    !settings.identityToken &&
+    typeof parentOrigin === 'string' &&
+    parentOrigin !== '' &&
+    parentOrigin !== '*' &&
+    typeof window !== 'undefined' &&
+    window.parent !== window;
+
+  if (!needsHostAuth) {
+    api.mount(settings);
+    return;
+  }
+
+  const onAuth = (event: MessageEvent): void => {
+    if (event.source !== window.parent || event.origin !== parentOrigin) {
+      return;
+    }
+    let parsed: { type?: string; identityToken?: string } = {};
+    try {
+      parsed = typeof event.data === 'string' ? JSON.parse(event.data) : (event.data as typeof parsed);
+    } catch {
+      return;
+    }
+    if (parsed.type !== 'authenticate' || typeof parsed.identityToken !== 'string' || !parsed.identityToken) {
+      return;
+    }
+    window.removeEventListener('message', onAuth);
+    api.mount({
+      ...settings,
+      identityToken: parsed.identityToken,
+      externalId: undefined,
+      autoOpen: settings.autoOpen !== false,
+    });
+  };
+
+  window.addEventListener('message', onAuth);
+  try {
+    window.parent.postMessage({ source: 'tongyu', type: 'host-ready' }, parentOrigin);
+  } catch {
+    // parentOrigin 配错时仍保留监听，避免直接匿名进线。
+  }
+  // 宿主超时未鉴权：报错给壳层，不创建匿名会话（登录用户历史才能跨端对齐）。
+  window.setTimeout(() => {
+    if (mounted) {
+      return;
+    }
+    window.removeEventListener('message', onAuth);
+    try {
+      window.parent.postMessage(
+        { source: 'tongyu', type: 'error', data: '身份未就绪' },
+        parentOrigin,
+      );
+    } catch {
+      /* ignore */
+    }
+  }, 15000);
+}
+
 if (typeof window !== 'undefined') {
   const api: TongYuGlobal = {
     mount,
@@ -64,9 +129,20 @@ if (typeof window !== 'undefined') {
   // Auto-mount: prefer TongYuSettings；线上旧 H5 壳仍写 RelayDeskSettings 时回退读取。
   // 出站事件协议仍是 source=tongyu，与宿主对齐。
   const boot = (): void => {
-    const settings = window.TongYuSettings ?? window.RelayDeskSettings;
-    if (settings?.endpoint && settings.inboxKey) {
-      api.mount(settings);
+    const raw = window.TongYuSettings ?? window.RelayDeskSettings /* compat alias; prefer TongYuSettings */;
+    // App WebView 在 DOCUMENT_START 注入 __tongyuHostIdentity；须在首次 mount 前并入，避免先匿名再鉴权。
+    const hostIdentity = (window as Window & {
+      __tongyuHostIdentity?: { identityToken?: string };
+    }).__tongyuHostIdentity;
+    const withHostToken = (options: TongYuWidgetOptions): TongYuWidgetOptions => {
+      const token = hostIdentity?.identityToken;
+      if (typeof token !== 'string' || !token) {
+        return options;
+      }
+      return { ...options, identityToken: token, externalId: undefined };
+    };
+    if (raw?.endpoint && raw.inboxKey) {
+      void mountWhenReady(api, withHostToken({ ...raw }));
       return;
     }
     const script = document.currentScript as HTMLScriptElement | null;
@@ -78,7 +154,7 @@ if (typeof window !== 'undefined') {
     for (const candidate of candidates) {
       const options = optionsFromScript(candidate);
       if (options) {
-        api.mount(options);
+        void mountWhenReady(api, withHostToken(options));
         return;
       }
     }

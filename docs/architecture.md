@@ -1,47 +1,37 @@
-# TongYu P0 架构
+# 通语平台架构与隔离边界
 
-## 技术基线（2026-10-07）
+复核日期：2026-10-23。以下依据本地源码；实例部署和性能须单独验证。
 
-- Go 1.27.1：聊天 API、WebSocket 与后台任务
-- PostgreSQL 18.6：业务数据；19 当前仍处于 Beta，不进入生产
-- Flutter 3.47.1 / Dart 3.13.1：坐席台与运营台，覆盖 Web、Windows、macOS、Android、iOS
-- TypeScript 7.0.2 + Web Component：网站/H5 访客组件
-- Docker：本地环境和云平台一致交付
+## 产品与交付层级
 
-只采用当前稳定版本，不使用 RC、Beta 或 Snapshot 作为生产基线。版本升级必须经过测试，而不是无约束使用浮动 `latest` 标签。
+一套通语实例包含平台运营后台、企业工作台、公开聊天入口、API 和 WebSocket。运营方在同一实例中开通多个企业租户；无需为每个企业再部署服务器。不同运营方购买独立部署授权时，应使用各自独立应用、数据库、存储、域名和安全密钥。
 
-## 为什么不是所有端都用 Flutter
+## 运行组件
 
-Flutter 适合功能复杂、需要跨桌面和移动端的坐席工作台，但 Flutter Web 运行时对嵌入第三方网站的一个聊天按钮而言过重。因此：
+后端为 Go 模块化单体，数据存储为 PostgreSQL。客户端包含 Flutter 工作台、TypeScript Web Component 与官网静态文件。现有 Dockerfile 构建 Go 并复制预构建 Web 产物；它不会构建 Flutter 或 Widget。依赖精确版本以工程清单和验证过的构建工具为准，不引用过去文档中的“最新稳定版”判断。
 
-- 坐席/运营产品使用 Flutter，共享绝大多数界面和业务逻辑。
-- 网站、PC Web 和 H5 使用标准 Web Component，体积小且不绑定宿主框架。
-- 业务 App 首期通过 WebView 接入同一 H5；后期提供 Android/iOS 原生桥接 SDK。
-- 所有客户端只依赖 OpenAPI/WebSocket 协议，不依赖某个前端框架。
+`auth` 负责平台与客服会话、签名 Token、租户 API Key、访客身份；`server` 实现 HTTP 路由及租户/入口/访客鉴权；`realtime` 处理长连接与跨实例通知；`platform/database` 提供迁移；`storage` 提供本地附件与 S3 兼容对象存储；AI、Webhook 和分配任务由对应模块处理。
 
-## 后端模块
+## 身份与权限
 
-- `auth`：Widget Token，后续扩展坐席 Session 与 RBAC
-- `config`：环境配置和安全校验
-- `platform/database`：连接池、内嵌迁移与开发数据
-- `realtime`：WebSocket 连接与实时事件
-- `server`：HTTP API、租户边界校验与中间件
+平台角色 `SUPER_ADMIN` 管理企业和额度，平台 `ADMIN` 只读；企业 `SUPERVISOR` 管理企业配置，`AGENT` 在获准入口内接待。平台/企业登录令牌、租户 API Key、访客 identityToken、Widget Token 和群会话 Token 各有用途，不能互换。
 
-首期保持模块化单体。模型稳定且确实出现独立扩容需求后，再拆实时网关或异步任务服务。
+单企业数据在共享数据库中按 tenant/inbox/visitor 等资源关系逻辑隔离，不是每企业一库或已配置的数据库 RLS 物理隔离。管理员接口和实时订阅也需要校验归属；单企业三入口不自动形成三个独立企业。商城每店独立 tenant 模型是另一种集成方式。
 
-## 消息可靠性
+## 消息与后台任务
 
-1. Widget 使用公开 `inboxKey` 初始化访客并换取短期 HMAC Token。
-2. 所有资源查询同时校验 `tenantId + inboxId + visitorId`，避免跨租户越权。
-3. 发送消息时在数据库事务内原子递增会话序号并持久化消息。
-4. 事务提交后才发送 WebSocket 事件；访客消息的 AI 自动回复在提交后异步执行，不阻塞发送接口。
-5. 断线重连使用 `after=<lastSequence>` 增量补拉；WebSocket 不作为消息存储。
-6. `clientMessageId` 提供客户端重试幂等性。
-7. 队列事件按 `inbox:` 扇出（坐席按入口订阅）；跨实例仍用 PostgreSQL `LISTEN/NOTIFY`。
-8. 单实例 WebSocket 与 DB 池可由环境变量设硬顶；`GET /metrics` 暴露基础计数。
+消息在事务中持久化并分配会话内 sequence；重试通过 clientMessageId 幂等。提交后通知实时连接；客户端断线后按 sequence 读历史补拉。WebSocket 不是消息存储或投递成功的唯一证据。
 
-## 部署演进
+AI 回复在提交后异步执行，受模型、套餐、用量和接管策略限制；不保证生成内容绝对正确。知识库关键词检索与 Embedding 能力取决于配置。Webhook 需签名、幂等、重试和失败处理。
 
-- 开发期：Northflank Sandbox 或本机 Docker，PostgreSQL 可使用 Northflank 免费数据库或 Neon Free。
-- 静态端：Cloudflare Pages 托管 Flutter Web 和 Widget 产物；也可由同一 Go 容器提供 `/widget.js`、`/h5/`、`/console/`。
-- 正式商用：迁移到付费常驻实例、托管 PostgreSQL、对象存储和 Redis（共享限流）；中国大陆业务需国内云、域名与备案方案。
+跨进程事件使用 PostgreSQL LISTEN/NOTIFY；限流器是进程内状态。多副本部署需重新验证共享限流、定时任务竞争、附件一致性与跨实例实时送达。源码连接上限和群人数上限是配置边界，不是已承诺吞吐或 p99 延迟。
+
+## 数据及容量
+
+PostgreSQL 持有企业、账号、消息、订阅、额度及操作记录；附件必须落到持久卷或对象存储。本地附件不适合无共享磁盘的多副本。数据库和附件必须配套备份，并验证可恢复。
+
+目前没有按套餐自动删除历史消息的保留策略；也没有按展示配额自动清理附件的完整计费模型。应在协议中明确保留、删除、导出和恢复责任，不能把“未自动删除”宣传成永久保留承诺。
+
+## 待完善的商业运行闭环
+
+自助购买/支付/续费、平台代理许可与授权生命周期、标准预构建发行包及全新环境安装证明、自动备份恢复与监控告警、数据导出与删除策略、生产容量证据仍需逐项交付。详见 [审查报告](平台交付审查-20261023.md)。

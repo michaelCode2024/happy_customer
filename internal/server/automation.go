@@ -258,7 +258,15 @@ func (a *API) maybeAutomationReply(ctx context.Context, tenantID, conversationID
 	if err != nil || result.RowsAffected() == 0 {
 		return true
 	}
-	meta := map[string]any{"automation": true, "rule": rule, "handoff": handoff, "senderName": "语聊助手"}
+	// 访客侧展示名跟嵌入入口走：渠道标题 → 入口名称，不用产品品牌名。
+	senderName := strings.TrimSpace(c.ChannelTitle)
+	if senderName == "" {
+		_ = a.db.QueryRow(ctx, `select coalesce(nullif(trim(name), ''), '') from inbox where id=$1`, inboxID).Scan(&senderName)
+	}
+	if senderName == "" {
+		senderName = "在线客服"
+	}
+	meta := map[string]any{"automation": true, "rule": rule, "handoff": handoff, "senderName": senderName}
 	if handoff {
 		if _, _, err := a.completeHandoff(ctx, tenantID, conversationID); err != nil {
 			_, _ = a.db.Exec(ctx, `delete from automation_delivery where conversation_id=$1 and question_id=$2`, conversationID, q.ID)

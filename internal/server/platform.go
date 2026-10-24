@@ -671,7 +671,7 @@ func (a *API) platformMeta(w http.ResponseWriter, r *http.Request, _ auth.Princi
 		model = "未配置"
 	}
 	respond(w, 200, map[string]any{
-		"product": "语聊客服", "version": version,
+		"product": "通语客服", "version": version,
 		"model":            model,
 		"aiProvider":       a.ai.ProviderName(),
 		"aiAvailable":      a.ai.Available(),

@@ -249,7 +249,7 @@ func (a *API) consolePresence(w http.ResponseWriter, r *http.Request, p auth.Pri
 
 func (a *API) agentInboxes(ctx handlerContext, tenantID, agentID uuid.UUID) ([]map[string]any, error) {
 	rows, err := a.db.Query(ctx, `
-		select i.id, i.name, i.public_key, i.auto_assign,
+		select i.id, i.name, i.public_key, i.auto_assign, coalesce(i.auto_accept,false),
 		       coalesce(s.enabled,false)
 		  from inbox i
 		  join agent_inbox ai on ai.inbox_id = i.id
@@ -264,11 +264,14 @@ func (a *API) agentInboxes(ctx handlerContext, tenantID, agentID uuid.UUID) ([]m
 	for rows.Next() {
 		var id uuid.UUID
 		var name, publicKey string
-		var autoAssign, aiEnabled bool
-		if err := rows.Scan(&id, &name, &publicKey, &autoAssign, &aiEnabled); err != nil {
+		var autoAssign, autoAccept, aiEnabled bool
+		if err := rows.Scan(&id, &name, &publicKey, &autoAssign, &autoAccept, &aiEnabled); err != nil {
 			return nil, err
 		}
-		items = append(items, map[string]any{"id": id, "name": name, "publicKey": publicKey, "autoAssign": autoAssign, "aiEnabled": aiEnabled})
+		items = append(items, map[string]any{
+			"id": id, "name": name, "publicKey": publicKey,
+			"autoAssign": autoAssign, "autoAccept": autoAccept, "aiEnabled": aiEnabled,
+		})
 	}
 	return items, rows.Err()
 }

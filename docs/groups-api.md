@@ -29,8 +29,8 @@
 
 1. **业务后端加人**：`POST /api/v1/open/groups/{id}/members`，body 为宿主用户的 `externalId` 列表（见 [开放 API](open-api.md)）。
 2. **前端打开群页**：
-   - 企业版：后端签发 `identityToken` 后打开 `/groups.html?groupId=<id>&identityToken=<票据>`（页面会立刻换成会话并清掉地址栏中的票据）；或邀请链接同时带 `identityToken`。
-   - 专业版及以上：后端调用 `POST /api/v1/open/groups/{id}/member-token`，把返回的 `token` 写入前端 `sessionStorage`（键名 `tongyu-group-<groupId>`，值为 `{token,groupId,actorId,actorKind:"widget"}`），再打开 `/groups.html?groupId=<id>`。
+   - 企业版：后端使用 `identityToken` 经 `POST /api/v1/groups/session` 换取群会话，再打开不含秘密的 `/groups.html?groupId=<id>&embed=1&parentOrigin=<精确宿主Origin>`。收到 `tongyu.group.ready` 后，校验 event.origin 和 event.source，再发送 `tongyu.group.authenticate` 与 groupId/token。身份票据和群 token 均不拼入 URL。
+   - 专业版及以上：后端验证当前用户后调用 `POST /api/v1/open/groups/{id}/member-token`，把返回的群 token 用上述来源校验消息桥交接。当前群页脚本还保留基于 identityToken 查询参数的兼容分支，生产接入统一不要使用 URL 传密钥的旧分支；应优先使用来源校验的 authenticate 消息桥，并在真实客户浏览器验证。跨域父页不能写客服域的 sessionStorage；不要把 Token 持久化到宿主存储。
 
 未启用requireIdentity的群仍允许匿名邀请链；新建商城福利群默认要求登录身份。登录用户应走externalId映射，避免同一人出现多个匿名visitor。
 

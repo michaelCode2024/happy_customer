@@ -13,7 +13,9 @@
     for (var i = 0; i < _flutter.buildConfig.builds.length; i++) {
       var build = _flutter.buildConfig.builds[i];
       if (build.mainJsPath && String(build.mainJsPath).indexOf('?release=') < 0) {
+        if (tongyuReleaseVersion != null && String(tongyuReleaseVersion) !== '' && String(tongyuReleaseVersion) !== 'null') {
         build.mainJsPath += '?release=' + tongyuReleaseVersion;
+      }
       }
     }
   }

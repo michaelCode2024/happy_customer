@@ -18,4 +18,19 @@
 - iOS/macOS：在 macOS 上运行对应的 `flutter build`（需要 Xcode 与签名配置）
 - 质量检查：`flutter analyze` 和 `flutter test`
 
+### 安卓安装包更新
+
+安卓客户端登录后会请求 `{服务根}/downloads/release.json`，与本机 `version` / `buildNumber` 比较；有新版本时弹窗，并可在「个人设置 → 外观与通知」手动检查。发行清单字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `android.url` | 同源 `/downloads/*.apk` 路径 |
+| `android.version` | 版本名，与 `pubspec` versionName 对应 |
+| `android.buildNumber` | 整数构建号；优先用它判断新旧 |
+| `android.notes` | 更新说明（字符串数组） |
+| `android.force` | `true` 时不可跳过 |
+| `android.minBuildNumber` | 低于该构建号视为必更 |
+
+发新包时：上传 APK → 更新 `release.json` 的 `version` / `buildNumber` / `sha256` / `notes`。网页 / PWA 仍走 Service Worker 更新，不走本清单。iOS 当前为「添加到主屏幕」，无 App Store 安装包升级。
+
 Web 产物由 Go 服务按 `/console/` 提供。Go 服务和 widget 的完整构建参见项目根目录的 `Dockerfile` 与 [部署说明](../../docs/deployment.md)。

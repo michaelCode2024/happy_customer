@@ -19,6 +19,7 @@ class AiAssistPanel extends StatefulWidget {
     required this.messages,
     required this.onAdopt,
     this.draftText = '',
+    this.draftController,
     this.writingOnly = false,
     this.initiallyExpanded = false,
   });
@@ -28,7 +29,10 @@ class AiAssistPanel extends StatefulWidget {
   final String conversationId;
   final List<ChatMessage> messages;
   final ValueChanged<AssistResult> onAdopt;
+  /// 无控制器时用的静态草稿（单测 / 侧栏兜底）。
   final String draftText;
+  /// 输入区控制器：润色读实时草稿，避免每键重建整条助手。
+  final TextEditingController? draftController;
   final bool writingOnly;
 
   @override
@@ -72,15 +76,29 @@ class _AiAssistPanelState extends State<AiAssistPanel> {
       _result = null;
       _error = null;
       _activeTask = null;
+      return;
     }
-    if (oldWidget.draftText != widget.draftText ||
-        _messageVersion(oldWidget.messages) !=
-            _messageVersion(widget.messages)) {
+    final messagesChanged = _messageVersion(oldWidget.messages) !=
+        _messageVersion(widget.messages);
+    // 消息变了：旧建议已失效。草稿键入不整条清空，避免收起条高度来回跳。
+    if (messagesChanged) {
       _result = null;
       _request++;
       _busy = false;
+      return;
+    }
+    // 润色进行中草稿被改写：作废在途请求，防止迟到结果覆盖新草稿。
+    if (_busy &&
+        _activeTask == 'POLISH' &&
+        oldWidget.draftText != widget.draftText) {
+      _request++;
+      _busy = false;
+      _result = null;
     }
   }
+
+  String get _draft =>
+      (widget.draftController?.text ?? widget.draftText).trim();
 
   String _messageVersion(List<ChatMessage> messages) => messages
       .where((m) => m.messageType == 'TEXT')
@@ -102,7 +120,7 @@ class _AiAssistPanelState extends State<AiAssistPanel> {
 
   Future<void> _run(String task) async {
     if (_busy) return;
-    final input = task == 'POLISH' ? widget.draftText.trim() : _question;
+    final input = task == 'POLISH' ? _draft : _question;
     if (input.isEmpty) {
       setState(() =>
           _error = task == 'POLISH' ? '先在输入框写下回复，再进行润色。' : '收到客户文本消息后再使用此功能。');
@@ -124,6 +142,8 @@ class _AiAssistPanelState extends State<AiAssistPanel> {
       if (!mounted ||
           request != _request ||
           widget.conversationId != conversationId) return;
+      // 润色期间草稿已改：丢弃迟到结果（控制器键入不会走 didUpdateWidget）。
+      if (task == 'POLISH' && _draft != input) return;
       setState(() => _result = result);
     } on ApiException catch (e) {
       if (mounted &&
@@ -161,11 +181,12 @@ class _AiAssistPanelState extends State<AiAssistPanel> {
     final labelOf = <String, String>{
       for (final (task, label) in _tasks) task: label,
     };
+    // 收起态压成单行工具条，给消息区和输入框让位。
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      padding: EdgeInsets.fromLTRB(10, _open ? 6 : 2, 8, _open ? 6 : 2),
       decoration: BoxDecoration(
-        color: scheme.primaryContainer.withOpacity(0.22),
+        color: scheme.primaryContainer.withOpacity(0.18),
         border: Border(
           top: BorderSide(color: scheme.outlineVariant.withOpacity(0.4)),
         ),
@@ -174,29 +195,45 @@ class _AiAssistPanelState extends State<AiAssistPanel> {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          // 收缩态：单行"AI 助手”触发展开。只在会话有消息时才出现。
-          ListTile(
-            leading: const TongYuArtwork(ai: true, size: 42),
-            visualDensity: VisualDensity.compact,
-            contentPadding: EdgeInsets.zero,
-            title: const Text(
-              'AI 写作助手',
-              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-            ),
-            subtitle: _result != null
-                ? Text('${labelOf[_result!.task] ?? _result!.task} · 采纳后可继续编辑')
-                : null,
-            trailing: _busy && _activeTask != null
-                ? const SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Icon(
-                    _open ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+          InkWell(
+            onTap: () => setState(() => _open = !_open),
+            borderRadius: BorderRadius.circular(6),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: <Widget>[
+                  const TongYuArtwork(ai: true, size: 22),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _result != null
+                          ? 'AI 写作助手 · ${labelOf[_result!.task] ?? _result!.task}'
+                          : 'AI 写作助手',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w600, fontSize: 12.5),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (_busy && _activeTask != null)
+                    const Padding(
+                      padding: EdgeInsets.only(right: 6),
+                      child: SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
+                  Icon(
+                    _open
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    size: 18,
                     color: scheme.onSurfaceVariant,
                   ),
-            onTap: () => setState(() => _open = !_open),
+                ],
+              ),
+            ),
           ),
           if (_open) ...<Widget>[
             const Divider(height: 1),

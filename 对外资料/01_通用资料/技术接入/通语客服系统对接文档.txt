@@ -1,149 +1,86 @@
-通语客服系统对接文档
-版本：1.0　日期：2026-10-14
-适用：网站、H5、Flutter/App、商城买家端、店主端及业务后端。
+通语客服系统技术接入指南
+版本：2026-10-23-R3
 
-一、接入准备
+1. 适用范围
 
-由客服系统管理员向开发方提供：
-1. BASE_URL：客服系统 HTTPS 根地址，不带末尾斜杠。
-2. inboxKey：已开通的客服入口标识。
-3. 租户 API Key：服务端调用凭证，身份签发需要 write 权限及相应套餐能力。
-4. 网站宿主 Origin：例如 https://app.example.com，包含协议、域名与非默认端口，不带路径。
-5. 如需商城店铺自动开通，单独提供商城 API Key。
+说明业务网站、H5 与 App 如何嵌入通语聊天、关联已登录客户身份，以及如何安全管理宿主服务端密钥。具体可用接口受客户套餐、当前实例版本和服务端配置约束；商城集成与群管理 API 见附录。
 
-本文所有 example.com 地址、用户编号与凭证均为示例。实际域名、入口和套餐须使用管理员提供的开通配置。
-API Key 只配置在业务后端；不得写入网页、Flutter 构建参数、App 安装包、URL 或日志。
-inboxKey 是公开入口标识，不是密钥；identityToken 是短期身份票据，不是聊天接口的 Bearer Token。
-普通租户密钥使用 X-TongYu-Key，商城密钥使用 X-TongYu-Marketplace-Key，两者不可互换。
+2. 接入前请由平台方提供
 
-二、推荐接入流程
+- 客服服务 HTTPS 根地址 BASE_URL（不带末尾斜杠）。
+- 本客户已启用的 inboxKey；它是公开入口 ID，不是凭证。
+- 已启用的接入能力及本实例实际支持的身份签发请求头。
+- 需嵌入 iframe 的宿主精确 HTTPS Origin。
+- 登录接入、Webhook 或其他服务端调用是否已纳入套餐与实施范围。
 
-1. 用户在原业务系统登录。
-2. 用户点击客服，客户端请求自己的业务后端。
-3. 业务后端从已验证的登录会话取得用户 ID 和昵称，调用通语签发身份票据。
-4. 业务后端向客户端返回 h5Url、identityToken、expiresIn。
-5. 客户端加载客服页面，通过 authenticate 指令交接身份。
-6. 客服页面负责聊天、附件、未读、已读、重连和历史消息。
+接入参数由平台方在客户专属配置中提供；参数齐备后即可开展联调。本文 API_KEY_HEADER、MARKETPLACE_KEY_HEADER 分别代表客户配置单列明的租户密钥和商城密钥请求头名称，调用时替换为实际名称。
 
-同一个 inbox 下，稳定 externalId 用于识别同一业务客户。不要使用昵称、随机数或设备号替代正式用户 ID。
-匿名咨询可直接打开 /h5/{inboxKey}，不传 externalId。需要绑定登录客户时必须由后端签发票据。
+3. 匿名客户
 
-三、后端签发登录客户身份
+可直接加载本客户的 H5 地址，或将聊天组件嵌入网站。匿名访问通过公开 inboxKey 识别入口，服务端 API 密钥保留在业务后端。
 
+```html
+<script>
+window.TongYuSettings = {
+  endpoint: 'https://chat.example.com',
+  inboxKey: 'public-inbox-key'
+};
+</script>
+<script src="https://chat.example.com/widget.js"></script>
+```
+
+请将示例地址和入口标识替换为平台管理员针对本客户提供的真实配置。
+
+4. 关联已登录的客户
+
+宿主业务后端验证当前登录会话后申请身份票据，并从安全会话读取用户 ID 作为 externalId。后端保管具备 write 权限的租户 API Key，并使用双方确认过的请求头调用：
+
+```http
 POST {BASE_URL}/api/v1/open/visitor-identity
-请求头：
-X-TongYu-Key: <SERVER_API_KEY>
+<API_KEY_HEADER>: <SERVER_API_KEY>
 Content-Type: application/json
 
-请求体：
-{
-  "inboxKey": "your-inbox-key",
-  "externalId": "user-1001",
-  "displayName": "张三"
-}
+{"inboxKey":"public-inbox-key","externalId":"stable-business-user-id","displayName":"客户昵称"}
+```
 
-字段说明：
-inboxKey：必填，必须属于密钥对应企业。
-externalId：必填，使用业务系统稳定 ID。长度最多为 200 个 UTF-8 字节，建议使用短 ASCII ID。
-displayName：客户显示昵称，可省略。
+标准身份票据 identityToken 有效期为 5 分钟。正式接入前须与平台方确认目标实例的接口版本、鉴权请求头及已开通能力，再完成联调。
 
-成功响应 HTTP 200：
-{
-  "identityToken": "<SHORT_LIVED_IDENTITY_TOKEN>",
-  "expiresIn": 300,
-  "inboxKey": "your-inbox-key"
-}
+将票据通过宿主后端的无缓存会话接口交给已登录客户页面，再由组件初始化：
 
-票据有效期 300 秒。建议每次打开客服时获取新票据；不要将票据放入 URL、浏览器历史或持久化存储。
-业务后端应设置 Cache-Control: no-store，并只对当前已登录用户返回其自身身份票据。
-禁止直接采信客户端提交的 externalId，以免用户冒用其他客户身份。
+```js
+window.TongYuSettings = {
+  endpoint: 'https://chat.example.com',
+  inboxKey: identity.inboxKey,
+  identityToken: identity.identityToken
+};
+```
 
-建议自行实现的宿主业务接口（不是通语现有接口）：
-GET /api/customer-service/session
-响应示例：
-{
-  "h5Url": "https://chat.example.com/h5/your-inbox-key?source=APP",
-  "identityToken": "<SHORT_LIVED_IDENTITY_TOKEN>",
-  "expiresIn": 300
-}
+身份响应设置 Cache-Control: no-store；API Key 保存在业务后端，身份票据与登录 Token 通过安全消息交接并按会话管理，URL、持久存储及日志中的凭证信息应脱敏。用户切换账号时重新申请票据并销毁旧聊天状态。
 
-四、网站和 H5 嵌入示例
+5. iframe 与 WebView
 
-下例由网站自己的后端提供 /api/customer-service/session。
-将 chat.example.com 与入口替换为实际配置。parentOrigin 必须是宿主精确 Origin；使用 * 时无法交接登录身份。
+iframe 的 parentOrigin 应设为宿主精确 Origin，并在发送 authenticate 之前校验消息来源和 contentWindow。服务端 CSP frame-ancestors、CORS 与 WebSocket Origin 应允许预先确认的来源。身份通信的信任范围使用精确 Origin。
 
-<iframe id="tongyu" title="在线客服"
-  allow="microphone; camera; clipboard-write"
-  style="width:100%;height:650px;border:0"></iframe>
+App WebView 没有 iframe 父窗口，原生应用需使用所选 WebView 插件的双向消息桥传递 authenticate 和页面事件；身份交接采用对应插件的原生消息接口。麦克风、摄像头、自动播放、附件、返回按钮和键盘行为需要在目标设备验收。
 
-<script>
-(async () => {
-  const chatOrigin = 'https://chat.example.com';
-  const frame = document.getElementById('tongyu');
-  const response = await fetch('/api/customer-service/session', {
-    credentials: 'same-origin', cache: 'no-store'
-  });
-  if (!response.ok) throw new Error('获取客服身份失败');
-  const session = await response.json();
-  const url = new URL(session.h5Url);
-  if (url.origin !== chatOrigin) throw new Error('客服地址不匹配');
-  url.searchParams.set('parentOrigin', location.origin);
-  const authenticate = () => frame.contentWindow.postMessage({
-    type: 'authenticate', identityToken: session.identityToken
-  }, chatOrigin);
-  window.addEventListener('message', event => {
-    if (event.origin !== chatOrigin || event.source !== frame.contentWindow) return;
-    let data = event.data;
-    if (typeof data === 'string') {
-      try { data = JSON.parse(data); } catch { return; }
-    }
-    if (!data || data.source !== 'tongyu') return;
-    if (data.type === 'close') {
-      // 在这里隐藏客服容器或返回业务页面。
-    }
-    if (data.type === 'error') {
-      // 展示错误并根据错误类型决定是否重新向业务后端取票据。
-    }
-  });
-  frame.onload = authenticate;
-  frame.src = url.toString();
-})().catch(() => {
-  // 展示“客服暂时不可用，请稍后重试”，不要输出凭证。
-});
-</script>
+6. 可靠性与错误处理
 
-宿主可发送的指令：
-打开：{ "type": "open" }
-关闭：{ "type": "close" }
-预填文字：{ "type": "prefill", "content": "我想咨询订单" }
-发送文字：{ "type": "say", "content": "你好" }
-交接身份：{ "type": "authenticate", "identityToken": "<TOKEN>" }
-say 会实际发送消息，请只在用户明确触发时使用，并等待聊天身份初始化完成。
+- 发送消息使用稳定 clientMessageId；网络重试沿用同一 ID。
+- 消息按 sequence 排序；WebSocket 用于通知，断线后须调用消息历史 API 增量补拉。
+- 票据过期时由业务后端重新签发；身份缺失、入口不匹配或权限不足应明确失败，重新认证后再继续访问。
+- 处理 400/401/403/404 和 5xx；对网络与 5xx 有限重试，按响应状态处理失败并设置重试次数与间隔。
+- 联系平台支持时提供请求路径、HTTP 状态、追踪 ID 和脱敏日志，不发送完整 Token 或 API Key。
 
-页面回传事件格式：
-{ "source": "tongyu", "type": "close" }
-其他事件包括 ready、open、message、sent、unread、resize、error，data 随事件变化。
-HTTP iframe 跨域策略、服务端 FRAME_ANCESTORS、ALLOWED_ORIGINS 和实际页面来源必须配套配置。
+7. 接入验收
 
-五、Flutter / App 接入
+使用真实测试账号逐项验证：匿名入口、A/B 两个已登录用户互不串号、过期票据刷新、错误入口拒绝、客户发消息、坐席回复、重载后历史一致、断线补拉、同一消息重试不重复。Iframe/App 还应检查宿主 Origin、账号切换、返回操作和目标设备权限。
 
-推荐复用完整 /h5/{inboxKey}?source=APP 页面，通过 WebView 承载。
-匿名客服可直接加载；登录客户先向业务后端获取票据。
+附录 详细接口契约
 
-Flutter Web：使用第四节 iframe 方案，parentOrigin 为 Flutter 网站实际 Origin。
-Android/iOS WebView：需要配置原生桥，将指令送至组件 bridge.onMessage，并通过 bridge.postMessage 接收 JSON 事件。
-原生 WebView 没有 iframe 父窗口，不能直接照搬 iframe.contentWindow.postMessage。
-桥接协议为上述 authenticate、close 等 JSON；具体注入方式需按项目所用 WebView 插件和页面适配器实现。
-接入方应根据所用 WebView 插件完成原生消息桥适配，并验证身份交接和页面返回。
-
-App 收到 source=tongyu、type=close 时返回上一业务页面。
-用户退出或切换账号时销毁旧客服页面及身份，重新获取当前用户票据，避免复用上一个客户的聊天状态。
-录音和拍照需要系统权限及 WebView 权限回调；线上使用 HTTPS。附件、键盘遮挡、安全区、返回按钮需真机验收。
-
-六、商城店铺与店员接入（按需启用）
+附录 A 商城店铺与店员接入（按需启用）
 
 商城密钥由平台管理员创建商城时签发。以下请求均由商城后端发起：
-X-TongYu-Marketplace-Key: <MARKETPLACE_SERVER_KEY>
+<MARKETPLACE_KEY_HEADER>: <MARKETPLACE_SERVER_KEY>
 Content-Type: application/json
 
 1. 创建或更新店铺
@@ -164,7 +101,7 @@ POST /api/v1/marketplace/shops/{shopId}/staff-session
 返回 token、agent、tenantId、inboxId、expiresIn。
 业务后端验证操作者和店铺归属后签发；前端使用真实店员 token 访问 console 接口。
 登录不会自动上线，应通过工作台在线状态与领取会话流程完成接待。
-需要复用 /console/?embedded=1 时，应对接工作台专用身份桥，不能把访客 identityToken 当店员 token。
+需要复用 /console/?embedded=1 时，应对接工作台专用身份桥，店员登录与访客身份分别使用对应会话凭证。
 
 4. 买家登录会话
 POST /api/v1/marketplace/buyer-session
@@ -184,7 +121,7 @@ POST /api/v1/marketplace/buyer/shops/{shopId}/session
 收到 conversation.updated 或 group.updated 后重新获取列表；断线恢复后补拉。
 POST /api/v1/marketplace/buyer/logout 撤销当前买家会话及绑定聊天、群会话；其他设备不受影响。
 
-七、福利群接入（按需启用）
+附录 B 福利群接入（按需启用）
 
 商城后端 Base：/api/v1/marketplace/shops/{shopId}/groups
 POST Base：建群。
@@ -204,12 +141,13 @@ POST /{id}/dissolve：解散群。
 返回 token、groupId、visitorId、expiresIn:3600，使用群会话 token 访问群消息接口。
 群页面 /groups.html?groupId=<ID>&embed=1&parentOrigin=<精确宿主Origin>。
 父页交接：{ "type": "tongyu.group.authenticate", "groupId": "<ID>", "token": "<GROUP_TOKEN>" }。
-群会话与访客票据不可混用。
+群消息接口使用群会话 token；访客身份票据用于一对一聊天身份初始化。
 
-八、商品与订单卡片（按需启用）
+附录 C 商品与订单卡片（按需启用）
 
 商城后端调用：
 POST /api/v1/marketplace/shops/{shopId}/conversations/{id}/cards
+```json
 {
   "senderType": "VISITOR",
   "externalId": "buyer-1001",
@@ -224,20 +162,21 @@ POST /api/v1/marketplace/shops/{shopId}/conversations/{id}/cards
     "status": "待发货"
   }
 }
+```
 
 senderType 为 VISITOR 或 AGENT；AGENT 回复需先领取接待。
 kind 为 PRODUCT 或 ORDER；ORDER 必须有 orderNumber。
 title 为 1～120 字；amountMinor 为非负整数，最大 9007199254740991，按两位小数最小货币单位解释。
-29900 表示 299.00。currency 为三位大写币种。url、imageUrl 可省略，仅允许 http/https 且禁止 URL 用户信息。
-业务后端从自己的数据库取得权威金额、订单状态并校验归属，不采信客户端传来的价格和状态。
-卡片保存发送时快照；后续订单变化需发送新卡片。不要包含地址、支付凭据等敏感内容。
+29900 表示 299.00。currency 为三位大写币种。url、imageUrl 为可选的 http/https 地址，地址中不含用户名和密码。
+商品金额、订单状态与归属以业务后端数据库为准，由业务后端构造卡片。
+卡片保存发送时快照；后续订单变化需发送新卡片。卡片按约定字段展示商品及订单摘要，敏感业务信息通过原业务系统查看。
 网络重试复用同一 clientMessageId。
 群卡片接口为 POST /api/v1/marketplace/shops/{shopId}/groups/{id}/cards，字段 externalId、clientMessageId、card。
 分享订单额外传 shareOrder:true，并由业务后端确认允许向该群分享。
 
-九、开放 API 与消息同步
+附录 D 开放 API 与消息同步
 
-普通租户后端使用 X-TongYu-Key：
+普通租户后端使用客户配置单列明的租户密钥请求头（API_KEY_HEADER）：
 GET /api/v1/open/me：检查当前租户与密钥。
 GET /api/v1/open/conversations：会话列表。
 GET /api/v1/open/conversations/{id}：会话详情。
@@ -253,20 +192,20 @@ POST /api/v1/open/conversations/{id}/delivered：设备收到后上报送达。
 
 回执请求体：
 { "readerType": "VISITOR", "readerId": "<VISITOR_UUID>", "sequence": 12 }
-sequence 必须大于 0；游标只前进。后端验证 readerId 与当前用户、会话的关联。
+sequence 必须大于 0；游标只前进。通语校验读取者与会话或企业的归属；宿主后端还须验证 readerId 对应当前已登录用户，按已验证的登录身份确定读取者。
 收到实时通知不等于已读；消息按 sequence 排序，断线后按 after 补拉。
 完整聊天页面已承担这些同步职责；自研聊天时需自行实现。
 
-十、Webhook（按需启用）
+附录 E Webhook（按需启用）
 
 管理员配置回调地址、密钥及订阅事件，如 message.created、message.agent、conversation.read、conversation.delivered。
-请求头：X-TongYu-Event、X-TongYu-Delivery、X-TongYu-Timestamp、X-TongYu-Signature。
+回调请求携带事件、投递 ID、时间戳及签名请求头，具体名称由客户接口配置单列明。TongYu 协议对应 X-TongYu-Event、X-TongYu-Delivery、X-TongYu-Timestamp、X-TongYu-Signature；其他协议版本按该实例配置验收。
 签名原文：<timestamp>.<原始请求体>。
 算法：HMAC-SHA256；签名头格式 sha256=<十六进制签名>。
 使用原始请求体字节验签，采用常量时间比较，检查时间窗口，并按投递 ID 幂等。
 成功持久化后返回 2xx；失败会重试。游标回调取最大 sequence，防止乱序回退。
 
-十一、错误处理
+附录 F 错误处理
 
 错误响应结构：
 { "status": 401, "code": "...", "message": "...", "timestamp": "..." }
@@ -278,9 +217,9 @@ sequence 必须大于 0；游标只前进。后端验证 readerId 与当前用�
 5xx 或网络失败：保留当前状态并有限重试；发送消息重试保持 clientMessageId。
 IDENTITY_TOKEN_REQUIRED：使用后端身份票据，不直接传 externalId。
 API_KEY_REQUIRED / API_KEY_INVALID：检查服务端密钥配置。
-禁止无限重试、将错误响应当成功，或在日志中输出完整凭证。
+失败请求按状态码与重试策略处理，日志中的身份凭证应脱敏。
 
-十二、开发分工与验收
+附录 G 开发分工与验收
 
 客服系统管理员：开通企业、入口、客服、套餐与密钥，配置域名策略和 Webhook。
 业务后端：验证原登录、签发短期身份、校验用户/店铺/订单归属，保管密钥。
@@ -295,14 +234,3 @@ API_KEY_REQUIRED / API_KEY_INVALID：检查服务端密钥配置。
 6. 商城买家、店铺、店员数据隔离；停用、退出、群权限与卡片订单归属生效。
 7. 检查前端安装包、URL、浏览器存储及日志不含服务端密钥。
 8. 在正式接入地址完成身份、消息、权限和目标设备的全流程验收。
-
-十三、接入配置单
-
-由管理员填写，通过受控渠道单独提供密钥：
-客服 BASE_URL：________________
-客服 inboxKey：________________
-宿主 Origin：________________
-接入模式：匿名 / 登录客户 / 商城
-租户或商城名称：________________
-已开通能力：身份签发 / 开放 API / 群聊 / Webhook
-联调联系人：________________

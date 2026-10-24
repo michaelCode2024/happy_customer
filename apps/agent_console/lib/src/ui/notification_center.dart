@@ -84,11 +84,30 @@ class _NotificationCenterState extends State<NotificationCenter> {
         context: context,
         builder: (ctx) => StatefulBuilder(
             builder: (ctx, refresh) => AlertDialog(
-                  title: const Row(
+                  title: Row(
                     children: [
-                      Icon(Icons.notifications_active_rounded, color: Color(0xFF3263FF), size: 20),
-                      SizedBox(width: 8),
-                      Text('消息提醒中心'),
+                      const Icon(Icons.notifications_active_rounded,
+                          color: Color(0xFFE53935), size: 22),
+                      const SizedBox(width: 8),
+                      const Expanded(child: Text('消息提醒中心')),
+                      if (_unread > 0)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFEBEE),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: const Color(0xFFFFCDD2)),
+                          ),
+                          child: Text(
+                            '$_unread 条未读',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFFC62828),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                   content: SizedBox(
@@ -137,7 +156,8 @@ class _NotificationCenterState extends State<NotificationCenter> {
                                     }
                                   }),
                               ActionChip(
-                                  avatar: const Icon(Icons.bolt, color: Color(0xFF3263FF), size: 16),
+                                  avatar: const Icon(Icons.bolt,
+                                      color: Color(0xFF3263FF), size: 16),
                                   label: const Text('开启系统通知'),
                                   onPressed: () async {
                                     final status =
@@ -148,7 +168,8 @@ class _NotificationCenterState extends State<NotificationCenter> {
                                     }
                                   }),
                               ActionChip(
-                                  avatar: const Icon(Icons.volume_up_outlined, size: 16),
+                                  avatar: const Icon(Icons.volume_up_outlined,
+                                      size: 16),
                                   label: const Text('声音与播报设置'),
                                   onPressed: () => showDialog<void>(
                                       context: ctx,
@@ -169,7 +190,10 @@ class _NotificationCenterState extends State<NotificationCenter> {
                             if (_pushStatus != null)
                               Padding(
                                   padding: const EdgeInsets.only(top: 8),
-                                  child: Text(_pushStatus!, style: const TextStyle(fontSize: 12, color: Color(0xFF5A6E85)))),
+                                  child: Text(_pushStatus!,
+                                      style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Color(0xFF5A6E85)))),
                             if (_error != null)
                               Padding(
                                 padding: const EdgeInsets.only(top: 6),
@@ -178,7 +202,8 @@ class _NotificationCenterState extends State<NotificationCenter> {
                                       await _load();
                                       if (ctx.mounted) refresh(() {});
                                     },
-                                    child: Text('$_error · 点击重试', style: const TextStyle(fontSize: 12))),
+                                    child: Text('$_error · 点击重试',
+                                        style: const TextStyle(fontSize: 12))),
                               ),
                             const SizedBox(height: 12),
                             Expanded(
@@ -186,65 +211,235 @@ class _NotificationCenterState extends State<NotificationCenter> {
                                     ? Container(
                                         decoration: BoxDecoration(
                                           color: const Color(0xFFF8FAFD),
-                                          borderRadius: BorderRadius.circular(8),
-                                          border: Border.all(color: const Color(0xFFE8EEF5)),
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                          border: Border.all(
+                                              color: const Color(0xFFE8EEF5)),
                                         ),
                                         child: const Center(
                                           child: Column(
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
-                                              Icon(Icons.mark_chat_unread_outlined, size: 40, color: Color(0xFF9AAEC4)),
+                                              Icon(
+                                                  Icons
+                                                      .mark_chat_unread_outlined,
+                                                  size: 40,
+                                                  color: Color(0xFF9AAEC4)),
                                               SizedBox(height: 10),
-                                              Text('暂无新通知', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF475569))),
+                                              Text('暂无新通知',
+                                                  style: TextStyle(
+                                                      fontSize: 14,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      color:
+                                                          Color(0xFF475569))),
                                               SizedBox(height: 4),
-                                              Text('客户的新进消息和待办会第一时间提醒您', style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8))),
+                                              Text('客户的新进消息和待办会第一时间提醒您',
+                                                  style: TextStyle(
+                                                      fontSize: 12,
+                                                      color:
+                                                          Color(0xFF94A3B8))),
                                             ],
                                           ),
                                         ),
                                       )
                                     : ListView.separated(
                                         itemCount: _items.length,
-                                        separatorBuilder: (_, __) => const Divider(height: 1, color: Color(0xFFF1F5F9)),
+                                        separatorBuilder: (_, __) =>
+                                            const SizedBox(height: 6),
                                         itemBuilder: (context, index) {
                                           final item = _items[index];
-                                          final isUnread = item['readAt'] == null;
-                                          return ListTile(
-                                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                                            leading: Container(
-                                              width: 36,
-                                              height: 36,
-                                              decoration: BoxDecoration(
-                                                color: isUnread ? const Color(0xFFEFF4FF) : const Color(0xFFF1F5F9),
-                                                shape: BoxShape.circle,
-                                              ),
-                                              child: Icon(
-                                                isUnread ? Icons.mark_email_unread_rounded : Icons.mail_outline_rounded,
-                                                size: 18,
-                                                color: isUnread ? const Color(0xFF3263FF) : const Color(0xFF94A3B8),
+                                          final isUnread =
+                                              item['readAt'] == null;
+                                          return Material(
+                                            color: isUnread
+                                                ? const Color(0xFFFFF5F5)
+                                                : const Color(0xFFF8FAFD),
+                                            borderRadius:
+                                                BorderRadius.circular(10),
+                                            child: InkWell(
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
+                                              onTap: () async {
+                                                try {
+                                                  await _read(
+                                                      id: asString(
+                                                          item['id']));
+                                                  if (!mounted ||
+                                                      !ctx.mounted) {
+                                                    return;
+                                                  }
+                                                  Navigator.pop(ctx);
+                                                  widget.onConversation(
+                                                      asString(item[
+                                                          'conversationId']));
+                                                } catch (_) {
+                                                  if (ctx.mounted) {
+                                                    refresh(() => _error =
+                                                        '打开通知失败，请重试');
+                                                  }
+                                                }
+                                              },
+                                              child: Container(
+                                                padding:
+                                                    const EdgeInsets.fromLTRB(
+                                                        10, 10, 12, 10),
+                                                decoration: BoxDecoration(
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                          10),
+                                                  border: Border(
+                                                    left: BorderSide(
+                                                      color: isUnread
+                                                          ? const Color(
+                                                              0xFFE53935)
+                                                          : Colors
+                                                              .transparent,
+                                                      width: 3,
+                                                    ),
+                                                    top: BorderSide(
+                                                      color: isUnread
+                                                          ? const Color(
+                                                              0xFFFFCDD2)
+                                                          : const Color(
+                                                              0xFFE8EEF5),
+                                                    ),
+                                                    right: BorderSide(
+                                                      color: isUnread
+                                                          ? const Color(
+                                                              0xFFFFCDD2)
+                                                          : const Color(
+                                                              0xFFE8EEF5),
+                                                    ),
+                                                    bottom: BorderSide(
+                                                      color: isUnread
+                                                          ? const Color(
+                                                              0xFFFFCDD2)
+                                                          : const Color(
+                                                              0xFFE8EEF5),
+                                                    ),
+                                                  ),
+                                                ),
+                                                child: Row(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment
+                                                          .start,
+                                                  children: [
+                                                    Container(
+                                                      width: 38,
+                                                      height: 38,
+                                                      decoration:
+                                                          BoxDecoration(
+                                                        color: isUnread
+                                                            ? const Color(
+                                                                0xFFFFEBEE)
+                                                            : const Color(
+                                                                0xFFF1F5F9),
+                                                        shape:
+                                                            BoxShape.circle,
+                                                      ),
+                                                      child: Icon(
+                                                        isUnread
+                                                            ? Icons
+                                                                .mark_email_unread_rounded
+                                                            : Icons
+                                                                .mail_outline_rounded,
+                                                        size: 18,
+                                                        color: isUnread
+                                                            ? const Color(
+                                                                0xFFE53935)
+                                                            : const Color(
+                                                                0xFF94A3B8),
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 10),
+                                                    Expanded(
+                                                      child: Column(
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .start,
+                                                        children: [
+                                                          Row(
+                                                            children: [
+                                                              Expanded(
+                                                                child: Text(
+                                                                  asString(item[
+                                                                      'title']),
+                                                                  style:
+                                                                      TextStyle(
+                                                                    fontSize:
+                                                                        13.5,
+                                                                    height:
+                                                                        1.35,
+                                                                    fontWeight:
+                                                                        isUnread
+                                                                            ? FontWeight.w700
+                                                                            : FontWeight.w500,
+                                                                    color: const Color(
+                                                                        0xFF0F172A),
+                                                                  ),
+                                                                ),
+                                                              ),
+                                                              if (isUnread)
+                                                                Container(
+                                                                  margin: const EdgeInsets
+                                                                      .only(
+                                                                      left:
+                                                                          6),
+                                                                  padding: const EdgeInsets
+                                                                      .symmetric(
+                                                                      horizontal:
+                                                                          6,
+                                                                      vertical:
+                                                                          2),
+                                                                  decoration:
+                                                                      BoxDecoration(
+                                                                    color: const Color(
+                                                                        0xFFE53935),
+                                                                    borderRadius:
+                                                                        BorderRadius.circular(
+                                                                            999),
+                                                                  ),
+                                                                  child:
+                                                                      const Text(
+                                                                    '未读',
+                                                                    style:
+                                                                        TextStyle(
+                                                                      fontSize:
+                                                                          10,
+                                                                      fontWeight:
+                                                                          FontWeight.w700,
+                                                                      color: Colors
+                                                                          .white,
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                            ],
+                                                          ),
+                                                          const SizedBox(
+                                                              height: 4),
+                                                          Text(
+                                                            _displayTime(item[
+                                                                'createdAt']),
+                                                            style: const TextStyle(
+                                                                fontSize: 11,
+                                                                color: Color(
+                                                                    0xFF64748B)),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                    const Icon(
+                                                      Icons
+                                                          .chevron_right_rounded,
+                                                      size: 18,
+                                                      color:
+                                                          Color(0xFF94A3B8),
+                                                    ),
+                                                  ],
+                                                ),
                                               ),
                                             ),
-                                            title: Text(
-                                              asString(item['title']),
-                                              style: TextStyle(
-                                                fontSize: 13,
-                                                fontWeight: isUnread ? FontWeight.w600 : FontWeight.normal,
-                                                color: const Color(0xFF0F172A),
-                                              ),
-                                            ),
-                                            subtitle: Text(
-                                              _displayTime(item['createdAt']),
-                                              style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
-                                            ),
-                                            onTap: () async {
-                                              try {
-                                                await _read(id: asString(item['id']));
-                                                if (!mounted || !ctx.mounted) return;
-                                                Navigator.pop(ctx);
-                                                widget.onConversation(asString(item['conversationId']));
-                                              } catch (_) {
-                                                if (ctx.mounted) refresh(() => _error = '打开通知失败，请重试');
-                                              }
-                                            },
                                           );
                                         },
                                       )),
@@ -258,18 +453,56 @@ class _NotificationCenterState extends State<NotificationCenter> {
   }
 
   @override
-  Widget build(BuildContext context) => Semantics(
+  Widget build(BuildContext context) {
+    final hasUnread = _unread > 0;
+    return Semantics(
       button: true,
-      label: '消息中心',
+      label: hasUnread ? '消息中心，$_unread 条未读' : '消息中心',
       identifier: 'desk.notifications.open',
       child: IconButton(
-          key: const ValueKey('desk-notifications-open'),
-          tooltip: '消息中心 · $_unread 条未读',
-          onPressed: _open,
-          icon: Badge(
-              isLabelVisible: _unread > 0,
-              backgroundColor: const Color(0xFF3263FF),
-              label: Text(_unread > 99 ? '99+' : '$_unread',
-                  style: const TextStyle(fontSize: 10, color: Colors.white)),
-              child: const Icon(Icons.notifications_none_rounded, size: 20))));
+        key: const ValueKey('desk-notifications-open'),
+        tooltip: '消息中心 · $_unread 条未读',
+        onPressed: _open,
+        // 有未读时用浅红底 + 实心铃铛 + 红色角标，避免灰线图标淹没在顶栏里。
+        icon: Badge(
+          isLabelVisible: hasUnread,
+          backgroundColor: const Color(0xFFE53935),
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+          label: Text(
+            _unread > 99 ? '99+' : '$_unread',
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
+              height: 1.1,
+            ),
+          ),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            width: 34,
+            height: 34,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: hasUnread
+                  ? const Color(0xFFFFEBEE)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+              border: hasUnread
+                  ? Border.all(color: const Color(0xFFFFCDD2))
+                  : null,
+            ),
+            child: Icon(
+              hasUnread
+                  ? Icons.notifications_active_rounded
+                  : Icons.notifications_none_rounded,
+              size: 22,
+              color: hasUnread
+                  ? const Color(0xFFE53935)
+                  : const Color(0xFF334155),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

@@ -44,7 +44,7 @@ class _TongYuConsoleAppState extends State<TongYuConsoleApp> {
   late final PlatformController _platform;
 
   bool _startupComplete = false;
-  ThemeMode _themeMode = ThemeMode.system;
+  ThemeMode _themeMode = ThemeMode.light;
   ConsoleSurface _surface = ConsoleSurface.agent;
 
   /// 平台 bootstrap 完成前不暴露「平台管理员登录」，避免点进去还在闪 splash。
@@ -105,13 +105,8 @@ class _TongYuConsoleAppState extends State<TongYuConsoleApp> {
   }
 
   Future<void> _restorePrefs() async {
-    final storedTheme = await _store.loadThemeMode();
-    final mode = switch (storedTheme) {
-      'light' => ThemeMode.light,
-      'dark' => ThemeMode.dark,
-      'system' => ThemeMode.system,
-      _ => null,
-    };
+    // Light theme only — clear any legacy dark/system preference.
+    unawaited(_store.saveThemeMode('light'));
     final storedSurface =
         loadTabConsoleSurface() ?? await _store.loadConsoleSurface();
     final surface = switch (storedSurface) {
@@ -121,15 +116,16 @@ class _TongYuConsoleAppState extends State<TongYuConsoleApp> {
     };
     if (!mounted) return;
     setState(() {
-      if (mode != null) _themeMode = mode;
+      _themeMode = ThemeMode.light;
       _surface = isHostedConsole ? ConsoleSurface.agent : surface;
       _surfaceRestored = true;
     });
   }
 
   void _setThemeMode(ThemeMode mode) {
-    setState(() => _themeMode = mode);
-    unawaited(_store.saveThemeMode(mode.name));
+    // Ignore dark/system from older builds; product is light-only.
+    setState(() => _themeMode = ThemeMode.light);
+    unawaited(_store.saveThemeMode('light'));
   }
 
   void _openPlatformConsole() {
@@ -159,8 +155,8 @@ class _TongYuConsoleAppState extends State<TongYuConsoleApp> {
         GlobalWidgetsLocalizations.delegate,
       ],
       theme: RelayTheme.light(),
-      darkTheme: RelayTheme.dark(),
-      themeMode: _themeMode,
+      darkTheme: RelayTheme.light(),
+      themeMode: ThemeMode.light,
       builder: (context, child) {
         final theme = Theme.of(context);
         if (!_startupComplete && _surfaceRestored &&

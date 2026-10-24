@@ -1,7 +1,7 @@
 name: tongyu_agent_console
 description: TongYu cross-platform agent and operations console.
 publish_to: none
-version: 0.1.0+1
+version: 0.1.1+2026102301
 
 # One codebase, four shapes: the desktop build is what an agent sits in all day,
 # the phone build is for on-call shifts, and the web build is a zero-install
@@ -20,6 +20,9 @@ dependencies:
   http: ^1.2.0
   web_socket_channel: ^2.4.0
   shared_preferences: ^2.2.3
+  # 安卓安装包版本号与打开 APK 下载页；Web / iOS PWA 仍走各自的更新通道。
+  package_info_plus: ^8.0.0
+  url_launcher: ^6.3.0
   # Pinned to the 0.8 line on purpose: the console must build against whatever
   # Flutter a developer already has, and image_picker 1.x requires Dart 3.10+.
   image_picker: ^0.8.9

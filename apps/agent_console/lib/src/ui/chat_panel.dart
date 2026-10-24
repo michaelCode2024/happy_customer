@@ -110,6 +110,8 @@ class _ChatPanelState extends State<ChatPanel> {
   bool _stickToBottom = true;
   bool _userScrolling = false;
   bool _bottomScrollQueued = false;
+  /// 上次已跟随的列表最大滚动范围；仅内容变长时再跳底，避免滚动中反复 jumpTo 闪屏。
+  double? _lastStickMaxExtent;
   String? _scrollConversationId;
   String? _lastMessageId;
   Timer? _readTimer;
@@ -197,6 +199,8 @@ class _ChatPanelState extends State<ChatPanel> {
       _lastMessageId = null;
       _stickToBottom = true;
       _userScrolling = false;
+      _lastStickMaxExtent = null;
+      _inlineAiOpen = false;
       _scrollToBottom();
     }
     if (lastId != _lastMessageId) {
@@ -283,33 +287,47 @@ class _ChatPanelState extends State<ChatPanel> {
   /// incoming message.
   bool _onThreadNotification(Notification notification) {
     if (notification is UserScrollNotification && notification.depth == 0) {
-      // 仅用户操作改变跟随状态；消息增高、图片加载和窗口缩放不会误判为翻历史。
-      _userScrolling = true;
-      _onScroll();
-      _userScrolling = notification.direction != ScrollDirection.idle;
+      // 仅用户手势改变跟随状态；图片增高、窗口缩放不误判为翻历史。
+      if (notification.direction != ScrollDirection.idle) {
+        _userScrolling = true;
+        _onScroll();
+      } else {
+        // 手势结束：先按落点更新贴底，再放开自动跟随，避免和 jumpTo 抢位置闪屏。
+        _onScroll();
+        _userScrolling = false;
+      }
     }
+    // 只有内容变长才贴底；用户拖动中绝不 jumpTo。
     if (notification is ScrollMetricsNotification &&
         notification.depth == 0 &&
-        _stickToBottom) {
-      _scrollToBottom();
+        _stickToBottom &&
+        !_userScrolling) {
+      final max = notification.metrics.maxScrollExtent;
+      final grew =
+          _lastStickMaxExtent == null || max > _lastStickMaxExtent! + 0.5;
+      _lastStickMaxExtent = max;
+      if (grew) {
+        _scrollToBottom();
+      }
     }
     return false;
   }
 
   void _scrollToBottom({bool force = false}) {
     if (force && !_stickToBottom) setState(() => _stickToBottom = true);
-    if (!_stickToBottom || _bottomScrollQueued) return;
+    if (!_stickToBottom || _bottomScrollQueued || _userScrolling) return;
     _bottomScrollQueued = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _bottomScrollQueued = false;
-      if (!mounted || !_scroll.hasClients || !_stickToBottom) return;
+      if (!mounted || !_scroll.hasClients || !_stickToBottom || _userScrolling) {
+        return;
+      }
       final position = _scroll.position;
+      _lastStickMaxExtent = position.maxScrollExtent;
       if ((position.maxScrollExtent - position.pixels).abs() > 0.5) {
         _scroll.jumpTo(position.maxScrollExtent);
       }
     });
-    // 滚动后懒加载列表可能重新估算高度；尺寸通知会继续追到真实底部。
-    WidgetsBinding.instance.scheduleFrame();
   }
 
   Future<void> _pickImage({bool document = false}) async {
@@ -356,22 +374,19 @@ class _ChatPanelState extends State<ChatPanel> {
     }
   }
 
-  /// 输入区常驻说明：拦截原因优先；已解决则提示发送会重新打开。
+  /// 输入区常驻说明。可领取会话改由底部接待坞提示，这里不再重复。
   String? _composerHint(Conversation conversation, String selfId) {
     if (_noteMode) {
       return null;
     }
-    if (conversation.isUnassigned) {
-      return '当前会话尚未接待，请先点击右上角「开始接待」再回复；内部备注仍可发送。';
+    if (conversation.canClaim(selfId)) {
+      return null;
     }
     if (conversation.isHeldByOther(selfId)) {
       final name = conversation.assigneeName.trim().isEmpty
           ? '其他客服'
           : conversation.assigneeName.trim();
       return '该会话由「$name」接待中，请先转派给自己后再回复；内部备注仍可发送。';
-    }
-    if (conversation.needsAcceptance) {
-      return '请先点击右上角「确认接单」再回复客户；内部备注仍可发送。';
     }
     if (conversation.isResolved) {
       return '会话已解决。发送回复将自动重新打开会话。';
@@ -665,6 +680,8 @@ class _ChatPanelState extends State<ChatPanel> {
 
   bool _mobileAi = false;
   bool _mobileAiChecked = false;
+  /// 桌面：AI 写作助手由输入区芯片展开，默认收起不占高。
+  bool _inlineAiOpen = false;
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -816,17 +833,6 @@ class _ChatPanelState extends State<ChatPanel> {
                   onDismiss: workbench.clearThreadError,
                 ),
               ),
-            if (!_noteMode && workbench.messages.isNotEmpty)
-              ValueListenableBuilder<TextEditingValue>(
-                  valueListenable: _composer,
-                  builder: (context, value, _) => AiAssistPanel(
-                        api: workbench.api,
-                        conversationId: conversation.id,
-                        messages: workbench.messages,
-                        onAdopt: _adoptResult,
-                        draftText: value.text,
-                        writingOnly: !widget.showInlineAssist,
-                      )),
             if (_isAiDraft)
               Container(
                 width: double.infinity,
@@ -838,55 +844,82 @@ class _ChatPanelState extends State<ChatPanel> {
                         color: Theme.of(context).colorScheme.primary,
                         fontSize: 12)),
               ),
+            // 待接待：底部单行操作坞，不铺禁用输入区；写备注再展开输入。
             if (!conversation.isResolved &&
-                conversation.canClaim(workbench.selfId))
+                conversation.canClaim(workbench.selfId) &&
+                !_noteMode)
               ReceptionAction(
-                  conversation: conversation,
-                  busy: workbench.claiming,
-                  onClaim: () async {
-                    await workbench.claim();
-                    if (mounted &&
-                        workbench.selectedId == conversation.id &&
-                        workbench.selected
-                                ?.publicReplyBlockReason(workbench.selfId) ==
-                            null) {
-                      _composerFocus.requestFocus();
-                    }
-                  }),
-            _Composer(
-              controller: _composer,
-              focusNode: _composerFocus,
-              noteMode: _noteMode,
-              sending: _sending,
-              uploading: _uploading,
-              pending: _pending,
-              uploadError: _uploadError,
-              visitorTyping: workbench.visitorTyping,
-              canned: workbench.cannedForSelection,
-              supportsFiles: widget.picker.supportsArbitraryFiles,
-              quote: workbench.replyTo,
-              // 未接待 / 他人会话 / 已解决：输入区常驻说明，避免只靠失败气泡。
-              statusHint: _composerHint(conversation, workbench.selfId),
-              lockPublicReply: !_noteMode &&
-                  conversation.publicReplyBlockReason(workbench.selfId) != null,
-              onChanged: _onComposerChanged,
-              onToggleNote: (value) => setState(() => _noteMode = value),
-              onPickImage: () => _pickImage(),
-              onPickFile: () => _pickImage(document: true),
-              voiceControl: VoiceRecorderButton(
-                  key: ValueKey(conversation.id),
-                  enabled: !_sending &&
-                      !_uploading &&
-                      !_noteMode &&
-                      conversation.publicReplyBlockReason(workbench.selfId) ==
-                          null,
-                  onRecorded: _attachVoice),
-              onClearQuote: () => workbench.quote(null),
-              onRemovePending: (id) => setState(
-                () => _pending.removeWhere((item) => item.id == id),
+                conversation: conversation,
+                busy: workbench.claiming,
+                onWriteNote: () => setState(() => _noteMode = true),
+                onClaim: () async {
+                  await workbench.claim();
+                  if (mounted &&
+                      workbench.selectedId == conversation.id &&
+                      workbench.selected
+                              ?.publicReplyBlockReason(workbench.selfId) ==
+                          null) {
+                    setState(() => _noteMode = false);
+                    _composerFocus.requestFocus();
+                  }
+                },
+              )
+            else
+              _Composer(
+                controller: _composer,
+                focusNode: _composerFocus,
+                noteMode: _noteMode,
+                sending: _sending,
+                uploading: _uploading,
+                pending: _pending,
+                uploadError: _uploadError,
+                visitorTyping: workbench.visitorTyping,
+                canned: workbench.cannedForSelection,
+                supportsFiles: widget.picker.supportsArbitraryFiles,
+                quote: workbench.replyTo,
+                statusHint: _composerHint(conversation, workbench.selfId),
+                lockPublicReply: !_noteMode &&
+                    conversation.publicReplyBlockReason(workbench.selfId) !=
+                        null,
+                aiOpen: _inlineAiOpen,
+                onToggleAi: workbench.messages.isEmpty
+                    ? null
+                    : () => setState(() => _inlineAiOpen = !_inlineAiOpen),
+                aiPanel: _inlineAiOpen &&
+                        !_noteMode &&
+                        workbench.messages.isNotEmpty
+                    ? AiAssistPanel(
+                        api: workbench.api,
+                        conversationId: conversation.id,
+                        messages: workbench.messages,
+                        onAdopt: _adoptResult,
+                        draftController: _composer,
+                        writingOnly: !widget.showInlineAssist,
+                        initiallyExpanded: true,
+                      )
+                    : null,
+                onChanged: _onComposerChanged,
+                onToggleNote: (value) => setState(() {
+                  _noteMode = value;
+                  if (value) _inlineAiOpen = false;
+                }),
+                onPickImage: () => _pickImage(),
+                onPickFile: () => _pickImage(document: true),
+                voiceControl: VoiceRecorderButton(
+                    key: ValueKey(conversation.id),
+                    enabled: !_sending &&
+                        !_uploading &&
+                        !_noteMode &&
+                        conversation.publicReplyBlockReason(
+                                workbench.selfId) ==
+                            null,
+                    onRecorded: _attachVoice),
+                onClearQuote: () => workbench.quote(null),
+                onRemovePending: (id) => setState(
+                  () => _pending.removeWhere((item) => item.id == id),
+                ),
+                onSend: _send,
               ),
-              onSend: _send,
-            ),
           ],
         );
       },
@@ -1150,16 +1183,7 @@ class _ThreadHeader extends StatelessWidget {
                           ),
                         ),
                       )),
-          // 仅未领取或「派给自己、待确认」才显示接单；他人会话只可转派，避免点了也失败。
-          if (conversation.canClaim(workbench.selfId))
-            Padding(
-              padding: const EdgeInsets.only(left: 8),
-              child: FilledButton.tonalIcon(
-                onPressed: workbench.claiming ? null : workbench.claim,
-                icon: const Icon(Icons.pan_tool_alt_outlined, size: 18),
-                label: Text(conversation.receptionActionLabel),
-              ),
-            ),
+          // 接待入口改到底部操作坞，顶栏不再重复「开始接待」。
           if (MediaQuery.sizeOf(context).width >= 760)
             Padding(
               // Keep clear of top-bar notification bell hit area.
@@ -1330,7 +1354,8 @@ class _ThreadHeader extends StatelessWidget {
       workbench.setSuppressReceptionFab(false);
     }
 
-    messenger.showMaterialBanner(
+    messenger.clearMaterialBanners();
+      messenger.showMaterialBanner(
       MaterialBanner(
         key: const ValueKey('desk-resolve-feedback-banner'),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -1933,6 +1958,10 @@ class _MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // 自动回复走坐席侧气泡，不再与「已分配…」一类系统灰字混用。
+    if (message.isAutomation) {
+      return _AutomationReplyBubble(message: message, flash: flash);
+    }
     if (message.isSystem ||
         (message.messageType == 'EVENT' && !message.isPrivate)) {
       return Padding(
@@ -1958,7 +1987,7 @@ class _MessageBubble extends StatelessWidget {
     }
 
     final isAgent = message.isFromAgent;
-    // 坐席实心蓝气泡用白字；访客白气泡用正文色（腾讯 IM / 云信习惯）。
+    // 浅色主题：淡蓝底深色字；深色主题：实心蓝底白字。
     final textColor = isAgent && theme.brightness == Brightness.dark
         ? Colors.white
         : theme.colorScheme.onSurface;
@@ -2200,6 +2229,148 @@ class _CommerceCard extends StatelessWidget {
   }
 }
 
+/// 自动回复：坐席侧淡蓝气泡 +「自动回复」角标；多段文案首段加粗、其余作步骤。
+class _AutomationReplyBubble extends StatelessWidget {
+  const _AutomationReplyBubble({required this.message, required this.flash});
+
+  final ChatMessage message;
+  final bool flash;
+
+  static const _productSenderNames = {
+    '通语助手',
+    '语聊助手',
+    '通语客服',
+    '语聊客服',
+    'AI 助手',
+    'AI助手',
+    '客服助手',
+  };
+
+  static List<String> _paragraphs(String raw) => raw
+      .split(RegExp(r'\n+'))
+      .map((line) => line.trim())
+      .where((line) => line.isNotEmpty)
+      .toList();
+
+  /// 跟嵌入入口标题一致；历史消息里的产品品牌名降级为「自动回复」。
+  static String _senderLabel(ChatMessage message) {
+    final meta = asString(message.metadata['senderName']).trim();
+    if (meta.isNotEmpty && !_productSenderNames.contains(meta)) {
+      return meta;
+    }
+    final name = message.senderName.trim();
+    if (name.isNotEmpty && !_productSenderNames.contains(name)) {
+      return name;
+    }
+    return '自动回复';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final parts = _paragraphs(message.content);
+    final title = parts.isEmpty ? message.content.trim() : parts.first;
+    final steps = parts.length > 1 ? parts.sublist(1) : const <String>[];
+    final ink = theme.colorScheme.onSurface;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4, right: 4),
+            child: Text(
+              _senderLabel(message),
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          _BubbleShell(
+            flash: flash,
+            isAgent: true,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primary.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    '自动回复',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.primary,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 10.5,
+                    ),
+                  ),
+                ),
+                Text(
+                  title,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: ink,
+                    fontWeight: FontWeight.w600,
+                    height: 1.55,
+                  ),
+                ),
+                if (steps.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  for (var i = 0; i < steps.length; i++) ...[
+                    if (i > 0)
+                      Divider(
+                        height: 16,
+                        thickness: 1,
+                        color: theme.colorScheme.primary.withOpacity(0.08),
+                      ),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: 7,
+                          height: 7,
+                          margin: const EdgeInsets.only(top: 6, right: 8),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.primary.withOpacity(0.45),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            steps[i],
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: ink.withOpacity(0.88),
+                              height: 1.5,
+                              fontSize: 12.5,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 4, right: 2),
+            child: _MessageStatusRow(
+              sentAt: message.createdAt,
+              receipt: MessageReceipt.none,
+              alignEnd: true,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _BubbleShell extends StatelessWidget {
   const _BubbleShell({
     required this.flash,
@@ -2221,64 +2392,64 @@ class _BubbleShell extends StatelessWidget {
     final bubbleColor = isAgent
         ? RelayTheme.agentBubble(scheme)
         : RelayTheme.visitorBubble(scheme);
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 620),
-      child: FractionallySizedBox(
-        widthFactor: mobile ? .84 : _bubbleWidthFactor,
+    final light = scheme.brightness == Brightness.light;
+    // 按内容收缩，只设最大宽度；短消息不再被撑成整行宽。
+    return LayoutBuilder(builder: (context, constraints) {
+      final maxBubble = (constraints.maxWidth *
+              (mobile ? 0.84 : _bubbleWidthFactor))
+          .clamp(96.0, 520.0);
+      return Align(
         alignment: isAgent ? Alignment.centerRight : Alignment.centerLeft,
-        child: GestureDetector(
-            onLongPress: mobile ? onLongPress : null,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 250),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-              decoration: BoxDecoration(
-                gradient: isAgent && !(mobile && scheme.brightness == Brightness.light)
-                    ? RelayTheme.actionGradient
-                    : null,
-                color: isAgent
-                    ? (mobile && scheme.brightness == Brightness.light
-                        ? const Color(0xFFDFE8FF)
-                        : null)
-                    : (mobile && scheme.brightness == Brightness.light
-                        ? Colors.white
-                        : bubbleColor),
-                borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(isAgent ? 16 : 16),
-                  topRight: Radius.circular(isAgent ? 16 : 16),
-                  bottomLeft: Radius.circular(isAgent ? 16 : 6),
-                  bottomRight: Radius.circular(isAgent ? 6 : 16),
-                ),
-                border: Border.all(
-                  color: flash
-                      ? scheme.primary
-                      : (isAgent
-                          ? Colors.transparent
-                          : scheme.outlineVariant.withOpacity(.85)),
-                  width: flash ? 2 : 1,
-                ),
-                boxShadow: isAgent && !(mobile && scheme.brightness == Brightness.light)
-                    ? RelayTheme.agentBubbleShadow()
-                    : [
-                        BoxShadow(
-                          color: const Color(0xFF3263FF).withOpacity(0.05),
-                          blurRadius: 18,
-                          offset: const Offset(0, 8),
-                        ),
-                      ],
-              ),
-              child: DefaultTextStyle.merge(
-                style: TextStyle(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxBubble),
+          child: GestureDetector(
+              onLongPress: mobile ? onLongPress : null,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 250),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                decoration: BoxDecoration(
+                  // 浅色主题不用实心蓝渐变，改淡底；深色主题仍用主色渐变。
+                  gradient: isAgent && !light
+                      ? RelayTheme.actionGradient
+                      : null,
                   color: isAgent
-                      ? (mobile && scheme.brightness == Brightness.light
-                          ? scheme.onSurface
-                          : Colors.white)
-                      : scheme.onSurface,
+                      ? (light ? bubbleColor : null)
+                      : (light && mobile ? Colors.white : bubbleColor),
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(16),
+                    topRight: const Radius.circular(16),
+                    bottomLeft: Radius.circular(isAgent ? 16 : 6),
+                    bottomRight: Radius.circular(isAgent ? 6 : 16),
+                  ),
+                  border: Border.all(
+                    color: flash
+                        ? scheme.primary
+                        : (isAgent
+                            ? (light
+                                ? const Color(0xFF3263FF).withOpacity(0.12)
+                                : Colors.transparent)
+                            : scheme.outlineVariant.withOpacity(.85)),
+                    width: flash ? 2 : 1,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF3263FF).withOpacity(light ? 0.06 : 0.16),
+                      blurRadius: light ? 12 : 18,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
                 ),
-                child: child,
-              ),
-            )),
-      ),
-    );
+                child: DefaultTextStyle.merge(
+                  style: TextStyle(
+                    color: isAgent && !light ? Colors.white : scheme.onSurface,
+                  ),
+                  child: child,
+                ),
+              )),
+        ),
+      );
+    });
   }
 }
 
@@ -3032,6 +3203,9 @@ class _Composer extends StatelessWidget {
     required this.quote,
     this.statusHint,
     this.lockPublicReply = false,
+    this.aiOpen = false,
+    this.onToggleAi,
+    this.aiPanel,
     required this.onChanged,
     required this.onToggleNote,
     required this.onPickImage,
@@ -3056,11 +3230,16 @@ class _Composer extends StatelessWidget {
   /// The message the next reply will quote, if the agent picked one.
   final ChatMessage? quote;
 
-  /// 输入区常驻说明（未接待 / 他人会话 / 已解决等）。
+  /// 输入区常驻说明（他人会话 / 已解决等）。
   final String? statusHint;
 
   /// 为 true 时禁止公开回复的附件与语音（内部备注不受影响）。
   final bool lockPublicReply;
+
+  /// AI 芯片是否展开；面板由父级传入，嵌在模式行下方。
+  final bool aiOpen;
+  final VoidCallback? onToggleAi;
+  final Widget? aiPanel;
 
   final ValueChanged<String> onChanged;
   final ValueChanged<bool> onToggleNote;
@@ -3089,240 +3268,307 @@ class _Composer extends StatelessWidget {
       focusNode.requestFocus();
     }
 
+    Widget toolIcon({
+      required String tooltip,
+      required IconData icon,
+      required VoidCallback? onPressed,
+    }) {
+      return IconButton(
+        tooltip: tooltip,
+        onPressed: onPressed,
+        visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+        padding: EdgeInsets.zero,
+        iconSize: 20,
+        icon: Icon(icon, color: scheme.onSurfaceVariant),
+      );
+    }
+
     return Container(
-        decoration: BoxDecoration(
-          color: scheme.surface,
-          border: Border(
-            top: BorderSide(color: scheme.outlineVariant),
-          ),
-        ),
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
-        child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.min,
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        border: Border(top: BorderSide(color: scheme.outlineVariant)),
+      ),
+      padding: const EdgeInsets.fromLTRB(14, 6, 14, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 模式 Tab 与工具同一行，去掉下方独立工具栏占高。
+          Row(
             children: [
-              Row(children: [
-                _ComposerModeTab(
-                  label: '回复客户',
-                  selected: !noteMode,
-                  tone: scheme.primary,
-                  onTap: () => onToggleNote(false),
+              _ComposerModeTab(
+                label: '回复客户',
+                selected: !noteMode,
+                tone: scheme.primary,
+                onTap: () => onToggleNote(false),
+              ),
+              const SizedBox(width: 6),
+              _ComposerModeTab(
+                label: '内部备注',
+                selected: noteMode,
+                tone: const Color(0xFFF97316),
+                onTap: () => onToggleNote(true),
+              ),
+              Container(
+                width: 1,
+                height: 18,
+                margin: const EdgeInsets.symmetric(horizontal: 8),
+                color: scheme.outlineVariant,
+              ),
+              PopupMenuButton<String>(
+                tooltip: '表情',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                icon: Icon(Icons.sentiment_satisfied_alt_outlined,
+                    size: 20, color: scheme.onSurfaceVariant),
+                onSelected: insert,
+                itemBuilder: (_) => [
+                  for (final emoji in [
+                    '😊',
+                    '👍',
+                    '🙏',
+                    '🎉',
+                    '❤️',
+                    '🤔',
+                    '✅',
+                    '😄'
+                  ])
+                    PopupMenuItem(
+                      value: emoji,
+                      child: Text(emoji, style: const TextStyle(fontSize: 22)),
+                    )
+                ],
+              ),
+              toolIcon(
+                tooltip: lockPublicReply ? '请先完成接待或转派' : '发送图片',
+                icon: Icons.image_outlined,
+                onPressed: uploading || lockPublicReply ? null : onPickImage,
+              ),
+              if (supportsFiles)
+                toolIcon(
+                  tooltip: lockPublicReply ? '请先完成接待或转派' : '发送文件',
+                  icon: Icons.folder_open_outlined,
+                  onPressed: uploading || lockPublicReply ? null : onPickFile,
                 ),
-                const SizedBox(width: 6),
-                _ComposerModeTab(
-                  label: '内部备注',
-                  selected: noteMode,
-                  tone: const Color(0xFFF97316),
-                  onTap: () => onToggleNote(true),
+              voiceControl,
+              if (canned.isNotEmpty)
+                _CannedMenu(
+                  canned: canned,
+                  onPick: (content) {
+                    controller.text = content;
+                    controller.selection =
+                        TextSelection.collapsed(offset: content.length);
+                    onChanged(content);
+                    focusNode.requestFocus();
+                  },
                 ),
-                const Spacer(),
-                if (!lockPublicReply && supportsFiles) ...[
-                  Text(
-                    'Ctrl + Enter 发送',
-                    style: theme.textTheme.labelSmall
-                        ?.copyWith(fontSize: 10.5, color: scheme.outline),
+              if (onToggleAi != null && !noteMode) ...[
+                const SizedBox(width: 2),
+                Material(
+                  color: aiOpen
+                      ? const Color(0xFF845EF7).withOpacity(0.16)
+                      : const Color(0xFFF3F0FF),
+                  borderRadius: BorderRadius.circular(8),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: onToggleAi,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 5),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.auto_awesome,
+                              size: 14,
+                              color: const Color(0xFF845EF7)
+                                  .withOpacity(aiOpen ? 1 : 0.9)),
+                          const SizedBox(width: 4),
+                          const Text(
+                            'AI',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF6F4BD8),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+              const Spacer(),
+              if (uploading)
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+            ],
+          ),
+          if (aiPanel != null) ...[
+            const SizedBox(height: 6),
+            aiPanel!,
+          ],
+          const SizedBox(height: 6),
+          if (statusHint != null)
+            Container(
+              margin: const EdgeInsets.only(bottom: 6),
+              padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
+              decoration: BoxDecoration(
+                color: scheme.secondaryContainer.withAlpha(160),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.info_outline,
+                      size: 16, color: scheme.onSecondaryContainer),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      statusHint!,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSecondaryContainer,
+                      ),
+                    ),
                   ),
                 ],
-              ]),
-              const SizedBox(height: 8),
-              if (statusHint != null)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-                  decoration: BoxDecoration(
-                    color: scheme.secondaryContainer.withAlpha(160),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(Icons.info_outline,
-                          size: 16, color: scheme.onSecondaryContainer),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          statusHint!,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: scheme.onSecondaryContainer,
-                          ),
-                        ),
-                      ),
-                    ],
+              ),
+            ),
+          if (uploadError != null)
+            Text(uploadError!,
+                style: TextStyle(color: scheme.error, fontSize: 12)),
+          if (quote != null)
+            Container(
+              margin: const EdgeInsets.only(bottom: 6),
+              padding: const EdgeInsets.fromLTRB(10, 6, 4, 6),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Row(children: [
+                Icon(Icons.reply, size: 15, color: scheme.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '回复 ${quote!.senderName.isEmpty ? '访客' : quote!.senderName}：${quote!.content}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall,
                   ),
                 ),
-              if (uploadError != null)
-                Text(uploadError!,
-                    style: TextStyle(color: scheme.error, fontSize: 12)),
-              if (quote != null)
-                Container(
-                    margin: const EdgeInsets.only(bottom: 6),
-                    padding: const EdgeInsets.fromLTRB(10, 6, 4, 6),
-                    decoration: BoxDecoration(
-                        color: scheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(4)),
-                    child: Row(children: [
-                      Icon(Icons.reply, size: 15, color: scheme.primary),
-                      const SizedBox(width: 8),
-                      Expanded(
-                          child: Text(
-                              '回复 ${quote!.senderName.isEmpty ? '访客' : quote!.senderName}：${quote!.content}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodySmall)),
-                      IconButton(
-                          tooltip: '取消引用',
-                          onPressed: onClearQuote,
-                          iconSize: 16,
-                          icon: const Icon(Icons.close))
-                    ])),
-              if (pending.isNotEmpty)
-                Wrap(spacing: 6, runSpacing: 6, children: [
-                  for (final attachment in pending)
-                    InputChip(
-                        avatar: Icon(
-                            attachment.isImage
-                                ? Icons.image_outlined
-                                : Icons.attach_file,
-                            size: 16),
-                        label: Text(
-                            '${attachment.fileName} · ${fileSize(attachment.sizeBytes)}'),
-                        onDeleted: () => onRemovePending(attachment.id))
-                ]),
-              Shortcuts(
-                  shortcuts: const <ShortcutActivator, Intent>{
-                    SingleActivator(LogicalKeyboardKey.enter, control: true):
-                        _SendIntent(),
-                    SingleActivator(LogicalKeyboardKey.numpadEnter,
-                        control: true): _SendIntent()
-                  },
-                  child: Actions(
-                      actions: <Type, Action<Intent>>{
-                        _SendIntent: CallbackAction<_SendIntent>(onInvoke: (_) {
-                          onSend();
-                          return null;
-                        })
-                      },
-                      child: TextField(
-                          controller: controller,
-                          focusNode: focusNode,
-                          minLines: compact ? 1 : 2,
-                          maxLines: compact ? 2 : 5,
-                          onChanged: onChanged,
-                          textInputAction: TextInputAction.newline,
-                          keyboardType: TextInputType.multiline,
-                          decoration: InputDecoration(
-                              hintText: noteMode
-                                  ? '写一条内部备注，访客看不到'
-                                  : lockPublicReply
-                                      ? '请先完成接待或转派后再回复客户'
-                                      : visitorTyping
-                                          ? '对方正在输入…'
-                                          : compact
-                                              ? '输入回复内容…'
-                                              : '输入回复内容，Ctrl + Enter 发送',
-                              filled: true,
-                              fillColor: noteMode
-                                  ? scheme.tertiaryContainer.withAlpha(35)
-                                  : scheme.surfaceContainerLow,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide:
-                                    BorderSide(color: scheme.outlineVariant),
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide:
-                                    BorderSide(color: scheme.outlineVariant),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide:
-                                    BorderSide(color: scheme.primary, width: 1.2),
-                              ),
-                              contentPadding: const EdgeInsets.symmetric(
-                                  vertical: 10, horizontal: 12),
-                              hintStyle: theme.textTheme.bodyMedium
-                                  ?.copyWith(color: scheme.outline))))),
-              // 输入区在上、工具栏在下，保持原有发送与附件回调。
-              Row(children: [
-                PopupMenuButton<String>(
-                    tooltip: '表情',
-                    icon: Icon(Icons.sentiment_satisfied_alt_outlined,
-                        size: 22, color: scheme.onSurfaceVariant),
-                    onSelected: insert,
-                    itemBuilder: (_) => [
-                          for (final emoji in [
-                            '😊',
-                            '👍',
-                            '🙏',
-                            '🎉',
-                            '❤️',
-                            '🤔',
-                            '✅',
-                            '😄'
-                          ])
-                            PopupMenuItem(
-                                value: emoji,
-                                child: Text(emoji,
-                                    style: const TextStyle(fontSize: 22)))
-                        ]),
                 IconButton(
-                    tooltip: lockPublicReply ? '请先完成接待或转派' : '发送图片',
-                    onPressed:
-                        uploading || lockPublicReply ? null : onPickImage,
-                    icon: Icon(Icons.image_outlined,
-                        size: 22, color: scheme.onSurfaceVariant)),
-                if (supportsFiles)
-                  IconButton(
-                      tooltip: lockPublicReply ? '请先完成接待或转派' : '发送文件',
-                      onPressed:
-                          uploading || lockPublicReply ? null : onPickFile,
-                      icon: Icon(Icons.folder_open_outlined,
-                          size: 22, color: scheme.onSurfaceVariant)),
-                voiceControl,
-                if (canned.isNotEmpty)
-                  _CannedMenu(
-                      canned: canned,
-                      onPick: (content) {
-                        controller.text = content;
-                        controller.selection =
-                            TextSelection.collapsed(offset: content.length);
-                        onChanged(content);
-                        focusNode.requestFocus();
-                      }),
-                const Spacer(),
-                if (uploading)
-                  const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2)),
+                  tooltip: '取消引用',
+                  onPressed: onClearQuote,
+                  iconSize: 16,
+                  icon: const Icon(Icons.close),
+                )
               ]),
-              const SizedBox(height: 6),
-              Row(children: [
-                Expanded(
-                    child: Text(
-                        noteMode
-                            ? '仅团队成员可见'
-                            : lockPublicReply
-                                ? '需先接待或转派后才能发送'
-                                : compact
-                                    ? '回复前请确认内容'
-                                    : 'Ctrl + Enter 发送 · Enter 换行',
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: scheme.outline))),
-                FilledButton(
-                    onPressed: sending ? null : onSend,
-                    child: sending
-                        ? const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2))
-                        : Text(noteMode ? '保存备注' : '发送'))
+            ),
+          if (pending.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Wrap(spacing: 6, runSpacing: 6, children: [
+                for (final attachment in pending)
+                  InputChip(
+                    avatar: Icon(
+                      attachment.isImage
+                          ? Icons.image_outlined
+                          : Icons.attach_file,
+                      size: 16,
+                    ),
+                    label: Text(
+                        '${attachment.fileName} · ${fileSize(attachment.sizeBytes)}'),
+                    onDeleted: () => onRemovePending(attachment.id),
+                  )
               ]),
-              if (!supportsFiles && !compact)
-                Text('当前客户端支持发送图片；其他文件可通过开放接口发送。',
-                    style: theme.textTheme.bodySmall),
-            ]));
+            ),
+          // 输入框压矮；发送嵌在右下角小按钮，避免外侧等高蓝块。
+          Stack(
+            children: [
+              Shortcuts(
+                shortcuts: const <ShortcutActivator, Intent>{
+                  SingleActivator(LogicalKeyboardKey.enter): _SendIntent(),
+                  SingleActivator(LogicalKeyboardKey.numpadEnter):
+                      _SendIntent(),
+                },
+                child: Actions(
+                  actions: <Type, Action<Intent>>{
+                    _SendIntent: CallbackAction<_SendIntent>(onInvoke: (_) {
+                      onSend();
+                      return null;
+                    })
+                  },
+                  child: TextField(
+                    controller: controller,
+                    focusNode: focusNode,
+                    minLines: 2,
+                    maxLines: 6,
+                    onChanged: onChanged,
+                    textInputAction: TextInputAction.newline,
+                    keyboardType: TextInputType.multiline,
+                    decoration: InputDecoration(
+                      hintText: noteMode
+                          ? '写一条内部备注，访客看不到'
+                          : lockPublicReply
+                              ? '请先完成接待或转派后再回复客户'
+                              : visitorTyping
+                                  ? '对方正在输入…'
+                                  : '输入回复内容…',
+                      filled: true,
+                      fillColor: noteMode
+                          ? scheme.tertiaryContainer.withAlpha(35)
+                          : scheme.surfaceContainerLow,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(color: scheme.outlineVariant),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(color: scheme.outlineVariant),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide:
+                            BorderSide(color: scheme.primary, width: 1.2),
+                      ),
+                      contentPadding: const EdgeInsets.fromLTRB(12, 10, 88, 10),
+                      hintStyle: theme.textTheme.bodyMedium
+                          ?.copyWith(color: scheme.outline),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                right: 8,
+                bottom: 8,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 28),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  onPressed: sending ? null : onSend,
+                  child: sending
+                      ? const SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Text(
+                          noteMode ? '保存备注' : '发送',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 }
 

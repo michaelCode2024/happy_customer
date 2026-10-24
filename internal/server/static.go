@@ -123,6 +123,16 @@ func (a *API) registerStatic(mux *http.ServeMux) {
 			a.logger.Error("render H5 page failed", "error", err)
 		}
 	})
+	// 旧 HTML 工作台入口已删除；书签与外链统一回到 Flutter /console/。
+	redirectLegacyConsoleShell := func(w http.ResponseWriter, r *http.Request) {
+		target := "/console/"
+		if q := r.URL.RawQuery; q != "" {
+			target += "?" + q
+		}
+		http.Redirect(w, r, target, http.StatusPermanentRedirect)
+	}
+	mux.HandleFunc("GET /console/desktop.html", redirectLegacyConsoleShell)
+	mux.HandleFunc("GET /console/mobile.html", redirectLegacyConsoleShell)
 	mux.HandleFunc("GET /console/", func(w http.ResponseWriter, r *http.Request) {
 		// Flutter's asset URLs use /console/ as their base. Unknown paths are
 		// routed to the index only for browser navigation, not missing assets.

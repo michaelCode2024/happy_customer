@@ -1,6 +1,6 @@
-# Widget API（当前开发版）
+# Widget HTTP 与实时消息 API
 
-基础地址：`http://localhost:8080`，健康检查为 `GET /health`。
+2026-10-23 对照当前路由复核。基础地址为目标实例的 `{BASE_URL}`；生产使用 HTTPS 和 WSS。本机端口应从实际实例取得，不使用文档端口推定运行状态。
 
 ## 初始化
 
@@ -36,7 +36,7 @@
 
 ## 实时连接
 
-连接 `ws://localhost:8080/ws/widget?token=<token>`。当前服务端事件：
+连接 `wss://<客服域名>/ws/widget?token=<token>`。以下事件仅展示字段形式，完整结构以当前接口返回为准：
 
 ```json
 {

@@ -116,6 +116,7 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
                           'offlineMessage',
                           'allowedDomains',
                           'autoAssign',
+                          'autoAccept',
                           'logoUrl',
                           'avatarUrl',
                           'fontFamily',
@@ -130,6 +131,7 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
                       'offlineMessage',
                       'allowedDomains',
                       'autoAssign',
+                      'autoAccept',
                       'status',
                       'logoUrl',
                       'avatarUrl',
@@ -425,7 +427,7 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
                   icon: Icons.chat_bubble_outline_rounded,
                   title: asString(inbox['name']),
                   subtitle:
-                      '${inbox['publicKey']} · ${inbox['autoAssign'] == true ? '自动分配' : '人工领取'}',
+                      '${inbox['publicKey']} · ${inbox['autoAssign'] == true ? (inbox['autoAccept'] == true ? '自动分配并接单' : '自动分配') : '人工领取'}',
                   trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                     WorkspaceTag(
                         text: inbox['status'] == 'ACTIVE' ? '已启用' : '已停用',
@@ -746,6 +748,8 @@ class _InboxDialogState extends State<_InboxDialog> {
   late final _css =
       TextEditingController(text: asString(widget.inbox?['customCss']));
   late bool _auto = widget.inbox?['autoAssign'] != false,
+      // 默认关闭：分配后仍需点「开始接待」。
+      _autoAccept = widget.inbox?['autoAccept'] == true,
       _active = widget.inbox?['status'] != 'DISABLED',
       _ai = widget.inbox?['aiEnabled'] == true;
   late String _strategy =
@@ -818,7 +822,22 @@ class _InboxDialogState extends State<_InboxDialog> {
                             contentPadding: EdgeInsets.zero,
                             title: const Text('自动分配给在线成员'),
                             value: _auto,
-                            onChanged: (v) => setState(() => _auto = v)),
+                            onChanged: (v) => setState(() {
+                                  _auto = v;
+                                  if (!v) _autoAccept = false;
+                                })),
+                        SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('分配后自动接单'),
+                            subtitle: Text(
+                              _auto
+                                  ? '开启后，分到的客服无需再点「开始接待」，可直接回复'
+                                  : '需先开启「自动分配给在线成员」',
+                            ),
+                            value: _auto && _autoAccept,
+                            onChanged: !_auto
+                                ? null
+                                : (v) => setState(() => _autoAccept = v)),
                         const SizedBox(height: 16),
                         ExpansionTile(
                             tilePadding: EdgeInsets.zero,
@@ -938,6 +957,7 @@ class _InboxDialogState extends State<_InboxDialog> {
                                 .where((s) => s.isNotEmpty)
                                 .toList(),
                             'autoAssign': _auto,
+                            'autoAccept': _auto && _autoAccept,
                             'logoUrl': _logo.text.trim(),
                             'avatarUrl': _avatar.text.trim(),
                             'fontFamily': _font.text.trim(),

@@ -88,12 +88,12 @@ export interface WidgetBridge {
 }
 
 export const DEFAULTS = {
-  title: '语聊客服',
-  subtitle: '语聊为您服务',
+  title: '通语客服',
+  subtitle: '通语为您服务',
   welcomeMessage: '',
   offlineMessage: '',
   placeholder: '请输入消息…',
-  // 默认使用语聊品牌蓝；接入企业可覆盖，不改已有自定义主题。
+  // 默认使用通语品牌蓝；接入企业可覆盖，不改已有自定义主题。
   primaryColor: '#3263FF',
   logoUrl: '',
   avatarUrl: '',

@@ -1,9 +1,11 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- 工作台唯一入口：本页加载 Flutter。禁止再跳转到 desktop.html / mobile.html。 -->
+  <!-- 本机自托管字体；禁止再引外网字体 CDN，避免国内网络卡住首屏。 -->
+  <link rel="stylesheet" href="fonts.css">
   <!--
     If you are serving your web app in a path other than the root, change the
     href value below to reflect the base path you are serving from.
@@ -18,18 +20,12 @@
     the `--base-href` argument provided to `flutter build`.
   -->
   <base href="$FLUTTER_BASE_HREF">
-
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <script>
-    // 纯 Flutter Web / H5 运行，不重定向到外部草稿
-  </script>
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="通语工作台与平台运营后台">
 
   <!-- iOS meta tags & icons -->
   <meta name="theme-color" content="#ffffff">
-  <meta name="color-scheme" content="light dark">
+  <meta name="color-scheme" content="light">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="通语客服">
@@ -94,11 +90,9 @@
       const loading = document.getElementById('tongyu-loading');
       if (loading) { loading.style.backgroundColor = color; loading.style.color = dark ? '#e2e8f0' : '#425466'; }
     };
-    let savedAppearance = 'system';
-    try { savedAppearance = JSON.parse(localStorage.getItem('flutter.tongyu.themeMode')) || 'system'; } catch (_) {}
-    const initialDark = savedAppearance === 'dark' ||
-        (savedAppearance !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
-    window.tongyuSyncTheme(initialDark ? '#171b22' : '#ffffff', initialDark);
+    // Product is light-theme only; ignore OS preference and any legacy dark preference.
+    try { localStorage.setItem('flutter.tongyu.themeMode', JSON.stringify('light')); } catch (_) {}
+    window.tongyuSyncTheme('#ffffff', false);
   </script>
 </head>
 <body>
@@ -110,12 +104,21 @@
   </div>
   <script>
     function dismissTongyuSplash() {
-      if (!window.tongyuFirstFramePainted || !window.tongyuAppReady) return;
+      // First Flutter frame is enough to leave the HTML splash; app-ready may lag on slow bootstrap.
+      if (!window.tongyuFirstFramePainted) return;
       window.tongyuFirstFrameReady = true;
       const splash = document.getElementById('tongyu-loading');
       if (!splash) return;
       splash.classList.add('leaving');
-      setTimeout(() => splash.remove(), matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 220);
+      splash.style.pointerEvents = 'none';
+      splash.setAttribute('aria-hidden', 'true');
+      const remove = function () {
+        try { splash.remove(); } catch (_) {}
+      };
+      // Always remove; reduced-motion and normal path both clear the overlay.
+      setTimeout(remove, matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 220);
+      // Belt-and-suspenders: if the transition path stalls, force-remove.
+      setTimeout(remove, 800);
     }
     window.addEventListener('flutter-first-frame', () => {
       window.tongyuFirstFramePainted = true; dismissTongyuSplash();
@@ -155,18 +158,59 @@
       window.tongyuEnsureRetry('重新加载');
     };
     function tongyuAppendBootstrap(src) {
-      // 显式声明 JS 类型，避免把误返回的 HTML 当成脚本解析。
+      // Fetch first so we never execute an HTML error/SPA fallback as JavaScript (MIME text/html).
       const el = document.createElement('script');
       el.type = 'text/javascript';
-      el.src = src;
-      el.async = true;
-      el.onerror = window.tongyuLoadingFailed;
-      document.body.appendChild(el);
+      fetch(src, { cache: 'no-cache', credentials: 'same-origin' }).then(function (res) {
+        const ct = (res.headers.get('content-type') || '').toLowerCase();
+        if (!res.ok || ct.indexOf('html') >= 0) {
+          throw new Error('bootstrap not javascript: ' + res.status + ' ' + ct);
+        }
+        return res.text();
+      }).then(function (code) {
+        el.text = code;
+        document.body.appendChild(el);
+      }).catch(function () {
+        el.src = src;
+        el.async = true;
+        el.onerror = window.tongyuLoadingFailed;
+        document.body.appendChild(el);
+      });
       return el;
     }
+    // DWDS/web-server may load modules but never invoke main without a debug extension.
+    window.tongyuKickstartMain = function () {
+      if (window.tongyuFirstFramePainted || window.tongyuFirstFrameReady) return true;
+      try {
+        if (typeof window.$dartRunMain === 'function') { window.$dartRunMain(); return true; }
+        if (window.$dartMainTearOffs && typeof window.$dartMainTearOffs.main === 'function') {
+          window.$dartMainTearOffs.main();
+          return true;
+        }
+      } catch (_) {}
+      return false;
+    };
+    (function () {
+      var tries = 0;
+      var timer = setInterval(function () {
+        tries += 1;
+        window.tongyuKickstartMain();
+        // If Flutter view mounted but splash flags lagged, treat as first frame.
+        if (!window.tongyuFirstFramePainted && document.querySelector('flutter-view, flt-glass-pane, canvas')) {
+          window.tongyuFirstFramePainted = true;
+          dismissTongyuSplash();
+        }
+        if (window.tongyuFirstFramePainted || window.tongyuFirstFrameReady) {
+          clearInterval(timer);
+          return;
+        }
+        if (tries > 150) clearInterval(timer);
+      }, 400);
+    })();
     tongyuAppendBootstrap('flutter_bootstrap.js');
     setTimeout(function () {
       if (window.tongyuFirstFrameReady || document.getElementById('tongyu-load-retry')) return;
+      window.tongyuKickstartMain();
       const status = document.getElementById('tongyu-start-status');
       if (status) {
         status.textContent = '连接时间较长，请检查网络。正在继续尝试连接…';
@@ -175,6 +219,7 @@
     }, 8000);
     setTimeout(function () {
       if (window.tongyuFirstFrameReady) return;
+      window.tongyuKickstartMain();
       // 只在第一次脚本没跑起来时软重试。解析到一半再注入会重复声明变量。
       if (!window.tongyuBootstrapRetried) {
         window.tongyuBootstrapRetried = true;
@@ -186,7 +231,9 @@
       }
       window.tongyuLoadingFailed();
     }, 22000);
-    setTimeout(window.tongyuLoadingFailed, 45000);
+    setTimeout(function () {
+      if (!window.tongyuFirstFrameReady) window.tongyuLoadingFailed();
+    }, 45000);
   </script>
   <script src="pwa-client.js"></script>
   <script src="push-client.js"></script>

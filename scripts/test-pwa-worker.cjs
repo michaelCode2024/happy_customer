@@ -4,11 +4,11 @@ const vm=require('node:vm'),fs=require('node:fs'),assert=require('node:assert/st
  const listeners={},storage=new Map();let network=true,skipped=false,claimed=false;
  const origin='https://test.example';
  const key=r=>new URL(typeof r==='string'?r:r.url,origin).href;
- const manifest={version:'development',assets:['/console/index.html','/console/mobile.html','/console/desktop.html','/console/main.dart.js?release=42']};
+ const manifest={version:'development',assets:['/console/index.html','/console/main.dart.js?release=42']};
  async function fetcher(request){
   if(!network)throw Error('offline');
   const u=new URL(key(request));
-  return new Response(u.pathname.endsWith('pwa-assets.json')?JSON.stringify(manifest):u.pathname.endsWith('desktop.html')?'DESKTOP SHELL':u.pathname.endsWith('mobile.html')?'MOBILE SHELL':u.pathname.endsWith('index.html')?'APP SHELL':'MAIN SCRIPT',{status:200});
+  return new Response(u.pathname.endsWith('pwa-assets.json')?JSON.stringify(manifest):u.pathname.endsWith('index.html')?'APP SHELL':'MAIN SCRIPT',{status:200});
  }
  const caches={keys:async()=>[...storage.keys()],delete:async n=>storage.delete(n),open:async n=>{
   if(!storage.has(n))storage.set(n,new Map());const rows=storage.get(n);
@@ -20,14 +20,14 @@ const vm=require('node:vm'),fs=require('node:fs'),assert=require('node:assert/st
   skipWaiting:()=>{skipped=true;},clients:{claim:async()=>{claimed=true;}},registration:{showNotification:async()=>{}}};
  vm.runInNewContext(fs.readFileSync('apps/agent_console/web/tongyu-push-sw.js','utf8'),{self,caches,fetch:fetcher,Request:class{constructor(url){this.url=key(url);}},Response,URL,Set});
  async function lifecycle(name){let promise;listeners[name]({waitUntil:p=>promise=p});await promise;}
- await lifecycle('install');assert(!skipped,'安装不能抢占当前输入');await lifecycle('activate');assert(claimed);
+ await lifecycle('install');assert(skipped,'入口更新必须 skipWaiting 尽快生效');await lifecycle('activate');assert(claimed);
  network=false;
  async function read(url,mode='cors') {let response;listeners.fetch({request:{method:'GET',url:origin+url,mode},respondWith:p=>response=p});return response;}
  const navigation=await read('/console/?surface=agent','navigate');
  assert.equal(navigation.redirected,false,'线上 index 重定向响应必须规范化后再交给导航');
  assert.equal(await navigation.text(),'APP SHELL');
- assert.equal(await (await read('/console/mobile.html#chat','navigate')).text(),'MOBILE SHELL');
- assert.equal(await (await read('/console/desktop.html?surface=platform','navigate')).text(),'DESKTOP SHELL');
+ assert.equal(await (await read('/console/desktop.html?surface=platform','navigate')).text(),'APP SHELL','旧 HTML 桌面壳书签必须回到 Flutter 入口');
+ assert.equal(await (await read('/console/mobile.html#chat','navigate')).text(),'APP SHELL','旧 HTML 手机壳书签必须回到 Flutter 入口');
  assert.equal(await read('/console/mobile-call.html','navigate'),undefined,'通话身份与信令页不能回退到离线首页');
  assert.equal(await (await read('/console/main.dart.js?release=42')).text(),'MAIN SCRIPT');
  assert.equal(await read('/api/v1/console/conversations'),undefined,'不能缓存 API');

@@ -179,7 +179,7 @@ func (a *API) adminAudit(w http.ResponseWriter, r *http.Request, p auth.Principa
 
 func (a *API) adminInboxes(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 	rows, err := a.db.Query(r.Context(), `
-		select i.id, i.name, i.public_key, i.status, i.auto_assign, i.updated_at,
+		select i.id, i.name, i.public_key, i.status, i.auto_assign, coalesce(i.auto_accept,false), i.updated_at,
 		       coalesce(i.allowed_domains, '{}'), coalesce(i.welcome_message,''), coalesce(i.offline_message,''),
 		       coalesce(s.enabled,false), coalesce(s.confidence_threshold, 0.35),
 		       (select count(*)::int from agent_inbox ai where ai.inbox_id = i.id),
@@ -197,19 +197,20 @@ func (a *API) adminInboxes(w http.ResponseWriter, r *http.Request, p auth.Princi
 	for rows.Next() {
 		var id uuid.UUID
 		var name, publicKey, status string
-		var autoAssign, aiEnabled bool
+		var autoAssign, autoAccept, aiEnabled bool
 		var updatedAt time.Time
 		var domains []string
 		var welcome, offline string
 		var threshold float64
 		var agentCount, openCount int
-		if err := rows.Scan(&id, &name, &publicKey, &status, &autoAssign, &updatedAt, &domains, &welcome, &offline,
+		if err := rows.Scan(&id, &name, &publicKey, &status, &autoAssign, &autoAccept, &updatedAt, &domains, &welcome, &offline,
 			&aiEnabled, &threshold, &agentCount, &openCount); err != nil {
 			fail(w, 500, "查询客服入口失败")
 			return
 		}
 		items = append(items, map[string]any{
-			"id": id, "name": name, "publicKey": publicKey, "status": status, "autoAssign": autoAssign,
+			"id": id, "name": name, "publicKey": publicKey, "status": status,
+			"autoAssign": autoAssign, "autoAccept": autoAccept,
 			"allowedDomains": domains, "welcomeMessage": welcome, "offlineMessage": offline,
 			"aiEnabled": aiEnabled, "confidenceThreshold": threshold,
 			"agentCount": agentCount, "openConversations": openCount, "updatedAt": updatedAt,
@@ -224,7 +225,7 @@ func (a *API) adminInbox(w http.ResponseWriter, r *http.Request, p auth.Principa
 		return
 	}
 	var name, publicKey, status string
-	var autoAssign bool
+	var autoAssign, autoAccept bool
 	var domains []string
 	var welcome, offline *string
 	var createdAt, updatedAt time.Time
@@ -234,14 +235,14 @@ func (a *API) adminInbox(w http.ResponseWriter, r *http.Request, p auth.Principa
 	var logoUrl, avatarUrl, fontFamily, customCss *string
 	var bubbleRadius *int
 	err := a.db.QueryRow(r.Context(), `
-		select i.name, i.public_key, i.status, i.auto_assign, i.allowed_domains, i.welcome_message,
+		select i.name, i.public_key, i.status, i.auto_assign, coalesce(i.auto_accept,false), i.allowed_domains, i.welcome_message,
 		       i.offline_message, i.created_at, i.updated_at,
 		       coalesce(s.enabled,false), coalesce(s.handoff_message,'正在为你转接人工客服，请稍候。'),
 		       coalesce(s.confidence_threshold, 0.35),
 		       i.logo_url, i.avatar_url, i.font_family, i.bubble_radius, i.custom_css
 		  from inbox i left join ai_setting s on s.inbox_id = i.id
 		 where i.id = $1 and i.tenant_id = $2`, id, p.TenantID).
-		Scan(&name, &publicKey, &status, &autoAssign, &domains, &welcome, &offline, &createdAt, &updatedAt,
+		Scan(&name, &publicKey, &status, &autoAssign, &autoAccept, &domains, &welcome, &offline, &createdAt, &updatedAt,
 			&aiEnabled, &handoff, &threshold, &logoUrl, &avatarUrl, &fontFamily, &bubbleRadius, &customCss)
 	if err != nil {
 		fail(w, 404, "客服入口不存在")
@@ -254,7 +255,8 @@ func (a *API) adminInbox(w http.ResponseWriter, r *http.Request, p auth.Principa
 		from routing_rule where inbox_id = $1 and tenant_id = $2`, id, p.TenantID).
 		Scan(&strategy, &fixedAgent, &maxConcurrent, &acceptanceTimeout)
 	respond(w, 200, map[string]any{
-		"id": id, "name": name, "publicKey": publicKey, "status": status, "autoAssign": autoAssign,
+		"id": id, "name": name, "publicKey": publicKey, "status": status,
+		"autoAssign": autoAssign, "autoAccept": autoAccept,
 		"allowedDomains": domains, "welcomeMessage": welcome, "offlineMessage": offline,
 		"aiEnabled": aiEnabled, "handoffMessage": handoff, "confidenceThreshold": threshold,
 		"logoUrl": logoUrl, "avatarUrl": avatarUrl, "fontFamily": fontFamily, "bubbleRadius": bubbleRadius, "customCss": customCss,
@@ -275,6 +277,7 @@ func (a *API) adminCreateInbox(w http.ResponseWriter, r *http.Request, p auth.Pr
 		WelcomeMessage string   `json:"welcomeMessage"`
 		OfflineMessage string   `json:"offlineMessage"`
 		AutoAssign     *bool    `json:"autoAssign"`
+		AutoAccept     *bool    `json:"autoAccept"`
 		LogoURL        string   `json:"logoUrl"`
 		AvatarURL      string   `json:"avatarUrl"`
 		FontFamily     string   `json:"fontFamily"`
@@ -300,6 +303,10 @@ func (a *API) adminCreateInbox(w http.ResponseWriter, r *http.Request, p auth.Pr
 	if in.AutoAssign != nil {
 		autoAssign = *in.AutoAssign
 	}
+	autoAccept := false
+	if in.AutoAccept != nil {
+		autoAccept = *in.AutoAccept
+	}
 	if in.AllowedDomains == nil {
 		in.AllowedDomains = []string{}
 	}
@@ -308,10 +315,10 @@ func (a *API) adminCreateInbox(w http.ResponseWriter, r *http.Request, p auth.Pr
 		return
 	}
 	id := uuid.New()
-	if _, err := a.db.Exec(r.Context(), `insert into inbox(id, tenant_id, name, public_key, status, auto_assign,
+	if _, err := a.db.Exec(r.Context(), `insert into inbox(id, tenant_id, name, public_key, status, auto_assign, auto_accept,
 			allowed_domains, welcome_message, offline_message, logo_url, avatar_url, font_family, bubble_radius, custom_css)
-		values($1,$2,$3,$4,'ACTIVE',$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-		id, p.TenantID, in.Name, publicKey, autoAssign, in.AllowedDomains,
+		values($1,$2,$3,$4,'ACTIVE',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+		id, p.TenantID, in.Name, publicKey, autoAssign, autoAccept, in.AllowedDomains,
 		nullable(in.WelcomeMessage), nullable(in.OfflineMessage),
 		nullable(in.LogoURL), nullable(in.AvatarURL), nullable(in.FontFamily), in.BubbleRadius, nullable(in.CustomCSS)); err != nil {
 		if isUniqueViolation(err) {
@@ -345,6 +352,7 @@ func (a *API) adminUpdateInbox(w http.ResponseWriter, r *http.Request, p auth.Pr
 		WelcomeMessage *string  `json:"welcomeMessage"`
 		OfflineMessage *string  `json:"offlineMessage"`
 		AutoAssign     *bool    `json:"autoAssign"`
+		AutoAccept     *bool    `json:"autoAccept"`
 		LogoURL        *string  `json:"logoUrl"`
 		AvatarURL      *string  `json:"avatarUrl"`
 		FontFamily     *string  `json:"fontFamily"`
@@ -385,15 +393,16 @@ func (a *API) adminUpdateInbox(w http.ResponseWriter, r *http.Request, p auth.Pr
 		    welcome_message = coalesce($6, welcome_message),
 		    offline_message = coalesce($7, offline_message),
 		    auto_assign = coalesce($8, auto_assign),
-		    logo_url = coalesce($9, logo_url),
-		    avatar_url = coalesce($10, avatar_url),
-		    font_family = coalesce($11, font_family),
-		    bubble_radius = coalesce($12, bubble_radius),
-		    custom_css = coalesce($13, custom_css),
+		    auto_accept = coalesce($9, auto_accept),
+		    logo_url = coalesce($10, logo_url),
+		    avatar_url = coalesce($11, avatar_url),
+		    font_family = coalesce($12, font_family),
+		    bubble_radius = coalesce($13, bubble_radius),
+		    custom_css = coalesce($14, custom_css),
 		    updated_at = now()
 		where id = $1 and tenant_id = $2`,
 		id, p.TenantID, in.Name, status, in.AllowedDomains,
-		nullableIfSet(in.WelcomeMessage), nullableIfSet(in.OfflineMessage), in.AutoAssign,
+		nullableIfSet(in.WelcomeMessage), nullableIfSet(in.OfflineMessage), in.AutoAssign, in.AutoAccept,
 		nullableIfSet(in.LogoURL), nullableIfSet(in.AvatarURL), nullableIfSet(in.FontFamily),
 		in.BubbleRadius, nullableIfSet(in.CustomCSS)); err != nil {
 		fail(w, 500, "更新客服入口失败")
@@ -633,7 +642,7 @@ func (a *API) adminSnippet(w http.ResponseWriter, r *http.Request, p auth.Princi
 		html.EscapeString(base) + "\" data-inbox-key=\"" + html.EscapeString(publicKey) + "\"></script>"
 	// 宿主项目用 iframe 嵌 H5：宽高由父页控制；parentOrigin 限制 postMessage 目标。
 	iframeTag := `<iframe src="` + html.EscapeString(h5URL) + `?parentOrigin=*"` +
-		` title="语聊客服" style="border:0;width:100%;height:100%;min-height:520px" allow="microphone;clipboard-write"></iframe>`
+		` title="通语客服" style="border:0;width:100%;height:100%;min-height:520px" allow="microphone;clipboard-write"></iframe>`
 	respond(w, 200, map[string]any{
 		"inboxKey":    publicKey,
 		"script":      snippet,

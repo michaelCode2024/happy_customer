@@ -18,6 +18,8 @@ self.addEventListener('install', event => event.waitUntil((async () => {
   // 完整下载成功才完成安装，避免页面半更新、离线时缺少主脚本或字体。
   await cache.addAll(manifest.assets.map(url => new Request(url, {cache:'reload'})));
   await cache.put('/console/pwa-assets.json',response);
+  // 入口与壳资源必须尽快生效，不能等用户点「更新」才换掉旧缓存。
+  await self.skipWaiting();
 })()));
 self.addEventListener('activate', event => event.waitUntil((async () => {
   for (const name of await caches.keys()) {
@@ -37,10 +39,18 @@ self.addEventListener('fetch', event => {
   event.respondWith((async () => {
     const cache=await caches.open(SHELL_CACHE);
     if (request.mode==='navigate') {
-      // 固定入口由当前完整版本提供；查询参数仍由客户端解释，不缓存登录/API响应。
-      const entry=await cache.match(url.pathname==='/console/mobile.html'?'/console/mobile.html':url.pathname==='/console/desktop.html'?'/console/desktop.html':'/console/index.html');
-      // Go 静态服务会把 index.html 重定向到目录；缓存响应携带 redirected
-      // 标记时不能直接用于 manual 导航，重建同源正文响应以兼容线上入口。
+      // 工作台唯一入口是 Flutter index；旧 desktop/mobile HTML 书签也回落到这里。
+      const entryPath='/console/index.html';
+      // 导航网络优先：避免旧壳长期挡住 Flutter 登录入口。
+      try {
+        const fresh=await fetch(entryPath, {cache:'no-store'});
+        if (fresh.ok) {
+          const copy=fresh.clone();
+          cache.put(entryPath, copy).catch(()=>{});
+          return fresh;
+        }
+      } catch (_) {}
+      const entry=await cache.match(entryPath);
       if (entry) return new Response(entry.body, {status:entry.status,statusText:entry.statusText,headers:entry.headers});
       return fetch(request);
     }

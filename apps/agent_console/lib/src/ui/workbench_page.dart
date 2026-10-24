@@ -11,6 +11,7 @@ import 'notification_center.dart';
 import '../util/push_bridge_stub.dart'
     if (dart.library.html) '../util/push_bridge_web.dart';
 import '../util/website.dart';
+import 'package:tongyu_agent_console/src/util/app_update.dart';
 import 'dart:async';
 import 'package:tongyu_agent_console/src/ui/overview_page.dart';
 import 'package:tongyu_agent_console/src/ui/brand.dart';
@@ -133,6 +134,14 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     unawaited(_openInitialConversation());
     unawaited(_workbench.loadReferenceData());
     unawaited(_loadMenuConfig());
+    // 安卓安装包登录后检查 /downloads/release.json；Web / PWA 走各自更新通道。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(promptAndroidAppUpdateIfNeeded(
+        context,
+        serverBase: widget.session.api.server,
+      ));
+    });
   }
 
   Future<void> _openInitialConversation() async {

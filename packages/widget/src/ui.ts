@@ -62,6 +62,21 @@ function formatText(value: string): string {
     .replace(/\n/g, '<br>');
 }
 
+/** 自动回复：首段作结论，其余作分点，避免整段灰字像系统公告。 */
+function formatAutomationBody(value: string): string {
+  const parts = value
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return '';
+  const lead = parts[0] ?? '';
+  if (parts.length === 1) return `<p class="rd-auto-lead">${formatText(lead)}</p>`;
+  const steps = parts.slice(1);
+  return `<p class="rd-auto-lead"><strong>${escapeHtml(lead)}</strong></p><ul class="rd-auto-steps">${steps
+    .map((step) => `<li>${escapeHtml(step)}</li>`)
+    .join('')}</ul>`;
+}
+
 /**
  * Renders a server-built excerpt. The server wraps each matched term in << >>,
  * having run the same tokenizer that indexed the message, so the highlight is
@@ -273,7 +288,7 @@ export class WidgetView {
         <div class="rd-header-main">
           <span class="rd-avatar">${this.#brandImg(ICONS.chat, true)}</span>
           <div class="rd-heading">
-            <strong>${escapeHtml(this.#options.embedded && this.#options.title === '语聊客服' ? '在线客服' : this.#options.title)}</strong>
+            <strong>${escapeHtml(this.#options.embedded && this.#options.title === '通语客服' ? '在线客服' : this.#options.title)}</strong>
             <span class="rd-service-subtitle">${escapeHtml(this.#options.subtitle)}</span>
             <span class="rd-subtitle"></span>
           </div>
@@ -748,10 +763,10 @@ export class WidgetView {
   }
 
   #welcomeHtml(snapshot: Snapshot): string {
-    // 欢迎标题跟渠道名走，避免 H5 已改渠道标题却仍写死「语聊客服」。
+    // 欢迎标题跟渠道名走，避免 H5 已改渠道标题却仍写死「通语客服」。
     const brand =
       snapshot.automation?.channelTitle ||
-      (this.#options.embedded && this.#options.title === '语聊客服' ? '在线客服' : this.#options.title);
+      (this.#options.embedded && this.#options.title === '通语客服' ? '在线客服' : this.#options.title);
     return `<div class="rd-empty">
       <span class="rd-avatar lg">${this.#brandImg(ICONS.headset, false)}</span>
       <div class="rd-welcome-body"><strong>您好，欢迎来到${escapeHtml(brand)}！</strong><p>${escapeHtml(snapshot.automation?.openReply || snapshot.welcomeMessage || '我们很高兴为您服务，请问有什么可以帮您？')}</p>${this.#welcomeSuggestions(snapshot)}</div>
@@ -780,7 +795,7 @@ export class WidgetView {
     if(!panel){panel=document.createElement('div');panel.className='rd-channel';this.#messagesNode?.after(panel);}
     const c=snapshot.automation;if(!c){panel.hidden=true;return;}
     const title=this.#root.querySelector<HTMLElement>('.rd-heading strong');
-    if(title)title.textContent=c.channelTitle || (this.#options.embedded && this.#options.title === '语聊客服' ? '在线客服' : this.#options.title);
+    if(title)title.textContent=c.channelTitle || (this.#options.embedded && this.#options.title === '通语客服' ? '在线客服' : this.#options.title);
     if(c.channelTitle)this.#root.querySelector('.rd-panel')?.setAttribute('aria-label',c.channelTitle);
     const items=[...(c.menuItems??[]),...(c.quickLinks??[]),...(c.diversionLinks??[])];
     panel.innerHTML=`<div class="rd-channel-row">${items.map(i=>this.#channelItemHtml(i)).join('')}</div>`;
@@ -876,6 +891,22 @@ export class WidgetView {
   #messageHtml(snapshot: Snapshot, message: ChatMessage): string {
     const mine = message.senderType === 'VISITOR';
     const system = message.senderType === 'SYSTEM';
+    const automation = system && message.metadata?.automation === true;
+    // 自动回复按友商（美洽等）做法：与客服消息同一行布局——客服头像 + 气泡，
+    // 仅加「自动回复」角标；系统灰字只留给分配/转接等状态事件。
+    if (automation) {
+      const name = this.#automationSenderName(snapshot, message);
+      return `<div class="rd-row rd-msg is-theirs is-auto">
+        ${this.#peerAvatarHtml()}
+        <div class="rd-bubble-group">
+          <span class="rd-sender">${escapeHtml(name)}<span class="rd-auto-badge">自动回复</span></span>
+          <div class="rd-bubble-wrap">
+            <div class="rd-bubble is-auto">${formatAutomationBody(message.content)}</div>
+          </div>
+          <span class="rd-time">${escapeHtml(timeLabel(message.createdAt))}</span>
+        </div>
+      </div>`;
+    }
     if (system) {
       return `<div class="rd-sys">${formatText(message.content)}</div>`;
     }
@@ -913,10 +944,11 @@ export class WidgetView {
           : message.attachments?.length
             ? '[文件]'
             : '');
+    const peerName = mine ? '' : this.#peerSenderName(snapshot, message);
     return `<div class="rd-row rd-msg ${mine ? 'is-mine' : 'is-theirs'}${isAI ? ' is-ai' : ''}" data-message="${escapeAttr(message.id)}" data-copy="${escapeAttr(copyText)}">
-      ${mine ? '' : `<span class="rd-avatar sm">${this.#brandImg(ICONS.chat, false)}</span>`}
+      ${mine ? '' : this.#peerAvatarHtml()}
       <div class="rd-bubble-group">
-        ${mine || !message.senderName ? '' : `<span class="rd-sender">${escapeHtml(message.senderName)}${aiBadge}</span>`}
+        ${mine || !peerName ? '' : `<span class="rd-sender">${escapeHtml(peerName)}${aiBadge}</span>`}
         <div class="rd-bubble-wrap">
           <div class="rd-bubble">${quote}${forward}${this.#bodyHtml(message)}</div>
           <button type="button" class="rd-quote-btn" data-quote="${escapeAttr(message.id)}" title="引用回复">${ICONS.quote}</button>
@@ -1510,6 +1542,58 @@ export class WidgetView {
     return `<img class="rd-brand-img" src="${escapeAttr(src)}" alt="">`;
   }
 
+  /** 客服侧头像：自动回复与人工消息共用，优先入口 avatarUrl / logoUrl。 */
+  #peerAvatarHtml(): string {
+    return `<span class="rd-avatar sm">${this.#brandImg(ICONS.headset, false)}</span>`;
+  }
+
+  /** 产品内部称呼，不能出现在访客侧回复人名。 */
+  #isProductSenderName(name: string): boolean {
+    const n = name.trim();
+    if (!n) return true;
+    return (
+      n === '通语助手' ||
+      n === '语聊助手' ||
+      n === '通语客服' ||
+      n === '语聊客服' ||
+      n === 'AI 助手' ||
+      n === 'AI助手' ||
+      n === '客服助手'
+    );
+  }
+
+  /** 嵌入方对外名称：渠道标题 → 入口标题 →「在线客服」。 */
+  #embedSenderName(snapshot: Snapshot): string {
+    const channel = snapshot.automation?.channelTitle?.trim() || '';
+    if (channel && !this.#isProductSenderName(channel)) {
+      return channel;
+    }
+    const title = this.#options.title?.trim() || '';
+    if (title && !this.#isProductSenderName(title)) {
+      return title;
+    }
+    return '在线客服';
+  }
+
+  /** 自动回复展示名：嵌入给谁就显示谁，不用产品品牌名。 */
+  #automationSenderName(snapshot: Snapshot, message: ChatMessage): string {
+    const meta =
+      typeof message.metadata?.senderName === 'string' ? message.metadata.senderName.trim() : '';
+    if (meta && !this.#isProductSenderName(meta)) {
+      return meta;
+    }
+    return this.#embedSenderName(snapshot);
+  }
+
+  /** 人工 / AI 消息：真人姓名保留；产品内部名换成嵌入方名称。 */
+  #peerSenderName(snapshot: Snapshot, message: ChatMessage): string {
+    const raw = message.senderName?.trim() || '';
+    if (raw && !this.#isProductSenderName(raw)) {
+      return raw;
+    }
+    return this.#embedSenderName(snapshot);
+  }
+
   #styles(): string {
     const light = this.#options.theme !== 'dark';
     const accent = this.#options.primaryColor;
@@ -1549,8 +1633,10 @@ export class WidgetView {
 }
 .rd-panel[hidden] { display: none; }
 ${this.#options.embedded ? `
+/* 嵌入 iframe 时必须跟宿主盒子走 100%，不能用 vw/vh/dvh：
+   宿主（尤其 Flutter Web）常把 iframe 裁成安全区高度，dvh 仍按整屏算会导致
+   内部布局比看得见的区域更高，常见问题按钮和输入框都点空。 */
 .rd-panel-slot, .rd-panel { top: 0; right: 0; bottom: 0; left: 0; width: 100%; max-width: none; height: 100%; max-height: none; border: 0; border-radius: 0; box-shadow: none; }
-@media (max-width: 480px) { .rd-panel { height: 100dvh; } }
 ` : ''}
 .rd-header {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
@@ -1571,7 +1657,7 @@ ${this.#options.embedded ? `
 .rd-avatar svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; }
 .rd-avatar.lg { width: 52px; height: 52px; background: ${accent}1a; color: ${accent}; }
 .rd-avatar.lg svg { width: 26px; height: 26px; }
-.rd-avatar.sm { width: 28px; height: 28px; background: ${accent}1a; color: ${accent}; align-self: flex-end; }
+.rd-avatar.sm { width: 28px; height: 28px; background: color-mix(in srgb, var(--rd-accent, ${accent}) 10%, transparent); color: var(--rd-accent, ${accent}); align-self: flex-end; }
 .rd-avatar.sm svg { width: 15px; height: 15px; }
 .rd-brand-img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
 .rd-launcher-logo { width: 24px; height: 24px; border-radius: 6px; object-fit: cover; display: block; }
@@ -1594,7 +1680,7 @@ ${this.#options.embedded ? `
 .rd-messages { background: ${light ? '#f7f8fa' : '#171b24'}; flex: 1; overflow-y: auto; padding: 20px 18px 12px; display: flex; flex-direction: column; gap: 16px; scrollbar-width: thin; }
 .rd-messages::-webkit-scrollbar { width: 6px; }
 .rd-messages::-webkit-scrollbar-thumb { background: ${light ? '#d1d5db' : '#4b5563'}; border-radius: 3px; }
-.rd-channel {padding:10px 16px;border-top:1px solid #edf0f5;background:${light ? '#fff' : '#1f2937'};max-height:104px;overflow:auto;flex-shrink:0}.rd-channel[hidden]{display:none}.rd-channel-row{display:flex;gap:8px;flex-wrap:wrap}.rd-channel-chip{font:inherit;font-size:12px;color:#3370ff;background:#f0f5ff;border:0;border-radius:6px;padding:7px 10px;text-decoration:none;cursor:pointer}.rd-welcome-suggestions{margin:12px 0 20px 38px}.rd-guide-title{color:#6b7280;font-size:12px;margin-bottom:8px}.rd-channel-card{display:flex;gap:12px;border:1px solid #edf0f5;border-radius:8px;padding:12px;margin:8px 0}.rd-channel-card img{width:56px;height:56px;object-fit:cover;border-radius:6px}.rd-channel-card p{font-size:12px;color:#6b7280;margin:5px 0}.rd-empty { display: flex; align-items: flex-start; gap: 10px; color: inherit; padding: 12px 0; }
+.rd-channel {padding:10px 16px;border-top:1px solid #edf0f5;background:${light ? '#fff' : '#1f2937'};max-height:104px;overflow:auto;flex-shrink:0}.rd-channel[hidden]{display:none}.rd-channel-row{display:flex;gap:8px;flex-wrap:wrap}.rd-channel-chip{font:inherit;font-size:12px;color:#3370ff;background:#f0f5ff;border:0;border-radius:6px;padding:7px 10px;text-decoration:none;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}.rd-welcome-suggestions{margin:12px 0 20px 38px}.rd-guide-title{color:#6b7280;font-size:12px;margin-bottom:8px}.rd-channel-card{display:flex;gap:12px;border:1px solid #edf0f5;border-radius:8px;padding:12px;margin:8px 0}.rd-channel-card img{width:56px;height:56px;object-fit:cover;border-radius:6px}.rd-channel-card p{font-size:12px;color:#6b7280;margin:5px 0}.rd-empty { display: flex; align-items: flex-start; gap: 10px; color: inherit; padding: 12px 0; }
 .rd-empty p { margin: 0; max-width: 280px; line-height: 1.8; padding: 12px 14px; border-radius: 3px 12px 12px; background: ${light ? '#ffffff' : '#1f2937'}; border: 1px solid ${light ? '#eef0f1' : '#374151'}; }
 .rd-empty small { display: block; max-width: 280px; margin-top: 12px; font-size: 11px; line-height: 1.7; color: ${light ? '#858d97' : '#a8aebb'}; }
 .rd-empty .rd-avatar { align-self: flex-start; }
@@ -1716,6 +1802,16 @@ ${this.#options.embedded ? `
 .rd-receipt svg { width: 13px; height: 13px; display: block; }
 .rd-receipt.is-read { color: ${accent}; }
 .rd-sys { align-self: center; font-size: 12px; color: ${light ? '#8c93a3' : '#8b91a0'}; background: ${light ? '#f5f6f8' : '#23262d'}; padding: 3px 8px; border-radius: 4px; }
+/* 自动回复角标/气泡跟入口主色走（含白标 --rd-accent），不用写死通语蓝。 */
+.rd-auto-badge { display: inline-flex; align-items: center; margin-left: 6px; font-size: 10.5px; font-weight: 600; color: var(--rd-accent-ink, var(--rd-accent, ${accent})); background: color-mix(in srgb, var(--rd-accent, ${accent}) 22%, ${light ? '#ffffff' : '#171b24'}); border-radius: 999px; padding: 1px 7px; vertical-align: middle; }
+.rd-bubble.is-auto { background: color-mix(in srgb, var(--rd-accent, ${accent}) 18%, ${light ? '#ffffff' : '#171b24'}); border: 1px solid color-mix(in srgb, var(--rd-accent, ${accent}) 28%, transparent); color: var(--rd-accent-ink, ${light ? '#0c1d40' : '#e8eefc'}); }
+.rd-auto-lead { margin: 0 0 8px; font-size: 13.5px; line-height: 1.55; }
+.rd-auto-lead:last-child { margin-bottom: 0; }
+.rd-auto-steps { list-style: none; margin: 0; padding: 0; }
+.rd-auto-steps li { position: relative; padding: 6px 0 6px 16px; font-size: 12.5px; line-height: 1.5; border-top: 1px solid color-mix(in srgb, var(--rd-accent, ${accent}) 14%, transparent); color: var(--rd-accent-ink, ${light ? '#3d4b62' : '#c5d0e8'}); opacity: .92; }
+.rd-auto-steps li:first-child { border-top: 0; padding-top: 0; }
+.rd-auto-steps li::before { content: ""; position: absolute; left: 0; top: 12px; width: 7px; height: 7px; border-radius: 50%; background: var(--rd-accent, ${accent}); opacity: .55; }
+.rd-auto-steps li:first-child::before { top: 6px; }
 .rd-row.is-flash .rd-bubble { outline: 2px solid ${accent}88; }
 .rd-pinned { display: flex; align-items: center; gap: 8px; margin: 8px 12px 0; padding: 6px 10px; border-radius: 10px; background: ${light ? '#f5f7fb' : '#23262d'}; font-size: 12px; color: ${light ? '#5b6172' : '#a8aebb'}; }
 .rd-pinned[hidden] { display: none; }
@@ -1823,7 +1919,8 @@ ${this.#options.embedded ? `
 .rd-star svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; }
 .rd-star:hover svg, .rd-star:hover ~ .rd-star svg { fill: #fbbf24; stroke: #fbbf24; }
 @media (max-width: 480px) {
-  .rd-panel { ${side}: 0; bottom: 0; width: 100vw; height: 100vh; height: 100dvh; max-width: none; border-radius: 0; border: 0; }
+  /* 仅非嵌入浮层用 vw/dvh 铺满手机屏；嵌入态保持上面的 100%。 */
+  .rd-panel:not(.is-embedded) { ${side}: 0; bottom: 0; width: 100vw; height: 100vh; height: 100dvh; max-width: none; border-radius: 0; border: 0; }
   .rd-launcher-slot { ${side}: 16px; bottom: 16px; }
 }
 ${light ? `
@@ -1856,7 +1953,7 @@ ${this.#options.launcher === 'bubble' ? '.rd-launcher-label { display: none; }' 
 .rd-channel-chip:hover { background: ${accent}0d; }
 .rd-channel-card { border-color: #E5E8EF; border-radius: 10px; }
 .rd-row { align-items: flex-start; gap: 8px; }
-.rd-avatar.sm { width: 32px; height: 32px; border-radius: 50%; align-self: flex-start; background: ${accent}15; color: ${accent}; }
+.rd-avatar.sm { width: 32px; height: 32px; border-radius: 50%; align-self: flex-start; background: color-mix(in srgb, var(--rd-accent, ${accent}) 12%, transparent); color: var(--rd-accent, ${accent}); }
 .rd-avatar.sm svg { width: 20px; height: 20px; }
 .rd-bubble-group { max-width: calc(100% - 44px); gap: 4px; }
 .rd-row.is-mine .rd-bubble-group { max-width: 85%; }

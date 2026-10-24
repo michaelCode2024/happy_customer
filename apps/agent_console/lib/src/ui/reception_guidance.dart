@@ -19,9 +19,11 @@ class ReceptionGuidance extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final dark = Theme.of(context).brightness == Brightness.dark;
     final notice = workbench.receptionNotice;
     final waiting = workbench.receptionWaiting;
+    // Build the label explicitly so web semantics never drop the digit.
+    final waitingLabel =
+        '有 ${waiting.toString()} 位客户正在等待接待';
     // 同一时刻只留一条接待提示：有等待人数时用顶栏，右下角卡片让开；
     // 标记解决的反馈条出现时也先藏起卡片，避免挡住会话操作。
     final showTopBanner = waiting > 0;
@@ -41,13 +43,9 @@ class ReceptionGuidance extends StatelessWidget {
               margin: const EdgeInsets.all(12),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                  color:
-                      dark ? const Color(0xFF392C1B) : const Color(0xFFFFF6E9),
+                  color: const Color(0xFFFFF6E9),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                      color: dark
-                          ? const Color(0xFF68502D)
-                          : const Color(0xFFF0DBB8))),
+                  border: Border.all(color: const Color(0xFFF0DBB8))),
               child: Wrap(
                   alignment: WrapAlignment.spaceBetween,
                   crossAxisAlignment: WrapCrossAlignment.center,
@@ -57,7 +55,9 @@ class ReceptionGuidance extends StatelessWidget {
                     Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('有 $waiting 位客户正在等待接待',
+                          Text(waitingLabel,
+                              key: ValueKey<String>('reception-waiting-count-$waiting'),
+                              semanticsLabel: waitingLabel,
                               style: TextStyle(
                                   fontWeight: FontWeight.w700,
                                   color: colors.onSurface)),
@@ -157,46 +157,88 @@ class ReceptionGuidance extends StatelessWidget {
 
 }
 
-/// 在原有输入区上方直接提供接单操作，内部备注及未发送草稿继续保留。
+/// 待接待底部操作坞：单行文案 + 写备注 / 开始接待，替代高大卡与禁用输入区。
 class ReceptionAction extends StatelessWidget {
-  const ReceptionAction(
-      {super.key,
-      required this.conversation,
-      required this.busy,
-      required this.onClaim});
+  const ReceptionAction({
+    super.key,
+    required this.conversation,
+    required this.busy,
+    required this.onClaim,
+    this.onWriteNote,
+  });
+
   final Conversation conversation;
   final bool busy;
   final VoidCallback onClaim;
+  final VoidCallback? onWriteNote;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final waitingAccept = conversation.needsAcceptance;
     return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        decoration: BoxDecoration(
-            color: colors.primaryContainer.withOpacity(.25),
-            border: Border(top: BorderSide(color: colors.outlineVariant))),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(conversation.needsAcceptance ? '这位客户已分配给你，等待确认接单' : '这位客户正在等你回应',
-              style: const TextStyle(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 5),
-          Text(
-              conversation.needsAcceptance
-                  ? '确认后即可回复客户，请及时接单。'
-                  : '点击开始接待，将会话分配给自己，即可回复客户。',
-              style: TextStyle(fontSize: 12, color: colors.onSurfaceVariant)),
-          const SizedBox(height: 10),
-          FilledButton.icon(
-              onPressed: busy ? null : onClaim,
-              icon: busy
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.support_agent, size: 18),
-              label: Text(
-                  busy ? '正在接待…' : '${conversation.receptionActionLabel}并回复')),
-        ]));
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        border: Border(top: BorderSide(color: colors.outlineVariant)),
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            colors.primaryContainer.withOpacity(0.22),
+            colors.surface,
+          ],
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  waitingAccept ? '请确认接单' : '客户正在等待',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13.5,
+                    height: 1.3,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  waitingAccept
+                      ? '确认后即可回复客户；内部备注可先写'
+                      : '开始接待后即可回复；内部备注可先写',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    height: 1.35,
+                    color: colors.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (onWriteNote != null) ...[
+            TextButton(
+              onPressed: busy ? null : onWriteNote,
+              child: const Text('写备注'),
+            ),
+            const SizedBox(width: 4),
+          ],
+          FilledButton(
+            onPressed: busy ? null : onClaim,
+            child: busy
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Text('${conversation.receptionActionLabel}并回复'),
+          ),
+        ],
+      ),
+    );
   }
 }

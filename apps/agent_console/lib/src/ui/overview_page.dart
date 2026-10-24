@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:tongyu_agent_console/src/theme.dart';
 import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
 import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
 
@@ -165,11 +166,7 @@ class OverviewPage extends StatelessWidget {
             : '客户从已接入的网站发来消息后，会先进入待领取队列。';
     return Container(
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF2F5BFF), Color(0xFF4B7BFF)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        gradient: RelayTheme.actionGradient,
         borderRadius: BorderRadius.circular(WbTokens.cardRadius),
         boxShadow: [
           BoxShadow(
