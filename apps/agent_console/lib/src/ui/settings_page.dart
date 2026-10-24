@@ -248,7 +248,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '在线时可以收到新的会话分配，仍需确认接单。离开或离线后不再自动分配新会话，已接待的会话保留。',
+                  _presenceHint(session),
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -354,8 +354,28 @@ class _SettingsPageState extends State<SettingsPage> {
                     title: Text(inbox.name),
                     subtitle: Text(
                       '标识 ${inbox.publicKey}'
-                      '${inbox.autoAssign ? (inbox.autoAccept ? ' · 自动分配并接单' : ' · 自动分配') : ''}'
+                      '${inbox.autoAssign ? (inbox.autoAccept ? ' · 自动分配并接单' : ' · 自动分配（仍需点接单）') : ' · 人工领取'}'
                       '${inbox.aiEnabled ? ' · AI 已开启' : ''}',
+                    ),
+                  ),
+                if (session.agent?.role == 'SUPERVISOR')
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      '要改「分配后自动接单」：打开「企业管理 → 客服入口」，点对应入口编辑。',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  )
+                else
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      '「分配后自动接单」由企业主管在「企业管理 → 客服入口」中配置。',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
               ],
@@ -601,6 +621,20 @@ class _SettingsPageState extends State<SettingsPage> {
     if (confirmed == true) {
       await widget.session.logout();
     }
+  }
+
+  /// 按已加入入口的 autoAccept 说明当前是否还要点「开始接待」。
+  String _presenceHint(SessionController session) {
+    final inboxes = session.inboxes;
+    if (inboxes.isEmpty) {
+      return '在线时可被分配新会话。离开或离线后不再自动分配，已接待的会话保留。';
+    }
+    final allAutoAccept =
+        inboxes.every((inbox) => inbox.autoAssign && inbox.autoAccept);
+    if (allAutoAccept) {
+      return '在线时新会话会自动分到并接单，可直接回复。离开或离线后不再自动分配，已接待的会话保留。';
+    }
+    return '在线时可收到新会话分配；若入口未开「分配后自动接单」，仍需点一次接单。离开或离线后不再自动分配，已接待的会话保留。';
   }
 
   static String _roleLabel(String role) => switch (role) {

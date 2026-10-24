@@ -184,7 +184,8 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
               Tab(text: '套餐与用量'),
               Tab(text: '操作记录'),
               Tab(text: '团队素材'),
-              Tab(text: '自动接待')
+              // 与「入口分配后自动接单」区分：本页是关键词/欢迎语等自动回复规则。
+              Tab(text: '自动回复')
             ])),
         body: _loading
             ? const Center(child: CircularProgressIndicator())
@@ -417,7 +418,11 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
     );
   }
   Widget _inboxList() => ListView(padding: const EdgeInsets.only(bottom: 20), children: [
-        _heading('客服入口', '每个入口单独设置接待文案、允许域名和自动分配规则。', '创建入口', () => _inbox()),
+        _heading(
+            '客服入口',
+            '每个入口单独设置接待文案、允许域名，以及「自动分配 / 分配后自动接单」（点进入口编辑）。',
+            '创建入口',
+            () => _inbox()),
         for (final inbox in _inboxes)
           Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
@@ -427,7 +432,7 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
                   icon: Icons.chat_bubble_outline_rounded,
                   title: asString(inbox['name']),
                   subtitle:
-                      '${inbox['publicKey']} · ${inbox['autoAssign'] == true ? (inbox['autoAccept'] == true ? '自动分配并接单' : '自动分配') : '人工领取'}',
+                      '${inbox['publicKey']} · ${inbox['autoAssign'] == true ? (inbox['autoAccept'] == true ? '自动分配并接单' : '自动分配（仍需点接单）') : '人工领取'}',
                   trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                     WorkspaceTag(
                         text: inbox['status'] == 'ACTIVE' ? '已启用' : '已停用',

@@ -33,6 +33,7 @@ import 'package:tongyu_agent_console/src/ui/stats_page.dart';
 import 'package:tongyu_agent_console/src/ui/visitor_sidebar.dart';
 import 'package:tongyu_agent_console/src/ui/conversation_context_panel.dart';
 import 'package:tongyu_agent_console/src/util/attachment_picker.dart';
+import 'package:tongyu_agent_console/src/util/browser_history.dart';
 import 'package:tongyu_agent_console/src/util/voice_player.dart';
 
 /// The console's top-level sections.
@@ -1145,21 +1146,41 @@ class MobileConversationFlow extends StatefulWidget {
 class MobileConversationFlowState extends State<MobileConversationFlow> {
   bool _scheduled = false;
   Route<void>? _threadRoute;
+  final _browserHistory = BrowserHistoryGate();
+  StreamSubscription<void>? _browserBack;
+
   @override
   void initState() {
     super.initState();
     widget.workbench.addListener(_selectionChanged);
+    // iPhone 主屏幕 PWA 边缘滑动走 popstate；与左上角返回共用同一条 Navigator 栈。
+    _browserBack = _browserHistory.listen(_onBrowserBack);
     _selectionChanged();
   }
 
   @override
   void dispose() {
     widget.workbench.removeListener(_selectionChanged);
+    _browserBack?.cancel();
     final route = _threadRoute;
-    if (route != null) WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (route.isActive) route.navigator?.removeRoute(route);
-    });
+    if (route != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (route.isActive) route.navigator?.removeRoute(route);
+      });
+    }
     super.dispose();
+  }
+
+  void _onBrowserBack() {
+    if (!mounted) return;
+    final route = _threadRoute;
+    if (route != null && route.isCurrent) {
+      route.navigator?.maybePop();
+      return;
+    }
+    // 客户资料等子页：只退当前 Navigator 顶层。
+    final nav = Navigator.of(context);
+    if (nav.canPop()) nav.maybePop();
   }
 
   void _selectionChanged() {
@@ -1173,28 +1194,40 @@ class MobileConversationFlowState extends State<MobileConversationFlow> {
         return;
       }
       if (_threadRoute != null) return;
+      final conversationId = widget.workbench.selectedId!;
       final route = MaterialPageRoute<void>(
-          settings: RouteSettings(
-              name: '/conversation/${widget.workbench.selectedId}'),
+          settings: RouteSettings(name: '/conversation/$conversationId'),
           builder: (routeContext) => Scaffold(
                 body: ChatPanel(
                   workbench: widget.workbench,
                   picker: widget.picker,
                   showInlineAssist: false,
                   onBack: () => Navigator.of(routeContext).maybePop(),
-                  onOpenProfile: () => Navigator.of(routeContext).push(
+                  onOpenProfile: () {
+                    // 客户资料也压一层历史，边缘滑动先关资料再回列表。
+                    _browserHistory.push('profile/$conversationId');
+                    Navigator.of(routeContext)
+                        .push(
                       MaterialPageRoute<void>(
-                          builder: (_) => Scaffold(
-                              appBar: AppBar(title: const Text('客户资料')),
-                              body: VisitorSidebar(
-                                  workbench: widget.workbench)))),
+                        settings: RouteSettings(
+                            name: '/conversation/$conversationId/profile'),
+                        builder: (_) => Scaffold(
+                          appBar: AppBar(title: const Text('客户资料')),
+                          body: VisitorSidebar(workbench: widget.workbench),
+                        ),
+                      ),
+                    )
+                        .whenComplete(_browserHistory.syncAfterLocalPop);
+                  },
                 ),
               ));
       _threadRoute = route;
-      // 真正的导航路由让系统返回、浏览器返回与页面返回具有同一行为。
+      // 真正的导航路由 + History，系统返回 / 边缘滑动 / 页面返回行为一致。
+      _browserHistory.push('conversation/$conversationId');
       Navigator.of(context).push(route);
       route.completed.whenComplete(() {
         _threadRoute = null;
+        _browserHistory.syncAfterLocalPop();
         if (mounted) widget.workbench.clearSelection();
       });
     });
