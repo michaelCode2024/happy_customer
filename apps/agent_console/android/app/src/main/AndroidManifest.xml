@@ -8,7 +8,11 @@
         android:label="通语客服"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
-        <service android:name=".ReceptionService" android:exported="false" android:foregroundServiceType="remoteMessaging" />
+        <!-- 安卓本机轮询提醒（非云推送）；杀进程不保活。iOS 用 PWA。 -->
+        <service
+            android:name=".ReceptionService"
+            android:exported="false"
+            android:foregroundServiceType="remoteMessaging" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

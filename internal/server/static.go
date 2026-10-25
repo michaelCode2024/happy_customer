@@ -14,7 +14,7 @@ var h5Page = template.Must(template.New("h5").Parse(`<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 	<title>通语客服</title>
   <style>html,body{margin:0;height:100%;background:#f5f6f8}</style>
 </head>

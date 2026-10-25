@@ -80,24 +80,87 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
           _searchDebounce?.cancel();
           _search.clear();
         }
+        final multiInbox = widget.session.inboxes.length > 1;
         return Column(
           children: <Widget>[
-            // 对齐腾讯 IM：顶栏「会话」+ 筛选 Tab + 搜索，列表信息密度更高。
+            // B：标题并入筛选行，搜索与入口同行，给列表多腾出约一条高度。
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 6, 4),
+              padding: const EdgeInsets.fromLTRB(10, 6, 2, 0),
               child: Row(
                 children: [
                   Text(
                     '客户消息',
                     style: theme.textTheme.titleMedium?.copyWith(
-                      fontSize: 14,
+                      fontSize: 13,
                       fontWeight: FontWeight.w700,
+                      height: 1.1,
                     ),
                   ),
-                  const Spacer(),
+                  const SizedBox(width: 2),
+                  // 窄侧栏时 Tab 可横滑，避免和角标、刷新挤爆。
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          for (final entry in const [
+                            (QueueFilter.all, '全部'),
+                            (QueueFilter.unassigned, '待接待'),
+                            (QueueFilter.mine, '我的'),
+                          ])
+                            _InboxFilterTab(
+                              label: entry.$2,
+                              selected: workbench.filter == entry.$1,
+                              onTap: () => workbench.setFilter(entry.$1),
+                            ),
+                          Semantics(
+                            button: true,
+                            label: '含已解决',
+                            identifier: 'desk.filter.includeResolved',
+                            toggled: workbench.includeResolved,
+                            child: Tooltip(
+                              message: workbench.includeResolved
+                                  ? '列表已含已解决会话，点击可隐藏'
+                                  : '列表不含已解决会话，点击可包含',
+                              child: TextButton(
+                                key: const ValueKey(
+                                    'desk-filter-include-resolved'),
+                                onPressed: () => workbench.setIncludeResolved(
+                                    !workbench.includeResolved),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: workbench.includeResolved
+                                      ? theme.colorScheme.primary
+                                      : theme.colorScheme.onSurfaceVariant,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6),
+                                  minimumSize: const Size(0, 28),
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                  textStyle: const TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                child: Text(
+                                  '含已解决',
+                                  style: TextStyle(
+                                    decoration: workbench.includeResolved
+                                        ? TextDecoration.underline
+                                        : TextDecoration.none,
+                                    decorationColor:
+                                        theme.colorScheme.primary,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                   if (workbench.receptionWaiting > 0)
                     Padding(
-                      padding: const EdgeInsets.only(right: 4),
+                      padding: const EdgeInsets.only(left: 2),
                       child: Tooltip(
                         message: '待领取或派给你尚未确认的会话',
                         child: InkWell(
@@ -109,7 +172,7 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
                     ),
                   if (workbench.unread > 0)
                     Padding(
-                      padding: const EdgeInsets.only(right: 2),
+                      padding: const EdgeInsets.only(left: 2),
                       child: Tooltip(
                         message: '未读消息 ${workbench.unread} 条',
                         child: _CountPill(count: workbench.unread),
@@ -117,8 +180,11 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
                     ),
                   IconButton(
                     tooltip: '刷新',
-                    iconSize: 20,
+                    iconSize: 18,
                     visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints(minWidth: 30, minHeight: 30),
                     onPressed: () => workbench.refreshConversations(),
                     icon: const Icon(Icons.refresh_rounded),
                   ),
@@ -126,131 +192,100 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(8, 2, 8, 0),
+              padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
               child: Row(
                 children: [
-                  for (final entry in const [
-                    (QueueFilter.all, '全部'),
-                    (QueueFilter.unassigned, '待接待'),
-                    (QueueFilter.mine, '我的'),
-                  ])
-                    _InboxFilterTab(
-                      label: entry.$2,
-                      selected: workbench.filter == entry.$1,
-                      onTap: () => workbench.setFilter(entry.$1),
-                    ),
-                  const Spacer(),
-                  Semantics(
-                    button: true,
-                    label: '含已解决',
-                    identifier: 'desk.filter.includeResolved',
-                    toggled: workbench.includeResolved,
-                    child: Tooltip(
-                      message: workbench.includeResolved
-                          ? '列表已含已解决会话，点击可隐藏'
-                          : '列表不含已解决会话，点击可包含',
-                      child: TextButton(
-                        key: const ValueKey('desk-filter-include-resolved'),
-                        onPressed: () => workbench
-                            .setIncludeResolved(!workbench.includeResolved),
-                        style: TextButton.styleFrom(
-                          foregroundColor: workbench.includeResolved
-                              ? theme.colorScheme.primary
-                              : theme.colorScheme.onSurfaceVariant,
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          minimumSize: const Size(0, 32),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          textStyle: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
+                  Expanded(
+                    child: TextField(
+                      controller: _search,
+                      textInputAction: TextInputAction.search,
+                      style: const TextStyle(fontSize: 12),
+                      decoration: InputDecoration(
+                        isDense: true,
+                        contentPadding:
+                            const EdgeInsets.symmetric(vertical: 6),
+                        hintText: '搜索客户、内容',
+                        prefixIcon:
+                            const Icon(Icons.search_rounded, size: 16),
+                        prefixIconConstraints: const BoxConstraints(
+                            minWidth: 30, minHeight: 30),
+                        filled: true,
+                        fillColor: theme.colorScheme.surfaceContainerLow,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(7),
+                          borderSide: BorderSide.none,
                         ),
-                        child: Text(
-                          '含已解决',
-                          style: TextStyle(
-                            decoration: workbench.includeResolved
-                                ? TextDecoration.underline
-                                : TextDecoration.none,
-                            decorationColor: theme.colorScheme.primary,
-                          ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(7),
+                          borderSide: BorderSide.none,
                         ),
+                        suffixIcon: _search.text.isEmpty
+                            ? null
+                            : IconButton(
+                                tooltip: '清除',
+                                iconSize: 16,
+                                visualDensity: VisualDensity.compact,
+                                icon: const Icon(Icons.close),
+                                onPressed: () {
+                                  _searchDebounce?.cancel();
+                                  _search.clear();
+                                  widget.workbench.setSearch('');
+                                  setState(() {});
+                                },
+                              ),
                       ),
+                      onSubmitted: (value) {
+                        _searchDebounce?.cancel();
+                        widget.workbench.setSearch(value.trim());
+                      },
+                      onChanged: (value) {
+                        setState(() {});
+                        _debouncedSearch(value);
+                      },
                     ),
                   ),
+                  if (multiInbox) ...[
+                    const SizedBox(width: 6),
+                    SizedBox(
+                      width: 108,
+                      child: DropdownButtonFormField<String?>(
+                        value: workbench.inboxFilter,
+                        isDense: true,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          prefixIcon:
+                              Icon(Icons.inbox_outlined, size: 16),
+                          prefixIconConstraints: BoxConstraints(
+                              minWidth: 28, minHeight: 28),
+                          contentPadding: EdgeInsets.symmetric(
+                              horizontal: 4, vertical: 4),
+                        ),
+                        items: <DropdownMenuItem<String?>>[
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text(
+                              '全部客服入口',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          for (final inbox in widget.session.inboxes)
+                            DropdownMenuItem<String?>(
+                              value: inbox.id,
+                              child: Text(
+                                inbox.name,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
+                        onChanged: (value) =>
+                            workbench.setInboxFilter(value),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-              child: TextField(
-                controller: _search,
-                textInputAction: TextInputAction.search,
-                style: const TextStyle(fontSize: 12.5),
-                decoration: InputDecoration(
-                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                  hintText: '搜索客户、内容',
-                  prefixIcon: const Icon(Icons.search_rounded, size: 17),
-                  prefixIconConstraints:
-                      const BoxConstraints(minWidth: 34, minHeight: 34),
-                  filled: true,
-                  fillColor: theme.colorScheme.surfaceContainerLow,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide.none,
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide.none,
-                  ),
-                  suffixIcon: _search.text.isEmpty
-                      ? null
-                      : IconButton(
-                          tooltip: '清除',
-                          iconSize: 18,
-                          icon: const Icon(Icons.close),
-                          onPressed: () {
-                            _searchDebounce?.cancel();
-                            _search.clear();
-                            widget.workbench.setSearch('');
-                            setState(() {});
-                          },
-                        ),
-                ),
-                onSubmitted: (value) {
-                  _searchDebounce?.cancel();
-                  widget.workbench.setSearch(value.trim());
-                },
-                onChanged: (value) {
-                  setState(() {});
-                  _debouncedSearch(value);
-                },
-              ),
-            ),
-            if (widget.session.inboxes.length > 1)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: DropdownButtonFormField<String?>(
-                  value: workbench.inboxFilter,
-                  isDense: true,
-                  decoration: const InputDecoration(
-                    prefixIcon: Icon(Icons.inbox_outlined, size: 18),
-                    contentPadding:
-                        EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                  ),
-                  items: <DropdownMenuItem<String?>>[
-                    const DropdownMenuItem<String?>(
-                      value: null,
-                      child: Text('全部客服入口'),
-                    ),
-                    for (final inbox in widget.session.inboxes)
-                      DropdownMenuItem<String?>(
-                        value: inbox.id,
-                        child: Text(inbox.name),
-                      ),
-                  ],
-                  onChanged: (value) => workbench.setInboxFilter(value),
-                ),
-              ),
             const Divider(height: 1),
             Expanded(child: _body(theme)),
           ],
@@ -317,7 +352,7 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
       child: ListView.builder(
         controller: _scroll,
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 18),
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
         itemCount: workbench.conversations.length,
         itemBuilder: (context, index) {
           final conversation = workbench.conversations[index];
@@ -603,23 +638,24 @@ class _InboxFilterTab extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 0),
+        // 与标题同行时压矮，给列表腾高度。
+        padding: const EdgeInsets.fromLTRB(7, 4, 7, 0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
               label,
               style: TextStyle(
-                fontSize: 13,
+                fontSize: 12,
                 fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                 color: selected ? scheme.primary : scheme.onSurfaceVariant,
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
             AnimatedContainer(
               duration: const Duration(milliseconds: 160),
-              height: 2.5,
-              width: selected ? 22 : 0,
+              height: 2,
+              width: selected ? 18 : 0,
               decoration: BoxDecoration(
                 color: scheme.primary,
                 borderRadius: BorderRadius.circular(999),

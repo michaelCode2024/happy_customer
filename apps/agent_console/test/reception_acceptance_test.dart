@@ -89,6 +89,69 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('入口自动接单开启时打开会话即接入 $width', (tester) async {
+      tester.view.physicalSize = Size(width, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+      var claimed = false;
+      var claims = 0;
+      Map<String, dynamic> conversation() => {
+            'id': 'c-auto',
+            'inboxId': 'inbox-auto',
+            'visitorId': 'v-auto',
+            'visitorName': '自动接单客户',
+            'status': 'OPEN',
+            'assigneeId': claimed ? 'a1' : null,
+            'assigneeName': claimed ? '客服甲' : '',
+            'acceptedAt': claimed ? '2026-10-25T12:00:00Z' : null,
+            'assignmentExpiresAt': null,
+          };
+      final api = TongYuApi(
+          server: 'http://localhost',
+          client: MockClient((r) async {
+            Object body = {};
+            if (r.url.path.endsWith('/claim')) {
+              claims++;
+              claimed = true;
+            } else if (r.url.path.endsWith('/conversations')) {
+              body = {
+                'items': [conversation()]
+              };
+            } else if (r.url.path.endsWith('/c-auto')) {
+              body = {'conversation': conversation()};
+            } else if (r.url.path.endsWith('/pins') ||
+                r.url.path.endsWith('/messages')) {
+              body = {'items': []};
+            }
+            return http.Response.bytes(utf8.encode(jsonEncode(body)), 200);
+          }));
+      final controller = WorkbenchController(
+        api: api,
+        selfId: 'a1',
+        autoAcceptInboxIds: const {'inbox-auto'},
+      );
+      addTearDown(controller.dispose);
+      addTearDown(api.close);
+      await controller.refreshConversations();
+      await controller.select('c-auto');
+      expect(claims, 1);
+      expect(controller.selected!.acceptedAt, isNotNull);
+      expect(controller.selected!.assigneeId, 'a1');
+      await tester.pumpWidget(MaterialApp(
+          theme: RelayTheme.light(),
+          home: Scaffold(
+              body: ChatPanel(
+                  workbench: controller,
+                  picker: _Picker(),
+                  showInlineAssist: false))));
+      await tester.pumpAndSettle();
+      expect(find.text('开始接待'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('待接待队列会话未领取时提示开始接待 $width', (tester) async {
       tester.view.physicalSize = Size(width, 800);
       tester.view.devicePixelRatio = 1;

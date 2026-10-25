@@ -11,6 +11,7 @@ import 'notification_center.dart';
 import '../util/push_bridge_stub.dart'
     if (dart.library.html) '../util/push_bridge_web.dart';
 import '../util/website.dart';
+import 'package:tongyu_agent_console/src/util/app_platform.dart';
 import 'package:tongyu_agent_console/src/util/app_update.dart';
 import 'dart:async';
 import 'package:tongyu_agent_console/src/ui/overview_page.dart';
@@ -25,8 +26,10 @@ import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
 import 'package:tongyu_agent_console/src/ui/chat_panel.dart';
 import 'package:tongyu_agent_console/src/ui/conversation_list.dart';
 import 'package:tongyu_agent_console/src/ui/mobile_conversation_view.dart';
+import 'package:flutter/foundation.dart';
 import 'package:tongyu_agent_console/src/ui/mobile_workbench_nav.dart';
 import 'package:tongyu_agent_console/src/ui/reception_guidance.dart';
+import 'package:tongyu_agent_console/src/ui/automation_page.dart';
 import 'package:tongyu_agent_console/src/ui/integration_page.dart';
 import 'package:tongyu_agent_console/src/ui/knowledge_page.dart';
 import 'package:tongyu_agent_console/src/ui/settings_page.dart';
@@ -46,8 +49,14 @@ enum WorkbenchSection {
   stats,
   knowledge,
   integrations,
+  /// 关键词 / 欢迎语等自动回复；需套餐 automation + 主管。
+  automation,
+  /// H5/App 渠道与图文菜单；需套餐 channels + 主管。
+  channels,
   enterprise,
-  settings
+  settings,
+  /// 手机底栏「更多」枢纽页；宽屏侧栏不展示此项。
+  more,
 }
 
 /// The signed-in shell: a rail of sections, the conversation queue, the open
@@ -89,9 +98,13 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
   /// 登录后直接进客户消息，避免首页绕一圈才开始干活。
   WorkbenchSection _section = WorkbenchSection.conversations;
 
+  /// 手机「更多」点进的二级页路由；与 section 切换分开，避免外层返回条 + 路由 pop 叠两次动画。
+  MaterialPageRoute<void>? _moreChildRoute;
+
   /// True while the customer record is open as a pushed page on a narrow window.
   bool _profileOpen = false;
   final _assistDraft = ValueNotifier<AssistResult?>(null);
+  final _contextPanelTab = ValueNotifier<int>(1);
   Timer? _planRefresh;
   StreamSubscription<String>? _notificationNavigation;
   Map<String, dynamic> _features = {};
@@ -116,6 +129,11 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
 
   bool _has(String feature) => _features[feature] == true;
 
+  Set<String> _autoAcceptInboxIdsOf(SessionController session) => {
+        for (final inbox in session.inboxes)
+          if (inbox.autoAccept) inbox.id,
+      };
+
   @override
   void initState() {
     super.initState();
@@ -127,6 +145,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     _workbench = WorkbenchController(
       api: widget.session.api,
       selfId: widget.session.agent?.id ?? '',
+      autoAcceptInboxIds: _autoAcceptInboxIdsOf(widget.session),
     );
     _picker = widget.picker ?? ImageAttachmentPicker();
     unawaited(_refreshPlan());
@@ -137,14 +156,25 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     unawaited(_openInitialConversation());
     unawaited(_workbench.loadReferenceData());
     unawaited(_loadMenuConfig());
-    // 安卓安装包登录后检查 /downloads/release.json；Web / PWA 走各自更新通道。
+    // 安卓安装包：版本检查 + 本机轮询提醒/角标（非云推送；杀进程不管）。
+    // iOS 只用 PWA 通道，不走这里。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       unawaited(promptAndroidAppUpdateIfNeeded(
         context,
         serverBase: widget.session.api.server,
       ));
+      if (runningOnAndroid) {
+        unawaited(enableBackgroundPush(widget.session.api));
+      }
     });
+  }
+
+  @override
+  void didUpdateWidget(covariant WorkbenchPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 入口「自动接单」可能在企业管理页改过，每次重建都同步到工作台。
+    _workbench.setAutoAcceptInboxIds(_autoAcceptInboxIdsOf(widget.session));
   }
 
   Future<void> _openInitialConversation() async {
@@ -258,6 +288,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     _notificationNavigation?.cancel();
     _planRefresh?.cancel();
     _assistDraft.dispose();
+    _contextPanelTab.dispose();
     _workbench.dispose();
     // The player is a process-wide singleton, so it is released rather than
     // disposed: signing out and back in must not hand the new session a dead
@@ -497,6 +528,30 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
           icon: Icons.code_rounded,
           selectedIcon: Icons.code,
           role: 'SUPERVISOR',
+          feature: 'integrations',
+        ),
+      // 与套餐 entitlements 对齐：旗舰/企业版才开放；欢迎语在「打开客服回复」。
+      if ((admin && _has('automation')) || ignoreRoleFilter)
+        const _SectionSpec(
+          id: 'automation',
+          section: WorkbenchSection.automation,
+          label: '自动回复',
+          group: '企业管理',
+          icon: Icons.smart_toy_outlined,
+          selectedIcon: Icons.smart_toy,
+          role: 'SUPERVISOR',
+          feature: 'automation',
+        ),
+      if ((admin && _has('channels')) || ignoreRoleFilter)
+        const _SectionSpec(
+          id: 'channels',
+          section: WorkbenchSection.channels,
+          label: '渠道管理',
+          group: '企业管理',
+          icon: Icons.devices_outlined,
+          selectedIcon: Icons.devices,
+          role: 'SUPERVISOR',
+          feature: 'channels',
         ),
       if (admin || ignoreRoleFilter)
         const _SectionSpec(
@@ -542,9 +597,9 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
         .toList();
   }
 
-  /// 手机底栏只留 3～4 个主入口，其余进「更多」，避免十几个 Tab 挤成一团。
+  /// 手机底栏只留 3～4 个主入口，其余进「更多」页，避免十几个 Tab 挤成一团。
   List<_SectionSpec> _phoneDestinations(List<_SectionSpec> sections) {
-    // 手机底栏对齐 v2：消息 / 工作台 / 知识（有权限时），其余进「更多」。
+    // 手机底栏：消息 / 工作台 / 知识（有权限时）/ 更多。
     final primary = <WorkbenchSection>[
       WorkbenchSection.conversations,
       WorkbenchSection.overview,
@@ -557,50 +612,81 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     ];
   }
 
-  Future<void> _openMoreSections(List<_SectionSpec> sections) async {
-    final extras = sections
-        .where((s) =>
-            s.section != WorkbenchSection.conversations &&
-            s.section != WorkbenchSection.overview &&
-            s.section != WorkbenchSection.knowledge)
-        .toList();
-    if (extras.isEmpty) return;
-    final picked = await showModalBottomSheet<WorkbenchSection>(
-      context: context,
-      showDragHandle: true,
-      builder: (ctx) {
-        final scheme = Theme.of(ctx).colorScheme;
-        return SafeArea(
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
-                child: Text(
-                  '更多功能',
-                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                ),
-              ),
-              for (final spec in extras)
-                ListTile(
-                  leading: Icon(spec.icon, color: scheme.primary),
-                  title: Text(spec.label),
-                  subtitle: Text(
-                    spec.group,
-                    style: TextStyle(color: scheme.onSurfaceVariant),
-                  ),
-                  onTap: () => Navigator.pop(ctx, spec.section),
-                ),
-              const SizedBox(height: 8),
-            ],
+  /// 不在底栏主入口里的功能，归入「更多」页。
+  List<_SectionSpec> _moreExtras(List<_SectionSpec> sections) => sections
+      .where((s) =>
+          s.section != WorkbenchSection.conversations &&
+          s.section != WorkbenchSection.overview &&
+          s.section != WorkbenchSection.knowledge)
+      .toList();
+
+  /// 关掉「更多」压着的二级页（切底栏或再次进枢纽前先卸掉）。
+  void _popMoreChildIfAny() {
+    final route = _moreChildRoute;
+    if (route == null) return;
+    if (route.isCurrent) {
+      Navigator.of(context).removeRoute(route);
+    }
+    _moreChildRoute = null;
+  }
+
+  /// 手机从「更多」进二级：只 push 一层，系统/页头返回只播一次。
+  void _openMoreChild(WorkbenchSection section) {
+    if (section == WorkbenchSection.more) return;
+    _popMoreChildIfAny();
+    final page = _moreChildPage(section);
+    final route = MaterialPageRoute<void>(
+      settings: RouteSettings(name: '/more/${section.name}'),
+      builder: (_) => page,
+    );
+    _moreChildRoute = route;
+    Navigator.of(context).push(route).whenComplete(() {
+      if (_moreChildRoute == route) _moreChildRoute = null;
+    });
+  }
+
+  /// 二级页本体；自带 AppBar 的直接推，没有的包一层带返回的壳。
+  Widget _moreChildPage(WorkbenchSection section) {
+    switch (section) {
+      case WorkbenchSection.groups:
+        return Scaffold(
+          appBar: AppBar(title: const Text('群聊')),
+          body: GroupsPage(session: widget.session),
+        );
+      case WorkbenchSection.stats:
+        return StatsPage(session: widget.session, workbench: _workbench);
+      case WorkbenchSection.settings:
+        return SettingsPage(
+          session: widget.session,
+          themeMode: widget.themeMode,
+          onThemeModeChanged: widget.onThemeModeChanged,
+        );
+      case WorkbenchSection.integrations:
+        return Scaffold(
+          appBar: AppBar(title: const Text('接入管理')),
+          body: IntegrationPage(
+            api: widget.session.api,
+            canIdentity: _has('identity'),
           ),
         );
-      },
-    );
-    if (picked != null && mounted) {
-      setState(() => _section = picked);
+      case WorkbenchSection.automation:
+        return AutomationPage(api: widget.session.api);
+      case WorkbenchSection.channels:
+        return AutomationPage(api: widget.session.api, channels: true);
+      case WorkbenchSection.enterprise:
+        return TenantAdminPage(
+          api: widget.session.api,
+          tenantSlug: widget.session.tenant?.slug ?? '',
+          onMemberSaved: () async {
+            await widget.session.refreshProfile();
+            await _workbench.loadAgents();
+          },
+        );
+      case WorkbenchSection.overview:
+      case WorkbenchSection.conversations:
+      case WorkbenchSection.knowledge:
+      case WorkbenchSection.more:
+        return const SizedBox.shrink();
     }
   }
 
@@ -614,7 +700,9 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
         final sections = _sections(agent);
         // A role change (or a stale stored session) can make the current section
         // illegal; falling back keeps the shell consistent with the rail.
-        if (!sections.any((spec) => spec.section == _section)) {
+        // 「更多」枢纽不在侧栏菜单里，单独放行。
+        if (_section != WorkbenchSection.more &&
+            !sections.any((spec) => spec.section == _section)) {
           _section = WorkbenchSection.conversations;
         }
         return LayoutBuilder(
@@ -658,6 +746,10 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                   phone.indexWhere((spec) => spec.section == _section);
               final hasKnowledge =
                   sections.any((s) => s.section == WorkbenchSection.knowledge);
+              // 主入口以外（含「更多」枢纽本身）都高亮第四项。
+              final onMoreTab =
+                  phoneIndex < 0 || _section == WorkbenchSection.more;
+              final moreTabIndex = hasKnowledge ? 3 : 2;
 
               return Scaffold(
                 // 窄屏使用原生风格移动应用栏
@@ -669,14 +761,17 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                 bottomNavigationBar: hostedThread
                     ? null
                     : MobileBottomNavBar(
-                        currentIndex: phoneIndex >= 0 ? phoneIndex : (hasKnowledge ? 3 : 2),
+                        currentIndex:
+                            onMoreTab ? moreTabIndex : phoneIndex,
                         unreadCount: _workbench.unread,
                         showKnowledge: hasKnowledge,
                         onTap: (index) {
+                          // 先卸掉「更多」二级路由，避免底栏切换后还压着旧页。
+                          _popMoreChildIfAny();
                           if (index < phone.length) {
                             setState(() => _section = phone[index].section);
                           } else {
-                            unawaited(_openMoreSections(sections));
+                            setState(() => _section = WorkbenchSection.more);
                           }
                         },
                       ),
@@ -785,6 +880,32 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
 
   Widget _bodyFor(double width) {
     switch (_section) {
+      case WorkbenchSection.more:
+        final extras = _moreExtras(_sections(widget.session.agent));
+        return MobileMoreHubPage(
+          agentName: widget.session.agent?.displayName,
+          tenantName: widget.session.tenant?.name,
+          // 网页版把「系统更新」放在更多页顶，避免埋进设置 → 外观与通知才找得到。
+          header: kIsWeb
+              ? PwaPanel(
+                  api: widget.session.api,
+                  settingsOnly: true,
+                  onReconnect: () async {
+                    await _workbench.refreshConversations();
+                    await _workbench.reloadSelected();
+                  },
+                )
+              : null,
+          entries: [
+            for (final spec in extras)
+              MobileMoreEntry(
+                label: spec.label,
+                group: spec.group,
+                icon: spec.icon,
+                onTap: () => _openMoreChild(spec.section),
+              ),
+          ],
+        );
       case WorkbenchSection.groups:
         // 和客户消息一样铺满剩余宽度，不再套一层圆角留白。
         return GroupsPage(session: widget.session);
@@ -821,6 +942,10 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
           api: widget.session.api,
           canIdentity: _has('identity'),
         );
+      case WorkbenchSection.automation:
+        return AutomationPage(api: widget.session.api);
+      case WorkbenchSection.channels:
+        return AutomationPage(api: widget.session.api, channels: true);
       case WorkbenchSection.enterprise:
         return TenantAdminPage(
             api: widget.session.api,
@@ -868,14 +993,45 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
       );
     }
 
+    void toggleProfile({int? tab}) {
+      if (tab != null) {
+        _contextPanelTab.value = tab;
+      }
+      if (width >= 1120) {
+        // 宽屏模式：如果已经处于同一标签则折叠；若已折叠或切换标签则展开
+        setState(() {
+          if (_profileOpen) {
+            _profileOpen = false;
+          } else if (tab != null && _contextPanelTab.value != tab) {
+            _contextPanelTab.value = tab;
+          } else {
+            _profileOpen = true;
+          }
+        });
+      } else {
+        setState(() => _profileOpen = true);
+      }
+    }
+
+    void openAiAssist() {
+      _contextPanelTab.value = 1;
+      if (width >= 1120) {
+        // 确保右侧栏展开（inlineProfile 为 true 时表示自然展示）
+        if (_profileOpen) {
+          setState(() => _profileOpen = false);
+        }
+      } else {
+        setState(() => _profileOpen = true);
+      }
+    }
+
     final chat = ChatPanel(
       workbench: _workbench,
       picker: _picker,
       assistDraft: _assistDraft,
-      showInlineAssist: !inlineProfile,
-      onOpenProfile: width >= 1120
-          ? () => setState(() => _profileOpen = !_profileOpen)
-          : () => _openProfile(),
+      showInlineAssist: false,
+      onOpenProfile: () => toggleProfile(tab: 0),
+      onOpenAiAssist: openAiAssist,
     );
 
     // 企点式三栏：会话列表 | 聊天 | 客户资料，竖分割线贴边。
@@ -904,6 +1060,11 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
             open: width < 1120 && _profileOpen,
             onClose: () => setState(() => _profileOpen = false),
             workbench: _workbench,
+            activeTabNotifier: _contextPanelTab,
+            onAdopt: (text) {
+              _assistDraft.value = null;
+              _assistDraft.value = text;
+            },
             child: chat,
           ),
         )),
@@ -921,6 +1082,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
               width: width >= 1200 ? 326 : 310,
               child: ConversationContextPanel(
                 workbench: _workbench,
+                activeTabNotifier: _contextPanelTab,
                 onAdopt: (text) {
                   _assistDraft.value = null;
                   _assistDraft.value = text;
@@ -931,10 +1093,6 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
         ],
       ],
     );
-  }
-
-  Future<void> _openProfile() async {
-    setState(() => _profileOpen = true);
   }
 
   PreferredSizeWidget _compactAppBar(AgentProfile? agent) {
@@ -961,8 +1119,11 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
         WorkbenchSection.stats => '数据统计',
         WorkbenchSection.knowledge => '知识库',
         WorkbenchSection.integrations => '接入管理',
+        WorkbenchSection.automation => '自动回复',
+        WorkbenchSection.channels => '渠道管理',
         WorkbenchSection.settings => '我的设置',
         WorkbenchSection.enterprise => '企业管理',
+        WorkbenchSection.more => '更多',
       };
 }
 
@@ -1246,12 +1407,16 @@ class _ProfileScope extends StatelessWidget {
     required this.onClose,
     required this.workbench,
     required this.child,
+    this.activeTabNotifier,
+    this.onAdopt,
   });
 
   final bool open;
   final VoidCallback onClose;
   final WorkbenchController workbench;
   final Widget child;
+  final ValueNotifier<int>? activeTabNotifier;
+  final ValueChanged<AssistResult>? onAdopt;
 
   @override
   Widget build(BuildContext context) {
@@ -1275,12 +1440,18 @@ class _ProfileScope extends StatelessWidget {
                       Align(
                         alignment: Alignment.centerRight,
                         child: IconButton(
-                          tooltip: '关闭客户资料',
+                          tooltip: '关闭',
                           icon: const Icon(Icons.close, size: 18),
                           onPressed: onClose,
                         ),
                       ),
-                      Expanded(child: VisitorSidebar(workbench: workbench)),
+                      Expanded(
+                        child: ConversationContextPanel(
+                          workbench: workbench,
+                          activeTabNotifier: activeTabNotifier,
+                          onAdopt: onAdopt ?? (_) {},
+                        ),
+                      ),
                     ],
                   ),
                 ),

@@ -30,9 +30,10 @@ class ChatPanel extends StatefulWidget {
     required this.workbench,
     required this.picker,
     this.onOpenProfile,
+    this.onOpenAiAssist,
     this.onBack,
     this.assistDraft,
-    this.showInlineAssist = true,
+    this.showInlineAssist = false,
   });
 
   final WorkbenchController workbench;
@@ -41,6 +42,7 @@ class ChatPanel extends StatefulWidget {
   /// Opens the customer sidebar; null hides the affordance on layouts that
   /// always show it.
   final VoidCallback? onOpenProfile;
+  final VoidCallback? onOpenAiAssist;
   final VoidCallback? onBack;
   final ValueNotifier<AssistResult?>? assistDraft;
   final bool showInlineAssist;
@@ -201,7 +203,6 @@ class _ChatPanelState extends State<ChatPanel> {
       _stickToBottom = true;
       _userScrolling = false;
       _lastStickMaxExtent = null;
-      _inlineAiOpen = false;
       _scrollToBottom();
     }
     if (lastId != _lastMessageId) {
@@ -681,8 +682,6 @@ class _ChatPanelState extends State<ChatPanel> {
 
   bool _mobileAi = false;
   bool _mobileAiChecked = false;
-  /// 桌面：AI 写作助手由输入区芯片展开，默认收起不占高。
-  bool _inlineAiOpen = false;
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -771,54 +770,30 @@ class _ChatPanelState extends State<ChatPanel> {
               ),
             Expanded(
               // 消息区浅灰底：对齐微信 / 腾讯 IM，和白底列表、白底输入区分层。
-              child: Column(
-                children: [
-                  // v2：消息流顶部斜切彩条（静态装饰，不遮挡内容）
-                  Transform(
-                    transform: Matrix4.skewY(-0.01),
-                    alignment: Alignment.center,
-                    child: Container(
-                      height: 3.5,
-                      width: double.infinity,
-                      decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            Color(0xFF5B8CFF),
-                            Color(0xFF845EF7),
-                            Color(0xFF12B886),
-                            Color(0xFFF59F00),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: ColoredBox(
+              child: ColoredBox(
                 color: MediaQuery.sizeOf(context).width < 760 &&
                         Theme.of(context).brightness == Brightness.light
                     ? const Color(0xFFF2F3F5)
                     : RelayTheme.chatCanvas(Theme.of(context).colorScheme),
                 child: NotificationListener<Notification>(
-                    onNotification: _onThreadNotification,
-                    child: _MessageList(
-                      key: ValueKey<String>(conversation.id),
-                      workbench: workbench,
-                      scroll: _scroll,
-                      flashSequence: _flashSequence,
-                      onRetry: workbench.retry,
-                      onLoadOlder: workbench.loadOlder,
-                      onQuote: workbench.quote,
-                      onEdit: _editMessage,
-                      onRecall: _recallMessage,
-                      onReact: _pickReaction,
-                      onPin: workbench.togglePin,
-                      onForward: _forwardMessage,
-                      showJumpToBottom: !_stickToBottom,
-                      onJumpToBottom: () => _scrollToBottom(force: true),
-                    )),
-              ),
+                  onNotification: _onThreadNotification,
+                  child: _MessageList(
+                    key: ValueKey<String>(conversation.id),
+                    workbench: workbench,
+                    scroll: _scroll,
+                    flashSequence: _flashSequence,
+                    onRetry: workbench.retry,
+                    onLoadOlder: workbench.loadOlder,
+                    onQuote: workbench.quote,
+                    onEdit: _editMessage,
+                    onRecall: _recallMessage,
+                    onReact: _pickReaction,
+                    onPin: workbench.togglePin,
+                    onForward: _forwardMessage,
+                    showJumpToBottom: !_stickToBottom,
+                    onJumpToBottom: () => _scrollToBottom(force: true),
                   ),
-                ],
+                ),
               ),
             ),
             if (workbench.threadError != null)
@@ -879,32 +854,26 @@ class _ChatPanelState extends State<ChatPanel> {
                 lockPublicReply: !_noteMode &&
                     conversation.publicReplyBlockReason(workbench.selfId) !=
                         null,
-                aiOpen: _inlineAiOpen,
+                aiOpen: false,
                 onToggleAi: workbench.messages.isEmpty
                     ? null
-                    : () => setState(() => _inlineAiOpen = !_inlineAiOpen),
-                aiPanel: _inlineAiOpen &&
-                        !_noteMode &&
-                        workbench.messages.isNotEmpty
-                    ? AiAssistPanel(
-                        api: workbench.api,
-                        conversationId: conversation.id,
-                        messages: workbench.messages,
-                        onAdopt: _adoptResult,
-                        draftController: _composer,
-                        writingOnly: !widget.showInlineAssist,
-                        initiallyExpanded: true,
-                      )
-                    : null,
+                    : () {
+                        if (widget.onOpenAiAssist != null) {
+                          widget.onOpenAiAssist!();
+                        } else if (widget.onOpenProfile != null) {
+                          widget.onOpenProfile!();
+                        }
+                      },
+                aiPanel: null,
                 onChanged: _onComposerChanged,
                 onToggleNote: (value) => setState(() {
                   _noteMode = value;
-                  if (value) _inlineAiOpen = false;
                 }),
                 onPickImage: () => _pickImage(),
                 onPickFile: () => _pickImage(document: true),
                 voiceControl: VoiceRecorderButton(
                     key: ValueKey(conversation.id),
+                    color: RelayTheme.magenta,
                     enabled: !_sending &&
                         !_uploading &&
                         !_noteMode &&
@@ -3270,7 +3239,9 @@ class _Composer extends StatelessWidget {
       required String tooltip,
       required IconData icon,
       required VoidCallback? onPressed,
+      required Color accent,
     }) {
+      final enabled = onPressed != null;
       return IconButton(
         tooltip: tooltip,
         onPressed: onPressed,
@@ -3278,7 +3249,8 @@ class _Composer extends StatelessWidget {
         constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
         padding: EdgeInsets.zero,
         iconSize: 20,
-        icon: Icon(icon, color: scheme.onSurfaceVariant),
+        icon: Icon(icon,
+            color: enabled ? accent : scheme.outline.withOpacity(.7)),
       );
     }
 
@@ -3318,8 +3290,8 @@ class _Composer extends StatelessWidget {
                 tooltip: '表情',
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                icon: Icon(Icons.sentiment_satisfied_alt_outlined,
-                    size: 20, color: scheme.onSurfaceVariant),
+                icon: const Icon(Icons.sentiment_satisfied_alt_outlined,
+                    size: 20, color: RelayTheme.amber),
                 onSelected: insert,
                 itemBuilder: (_) => [
                   for (final emoji in [
@@ -3341,15 +3313,20 @@ class _Composer extends StatelessWidget {
               toolIcon(
                 tooltip: lockPublicReply ? '请先完成接待或转派' : '发送图片',
                 icon: Icons.image_outlined,
+                accent: RelayTheme.teal,
                 onPressed: uploading || lockPublicReply ? null : onPickImage,
               ),
               if (supportsFiles)
                 toolIcon(
                   tooltip: lockPublicReply ? '请先完成接待或转派' : '发送文件',
                   icon: Icons.folder_open_outlined,
+                  accent: RelayTheme.blue,
                   onPressed: uploading || lockPublicReply ? null : onPickFile,
                 ),
-              voiceControl,
+              IconTheme(
+                data: const IconThemeData(color: RelayTheme.magenta, size: 20),
+                child: voiceControl,
+              ),
               if (canned.isNotEmpty)
                 _CannedMenu(
                   canned: canned,
@@ -3369,6 +3346,7 @@ class _Composer extends StatelessWidget {
                       : const Color(0xFFF3F0FF),
                   borderRadius: BorderRadius.circular(8),
                   child: InkWell(
+                    key: const ValueKey('ai-assist-toggle'),
                     borderRadius: BorderRadius.circular(8),
                     onTap: onToggleAi,
                     child: Padding(
@@ -3383,7 +3361,7 @@ class _Composer extends StatelessWidget {
                                   .withOpacity(aiOpen ? 1 : 0.9)),
                           const SizedBox(width: 4),
                           const Text(
-                            'AI',
+                            'AI 助手',
                             style: TextStyle(
                               fontSize: 11.5,
                               fontWeight: FontWeight.w600,
@@ -3483,7 +3461,8 @@ class _Composer extends StatelessWidget {
                   )
               ]),
             ),
-          // 输入框压矮；发送嵌在右下角小按钮，避免外侧等高蓝块。
+          // 输入框加高；发送嵌在右下角小按钮，避免外侧等高蓝块。
+          // 回复/备注共用同一套底色与边框，只改提示文案和按钮文案，避免切换时框体“变形”。
           Stack(
             children: [
               Shortcuts(
@@ -3502,8 +3481,8 @@ class _Composer extends StatelessWidget {
                   child: TextField(
                     controller: controller,
                     focusNode: focusNode,
-                    minLines: 2,
-                    maxLines: 6,
+                    minLines: 4,
+                    maxLines: 8,
                     onChanged: onChanged,
                     textInputAction: TextInputAction.newline,
                     keyboardType: TextInputType.multiline,
@@ -3516,9 +3495,7 @@ class _Composer extends StatelessWidget {
                                   ? '对方正在输入…'
                                   : '输入回复内容…',
                       filled: true,
-                      fillColor: noteMode
-                          ? scheme.tertiaryContainer.withAlpha(35)
-                          : scheme.surfaceContainerLow,
+                      fillColor: scheme.surfaceContainerLow,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
                         borderSide: BorderSide(color: scheme.outlineVariant),
@@ -3532,7 +3509,7 @@ class _Composer extends StatelessWidget {
                         borderSide:
                             BorderSide(color: scheme.primary, width: 1.2),
                       ),
-                      contentPadding: const EdgeInsets.fromLTRB(12, 10, 88, 10),
+                      contentPadding: const EdgeInsets.fromLTRB(12, 12, 88, 12),
                       hintStyle: theme.textTheme.bodyMedium
                           ?.copyWith(color: scheme.outline),
                     ),
@@ -3542,24 +3519,37 @@ class _Composer extends StatelessWidget {
               Positioned(
                 right: 8,
                 bottom: 8,
-                child: FilledButton(
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size(0, 28),
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    visualDensity: VisualDensity.compact,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: sending ? null : RelayTheme.actionGradient,
+                    color: sending ? scheme.primary : null,
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                  onPressed: sending ? null : onSend,
-                  child: sending
-                      ? const SizedBox(
-                          width: 12,
-                          height: 12,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Text(
-                          noteMode ? '保存备注' : '发送',
-                          style: const TextStyle(fontSize: 12),
-                        ),
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.transparent,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: Colors.transparent,
+                      disabledForegroundColor: Colors.white,
+                      shadowColor: Colors.transparent,
+                      minimumSize: const Size(0, 28),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: sending ? null : onSend,
+                    child: sending
+                        ? const SizedBox(
+                            width: 12,
+                            height: 12,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white),
+                          )
+                        : Text(
+                            noteMode ? '保存备注' : '发送',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                  ),
                 ),
               ),
             ],
@@ -3570,7 +3560,7 @@ class _Composer extends StatelessWidget {
   }
 }
 
-/// 输入区模式切换：实心淡底 + 主色文字，替代散落的纯文本按钮。
+/// 输入区模式切换：选中只靠字重与主色文字，不加色块底，避免彩色胶囊看起来歪。
 class _ComposerModeTab extends StatelessWidget {
   const _ComposerModeTab({
     required this.label,
@@ -3587,28 +3577,18 @@ class _ComposerModeTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: selected ? tone.withOpacity(.09) : Colors.transparent,
+    return InkWell(
       borderRadius: BorderRadius.circular(7),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(7),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(7),
-            border: Border.all(
-              color: selected ? tone.withOpacity(.24) : Colors.transparent,
-            ),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              height: 1.3,
-              fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-              color: selected ? tone : scheme.onSurfaceVariant,
-            ),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            height: 1.3,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+            color: selected ? tone : scheme.onSurfaceVariant,
           ),
         ),
       ),
@@ -3670,28 +3650,39 @@ class _MobileComposerState extends State<_MobileComposer> {
     final c = widget.composer;
     final s = Theme.of(context).colorScheme;
     final dark = s.brightness == Brightness.dark;
-    final background = dark ? s.surface : const Color(0xFFFAFAFA);
-    Widget tool(IconData icon, String label, VoidCallback? action) => SizedBox(
-        width: 66,
-        child: TextButton(
-            onPressed: action,
-            style: TextButton.styleFrom(padding: EdgeInsets.zero),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                      color: s.surfaceContainerHighest.withOpacity(.5),
-                      borderRadius: BorderRadius.circular(12)),
-                  child: Icon(icon,
-                      size: 23,
-                      color: action == null ? s.outline : s.onSurfaceVariant)),
-              const SizedBox(height: 5),
-              Text(label,
-                  style: TextStyle(
-                      fontSize: 11,
-                      color: action == null ? s.outline : s.onSurfaceVariant))
-            ])));
+    final background = dark ? s.surface : const Color(0xFFF7F9FF);
+    // 工具格用主题辅色软底 + 彩色图标，避免一整排灰标显得发素。
+    Widget tool(
+      IconData icon,
+      String label,
+      VoidCallback? action, {
+      required Color accent,
+      required Color soft,
+    }) =>
+        SizedBox(
+            width: 66,
+            child: TextButton(
+                onPressed: action,
+                style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                          color: action == null
+                              ? s.surfaceContainerHighest.withOpacity(.45)
+                              : soft,
+                          borderRadius: BorderRadius.circular(12)),
+                      child: Icon(icon,
+                          size: 23,
+                          color: action == null ? s.outline : accent)),
+                  const SizedBox(height: 5),
+                  Text(label,
+                      style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: action == null ? s.outline : accent))
+                ])));
     return Container(
         key: const ValueKey('mobile-composer'),
         padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
@@ -3716,7 +3707,8 @@ class _MobileComposerState extends State<_MobileComposer> {
                 Row(children: [
                   Expanded(
                       child: Text('内部备注 · 仅团队可见',
-                          style: TextStyle(fontSize: 12, color: s.tertiary))),
+                          style: TextStyle(
+                              fontSize: 12, color: RelayTheme.violet))),
                   TextButton(
                       onPressed: () => c.onToggleNote(false),
                       child: const Text('取消'))
@@ -3759,14 +3751,15 @@ class _MobileComposerState extends State<_MobileComposer> {
                                 ? Icons.cancel_outlined
                                 : Icons.add_circle_outline,
                             size: 26,
-                            color: s.onSurfaceVariant))),
+                            color: _tools
+                                ? RelayTheme.blue
+                                : RelayTheme.blue.withOpacity(.85)))),
                 const SizedBox(width: 6),
                 Expanded(
                     child: Container(
                         decoration: BoxDecoration(
-                            color: c.noteMode
-                                ? s.tertiaryContainer.withOpacity(.25)
-                                : s.surface,
+                            // 回复/备注共用白底，避免切换时输入框颜色跳变。
+                            color: s.surface,
                             border: Border.all(
                                 color: s.outlineVariant.withOpacity(.6)),
                             borderRadius: BorderRadius.circular(9)),
@@ -3777,8 +3770,8 @@ class _MobileComposerState extends State<_MobileComposer> {
                                   child: TextField(
                                       controller: c.controller,
                                       focusNode: c.focusNode,
-                                      minLines: 1,
-                                      maxLines: 4,
+                                      minLines: 2,
+                                      maxLines: 5,
                                       onChanged: c.onChanged,
                                       textInputAction: TextInputAction.newline,
                                       keyboardType: TextInputType.multiline,
@@ -3805,10 +3798,10 @@ class _MobileComposerState extends State<_MobileComposer> {
                                   padding: EdgeInsets.zero,
                                   constraints:
                                       const BoxConstraints(minWidth: 50),
-                                  icon: Icon(
+                                  icon: const Icon(
                                       Icons.sentiment_satisfied_alt_outlined,
                                       size: 22,
-                                      color: s.onSurfaceVariant),
+                                      color: RelayTheme.amber),
                                   onSelected: _insert,
                                   itemBuilder: (_) => [
                                         for (final emoji in [
@@ -3825,30 +3818,60 @@ class _MobileComposerState extends State<_MobileComposer> {
                 const SizedBox(width: 6),
                 ValueListenableBuilder<TextEditingValue>(
                     valueListenable: c.controller,
-                    builder: (context, value, _) => SizedBox(
-                        width: 44,
-                        height: 44,
-                        child: IconButton.filled(
-                            tooltip: c.noteMode ? '保存备注' : '发送',
-                            style: IconButton.styleFrom(
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(9))),
-                            onPressed: c.sending ||
-                                    c.uploading ||
-                                    c.lockPublicReply ||
-                                    (value.text.trim().isEmpty &&
-                                        c.pending.isEmpty)
-                                ? null
-                                : c.onSend,
-                            icon: c.sending || c.uploading
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2))
-                                : Icon(
-                                    c.noteMode ? Icons.check : Icons.arrow_upward,
-                                    size: 22)))),
+                    builder: (context, value, _) {
+                      final busy = c.sending || c.uploading;
+                      final canSend = !busy &&
+                          !c.lockPublicReply &&
+                          (value.text.trim().isNotEmpty || c.pending.isNotEmpty);
+                      // 可发送/发送中：蓝渐变 + 白箭头；禁用：浅灰底灰箭头。
+                      final active = canSend || busy;
+                      return SizedBox(
+                          width: 44,
+                          height: 44,
+                          child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                gradient: active
+                                    ? RelayTheme.actionGradient
+                                    : null,
+                                color: active
+                                    ? null
+                                    : s.surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(9),
+                              ),
+                              child: IconButton(
+                                  tooltip: c.noteMode ? '保存备注' : '发送',
+                                  style: IconButton.styleFrom(
+                                    backgroundColor: Colors.transparent,
+                                    foregroundColor: active
+                                        ? Colors.white
+                                        : s.onSurfaceVariant,
+                                    disabledBackgroundColor:
+                                        Colors.transparent,
+                                    disabledForegroundColor: active
+                                        ? Colors.white
+                                        : s.onSurfaceVariant,
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(9)),
+                                  ),
+                                  onPressed: canSend ? c.onSend : null,
+                                  icon: busy
+                                      ? const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Colors.white))
+                                      : Icon(
+                                          c.noteMode
+                                              ? Icons.check
+                                              : Icons.arrow_upward,
+                                          size: 22,
+                                          color: active
+                                              ? Colors.white
+                                              : s.onSurfaceVariant,
+                                        ))));
+                    }),
               ]),
               if (_tools)
                 Padding(
@@ -3861,7 +3884,9 @@ class _MobileComposerState extends State<_MobileComposer> {
                               ? null
                               : () {
                                   c.onPickImage();
-                                }),
+                                },
+                          accent: RelayTheme.teal,
+                          soft: RelayTheme.tealSoft),
                       if (c.supportsFiles)
                         tool(
                             Icons.insert_drive_file_outlined,
@@ -3870,14 +3895,29 @@ class _MobileComposerState extends State<_MobileComposer> {
                                 ? null
                                 : () {
                                     c.onPickFile();
-                                  }),
+                                  },
+                            accent: RelayTheme.blue,
+                            soft: RelayTheme.blueSoft),
                       SizedBox(
                           width: 66,
                           child:
                               Column(mainAxisSize: MainAxisSize.min, children: [
-                            SizedBox(height: 48, child: c.voiceControl),
+                            Container(
+                                width: 48,
+                                height: 48,
+                                decoration: BoxDecoration(
+                                    color: RelayTheme.magentaSoft,
+                                    borderRadius: BorderRadius.circular(12)),
+                                child: IconTheme(
+                                    data: const IconThemeData(
+                                        color: RelayTheme.magenta, size: 23),
+                                    child: c.voiceControl)),
                             const SizedBox(height: 5),
-                            const Text('语音', style: TextStyle(fontSize: 11))
+                            const Text('语音',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: RelayTheme.magenta))
                           ])),
                       if (c.canned.isNotEmpty)
                         tool(Icons.bolt_outlined, '常用回复', () {
@@ -3893,12 +3933,16 @@ class _MobileComposerState extends State<_MobileComposer> {
                               c.focusNode.requestFocus();
                             },
                           );
-                        }),
+                        },
+                            accent: RelayTheme.amber,
+                            soft: RelayTheme.amberSoft),
                       tool(Icons.edit_note_outlined, '内部备注', () {
                         c.onToggleNote(true);
                         setState(() => _tools = false);
                         c.focusNode.requestFocus();
-                      }),
+                      },
+                          accent: RelayTheme.violet,
+                          soft: RelayTheme.violetSoft),
                     ])),
             ]));
   }
@@ -3921,7 +3965,7 @@ class _CannedMenu extends StatelessWidget {
   Widget build(BuildContext context) {
     return PopupMenuButton<String>(
       tooltip: '常用回复',
-      icon: const Icon(Icons.bolt_outlined),
+      icon: const Icon(Icons.bolt_outlined, color: RelayTheme.amber),
       onSelected: onPick,
       itemBuilder: (context) => <PopupMenuEntry<String>>[
         for (final entry in canned)

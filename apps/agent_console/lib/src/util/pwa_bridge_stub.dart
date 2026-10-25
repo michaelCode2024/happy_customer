@@ -1,4 +1,13 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+
 bool get browserOffline => false;
 Map<String, dynamic> pwaStatus() => {};
 Future<String> pwaAction(String action) async => '';
-void setAppBadge(int count) {}
+
+/// 安卓安装包用通知 setNumber 做桌面角标；网页走 Badging API。
+void setAppBadge(int count) {
+  if (defaultTargetPlatform != TargetPlatform.android) return;
+  const MethodChannel('tongyu/alerts')
+      .invokeMethod<void>('setBadge', {'count': count}).catchError((_) {});
+}

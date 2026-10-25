@@ -10,10 +10,18 @@ import 'package:tongyu_agent_console/src/ui/visitor_sidebar.dart';
 
 /// 右侧上下文与当前会话绑定；隐藏的标签页保留结果，切换会话时销毁旧草稿。
 class ConversationContextPanel extends StatefulWidget {
-  const ConversationContextPanel(
-      {super.key, required this.workbench, required this.onAdopt});
+  const ConversationContextPanel({
+    super.key,
+    required this.workbench,
+    required this.onAdopt,
+    this.initialTab = 1,
+    this.activeTabNotifier,
+  });
+
   final WorkbenchController workbench;
   final ValueChanged<AssistResult> onAdopt;
+  final int initialTab;
+  final ValueNotifier<int>? activeTabNotifier;
 
   @override
   State<ConversationContextPanel> createState() =>
@@ -21,7 +29,47 @@ class ConversationContextPanel extends StatefulWidget {
 }
 
 class _ConversationContextPanelState extends State<ConversationContextPanel> {
-  int _tab = 1;
+  late int _tab;
+
+  @override
+  void initState() {
+    super.initState();
+    _tab = widget.activeTabNotifier?.value ?? widget.initialTab;
+    widget.activeTabNotifier?.addListener(_onTabNotifierChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant ConversationContextPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.activeTabNotifier != widget.activeTabNotifier) {
+      oldWidget.activeTabNotifier?.removeListener(_onTabNotifierChanged);
+      widget.activeTabNotifier?.addListener(_onTabNotifierChanged);
+      if (widget.activeTabNotifier != null) {
+        _tab = widget.activeTabNotifier!.value;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.activeTabNotifier?.removeListener(_onTabNotifierChanged);
+    super.dispose();
+  }
+
+  void _onTabNotifierChanged() {
+    if (widget.activeTabNotifier != null &&
+        widget.activeTabNotifier!.value != _tab) {
+      setState(() => _tab = widget.activeTabNotifier!.value);
+    }
+  }
+
+  void _switchTab(int index) {
+    setState(() => _tab = index);
+    if (widget.activeTabNotifier != null &&
+        widget.activeTabNotifier!.value != index) {
+      widget.activeTabNotifier!.value = index;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -33,7 +81,8 @@ class _ConversationContextPanelState extends State<ConversationContextPanel> {
             for (var i = 0; i < 2; i++)
               Expanded(
                   child: InkWell(
-                onTap: () => setState(() => _tab = i),
+                key: ValueKey(i == 0 ? 'context-tab-profile' : 'context-tab-ai'),
+                onTap: () => _switchTab(i),
                 child: Container(
                   alignment: Alignment.center,
                   decoration: BoxDecoration(

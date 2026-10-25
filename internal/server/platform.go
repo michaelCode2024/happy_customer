@@ -746,6 +746,6 @@ func (a *API) platformCreateAgent(w http.ResponseWriter, r *http.Request, p auth
 		return
 	}
 	p.TenantID = id
-	a.createPlatformAgent(w, r, p)
+	a.createTenantAgent(w, r, p)
 }
 

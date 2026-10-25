@@ -1,6 +1,5 @@
 import 'package:tongyu_agent_console/src/ui/design_a.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:tongyu_agent_console/src/ui/assist_feedback_actions.dart';
 
 import 'package:tongyu_agent_console/src/api/api_exception.dart';
@@ -9,7 +8,7 @@ import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
 
 /// 坐席 AI 辅助条：会话摘要、回复建议、翻译、情感、润色、下一步。
 ///
-/// 关键约束：这里产出的都是草稿，需坐席手动「采纳」后才进入输入框发送。
+/// 关键约束：这里产出的都是草稿，需坐席手动「插入输入框」后才进入输入框发送。
 /// 它与自动回复严格分离——自动回复是对客承诺，助手只是给坐席的参考。
 class AiAssistPanel extends StatefulWidget {
   const AiAssistPanel({
@@ -63,8 +62,13 @@ class _AiAssistPanelState extends State<AiAssistPanel> {
     ('NEXT_ACTION', '下一步'),
   ];
 
-  // 这两类结果可直接「采纳」到输入框；其余仅作参考。
-  static const Set<String> _adoptable = <String>{'SUGGEST', 'POLISH'};
+  // 可直接插入输入框的任务；摘要 / 情感仍可插入，走同一按钮，不单独走反馈条。
+  static const Set<String> _adoptable = <String>{
+    'SUGGEST',
+    'POLISH',
+    'TRANSLATE',
+    'NEXT_ACTION',
+  };
 
   @override
   void didUpdateWidget(covariant AiAssistPanel oldWidget) {
@@ -439,21 +443,27 @@ class _ResultCard extends StatelessWidget {
             const SizedBox(height: 8),
             Wrap(
               children: <Widget>[
-                TextButton.icon(
-                  icon: const Icon(Icons.copy, size: 16),
-                  label: const Text('复制'),
-                  style: TextButton.styleFrom(
-                      visualDensity: VisualDensity.compact),
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(text: result.text));
-                  },
-                ),
+                // 建议 / 润色 / 翻译 / 下一步：带有用反馈的插入条。
                 if (_AiAssistPanelState._adoptable.contains(result.task))
                   AssistFeedbackActions(
                       key: ValueKey(result),
                       api: api,
                       result: result,
-                      onAdopt: onAdopt),
+                      onAdopt: onAdopt)
+                else
+                  // 摘要 / 情感：同样一键进输入框，不再只复制剪贴板。
+                  TextButton.icon(
+                    icon: const Icon(Icons.edit_outlined, size: 16),
+                    label: const Text('插入输入框'),
+                    style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact),
+                    onPressed: () {
+                      onAdopt(result);
+                      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                        const SnackBar(content: Text('已插入输入框，请确认后发送')),
+                      );
+                    },
+                  ),
               ],
             ),
           ],

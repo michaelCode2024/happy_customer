@@ -38,13 +38,16 @@ Future<void> disableBackgroundAlerts() async {
   }
 }
 
+/// 安卓安装包：本机轮询值班（非 FCM）。iOS 请用 PWA / 浏览器通知。
 Future<String> enableBackgroundPush(TongYuApi api) async {
-  if (defaultTargetPlatform != TargetPlatform.android)
-    return '此设备请使用网页版开启浏览器通知';
+  if (defaultTargetPlatform != TargetPlatform.android) {
+    return '此设备请使用网页版（PWA）开启浏览器通知';
+  }
   try {
     return await const MethodChannel('tongyu/alerts').invokeMethod<String>(
-            'enableBackground', {'server': api.server, 'token': api.token}) ??
-        '已开启后台提醒';
+            'enableBackground',
+            {'server': api.server, 'token': api.token}) ??
+        '安卓本机消息提醒已开启（进程内轮询，非云推送）';
   } catch (_) {
     return '后台提醒未开启，请允许系统通知权限后重试';
   }

@@ -21,8 +21,6 @@ declare global {
     TongYu?: TongYuGlobal;
     /** Optional configuration object, read before the script attributes. */
     TongYuSettings?: TongYuWidgetOptions;
-    /** 旧名：线上 Go 壳尚未全部切到 TongYuSettings 前兼容读取。 */
-    RelayDeskSettings?: TongYuWidgetOptions;
   }
 }
 
@@ -126,10 +124,10 @@ if (typeof window !== 'undefined') {
   };
   window.TongYu = api;
 
-  // Auto-mount: prefer TongYuSettings；线上旧 H5 壳仍写 RelayDeskSettings 时回退读取。
+  // Auto-mount：只读 TongYuSettings。用户端 / 店主端 / 店主 PC 已统一此名，不再回退旧名。
   // 出站事件协议仍是 source=tongyu，与宿主对齐。
   const boot = (): void => {
-    const raw = window.TongYuSettings ?? window.RelayDeskSettings /* compat alias; prefer TongYuSettings */;
+    const raw = window.TongYuSettings;
     // App WebView 在 DOCUMENT_START 注入 __tongyuHostIdentity；须在首次 mount 前并入，避免先匿名再鉴权。
     const hostIdentity = (window as Window & {
       __tongyuHostIdentity?: { identityToken?: string };

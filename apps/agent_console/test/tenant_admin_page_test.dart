@@ -7,7 +7,10 @@ import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
 import 'package:tongyu_agent_console/src/ui/tenant_admin_page.dart';
 
 void main() {
-  testWidgets('企业后台不提供建号或邀请入口', (tester) async {
+  testWidgets('企业主管可在席位内添加成员并看到一次性初始密码', (tester) async {
+    tester.view.physicalSize = const Size(1280, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     Map<String, dynamic>? creation;
     final api = TongYuApi(
         server: 'https://chat.example.com',
@@ -28,12 +31,14 @@ void main() {
                 ]
               },
             '/api/v1/admin/subscription' => {
-                'plan': 'STARTER',
-                'status': 'ACTIVE'
+                'plan': 'ENTERPRISE',
+                'status': 'ACTIVE',
+                'seatLimit': 10,
+                'usedSeats': 2,
               },
             '/api/v1/admin/audit' => {'items': []},
             '/api/v1/console/entitlements' => {
-                'plan': 'STARTER',
+                'plan': 'ENTERPRISE',
                 'features': {'ai': false, 'integrations': true}
               },
             _ => throw StateError('unexpected ${request.url.path}'),
@@ -42,13 +47,32 @@ void main() {
         }))
       ..token = 'test-session';
     addTearDown(api.close);
-    await tester.pumpWidget(MaterialApp(home: TenantAdminPage(api: api)));
+    // 关闭 Material 3 ink sparkle，避免本机 Flutter 引擎与 shader 版本不匹配干扰交互测试。
+    await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(
+            useMaterial3: true, splashFactory: NoSplash.splashFactory),
+        home: TenantAdminPage(api: api)));
     await tester.pumpAndSettle();
-    expect(find.text('添加成员'), findsNothing);
-    expect(find.text('邀请成员'), findsNothing);
-    expect(find.textContaining('新账号由平台管理员建立'), findsOneWidget);
-    expect(creation, isNull);
+    expect(find.text('添加成员'), findsWidgets);
+    expect(find.textContaining('剩余 8'), findsOneWidget);
+    await tester.tap(find.text('添加成员').first);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.widgetWithText(TextFormField, '成员姓名'), '客服三号');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, '登录用户名'), 'kf3');
+    final inboxTile = find.byType(CheckboxListTile);
+    await tester.ensureVisible(inboxTile);
+    await tester.tap(inboxTile, warnIfMissed: false);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('添加成员').last);
+    await tester.pumpAndSettle();
+    expect(creation?['email'], 'kf3');
+    expect(creation?['displayName'], '客服三号');
+    expect(creation?['inboxIds'], ['inbox1']);
+    expect(find.textContaining('初始密码：once-only'), findsOneWidget);
   });
+
   testWidgets('体验版入口保存失败保留弹窗，重试不提交 AI 配置', (tester) async {
     int saves = 0;
     final api = TongYuApi(
@@ -88,7 +112,10 @@ void main() {
         }))
       ..token = 'test-session';
     addTearDown(api.close);
-    await tester.pumpWidget(MaterialApp(home: TenantAdminPage(api: api)));
+    await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(
+            useMaterial3: true, splashFactory: NoSplash.splashFactory),
+        home: TenantAdminPage(api: api)));
     await tester.pumpAndSettle();
     await tester.tap(find.text('客服入口').first);
     await tester.pumpAndSettle();

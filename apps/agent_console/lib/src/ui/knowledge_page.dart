@@ -320,8 +320,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
                   setState(() => _tab = index);
                   if (index == 0) _load();
                 }),
-            if (_tab == 0) _metrics(theme),
-            if (_tab == 0 && _categories.isNotEmpty) _categoryCards(theme),
+            if (_tab == 0) _compactFilterAndMetricsBar(theme),
             Expanded(
                 child: _tab != 0
                     ? SupportAssetsPage(
@@ -372,7 +371,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
                         return Padding(
                             padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
                             child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
                                   Expanded(flex: 7, child: list),
                                   const SizedBox(width: 20),
@@ -383,140 +382,218 @@ class _KnowledgePageState extends State<KnowledgePage> {
                                 ]));
                       }))
           ]);
-          return viewport.maxWidth >= 900
-              ? SingleChildScrollView(
-                  child: SizedBox(
-                      height:
-                          viewport.maxHeight < 1000 ? 1000 : viewport.maxHeight,
-                      child: content))
-              : content;
+          return content;
         }));
   }
 
-  Widget _metrics(ThemeData theme) => LayoutBuilder(builder: (context, box) {
-        final metrics = [
-          ('知识条目', '${_entries.length}', Icons.menu_book_outlined),
-          (
-            '已启用',
-            '${_entries.where((e) => e.status == 'ACTIVE').length}',
-            Icons.check_circle_outline
-          ),
-          (
-            '缺少相似问法',
-            '${_entries.where((e) => e.questionExamples.isEmpty).length}',
-            Icons.edit_note_outlined
-          ),
-          ('内容分类', '${_categories.length}', Icons.category_outlined),
-        ];
-        return Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-            child: box.maxWidth < 900
-                ? Wrap(spacing: 10, runSpacing: 8, children: [
-                    for (final m in metrics) _summary(theme, m.$1, m.$2)
-                  ])
-                : Row(children: [
-                    for (var i = 0; i < metrics.length; i++) ...[
-                      if (i > 0) const SizedBox(width: 14),
-                      Expanded(
-                          child: WorkspaceKpiCard(
-                              label: metrics[i].$1,
-                              value: metrics[i].$2,
-                              icon: metrics[i].$3)),
-                    ]
-                  ]));
-      });
+  Widget _compactFilterAndMetricsBar(ThemeData theme) {
+    final activeCount = _entries.where((e) => e.status == 'ACTIVE').length;
+    final gapCount = _entries.where((e) => e.questionExamples.isEmpty).length;
+    final totalCount = _entries.length;
 
-  Widget _categoryCards(ThemeData theme) =>
-      LayoutBuilder(builder: (context, box) {
-        if (box.maxWidth < 900) return const SizedBox.shrink();
-        return SizedBox(
-            height: 72,
-            child: ListView.separated(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
-                scrollDirection: Axis.horizontal,
-                itemCount: _categories.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 10),
-                itemBuilder: (context, index) {
-                  final c = _categories[index],
-                      id = asString(_categories[index]['id']);
-                  final count =
-                      _entries.where((e) => e.categoryId == id).length;
-                  final selected = _categoryFilter == id;
-                  return SizedBox(
-                      width: 186,
-                      child: Material(
-                          color: selected
-                              ? theme.colorScheme.primary.withOpacity(.07)
-                              : theme.colorScheme.surface,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                              side: BorderSide(
-                                  color: selected
-                                      ? theme.colorScheme.primary
-                                          .withOpacity(.30)
-                                      : theme.colorScheme.outlineVariant)),
-                          child: InkWell(
-                              borderRadius: BorderRadius.circular(10),
-                              onTap: () => setState(() => _categoryFilter =
-                                  selected ? '' : id),
-                              child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 9),
-                                  child: Row(children: [
-                                    Container(
-                                      width: 26,
-                                      height: 26,
-                                      decoration: BoxDecoration(
-                                          color: theme.colorScheme.primary
-                                              .withOpacity(.08),
-                                          borderRadius:
-                                              BorderRadius.circular(7)),
-                                      child: Icon(Icons.folder_open_outlined,
-                                          size: 15,
-                                          color: theme.colorScheme.primary),
-                                    ),
-                                    const SizedBox(width: 9),
-                                    Expanded(
-                                        child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.center,
-                                            children: [
-                                          Text(asString(c['name']),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: const TextStyle(
-                                                  fontSize: 12.5,
-                                                  fontWeight:
-                                                      FontWeight.w600)),
-                                          const SizedBox(height: 1),
-                                          Text('$count 篇知识',
-                                              style: theme.textTheme
-                                                  .labelSmall
-                                                  ?.copyWith(
-                                                      fontSize: 10.5,
-                                                      color: theme.colorScheme
-                                                          .onSurfaceVariant)),
-                                        ])),
-                                  ])))));
-                }));
-      });
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 10),
+      child: LayoutBuilder(builder: (context, box) {
+        final isNarrow = box.maxWidth < 800;
 
-  Widget _summary(ThemeData theme, String title, String value) => Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      decoration: BoxDecoration(
-          color: theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: theme.colorScheme.outlineVariant)),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Text(title,
-            style: theme.textTheme.bodySmall?.copyWith(fontSize: 11.5)),
-        const SizedBox(width: 8),
-        Text(value,
-            style: theme.textTheme.titleSmall
-                ?.copyWith(fontSize: 13, color: theme.colorScheme.primary))
-      ]));
+        final categoryChips = SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _filterChip(
+                theme: theme,
+                label: '全部',
+                count: totalCount,
+                selected: _categoryFilter.isEmpty,
+                onTap: () => setState(() => _categoryFilter = ''),
+              ),
+              for (final c in _categories) ...[
+                const SizedBox(width: 8),
+                _filterChip(
+                  theme: theme,
+                  label: asString(c['name']),
+                  count: _entries
+                      .where((e) => e.categoryId == asString(c['id']))
+                      .length,
+                  selected: _categoryFilter == asString(c['id']),
+                  onTap: () {
+                    final id = asString(c['id']);
+                    setState(() =>
+                        _categoryFilter = _categoryFilter == id ? '' : id);
+                  },
+                ),
+              ],
+              if (_entries.any((e) => e.categoryId.isEmpty)) ...[
+                const SizedBox(width: 8),
+                _filterChip(
+                  theme: theme,
+                  label: '未分类',
+                  count: _entries.where((e) => e.categoryId.isEmpty).length,
+                  selected: _categoryFilter == 'uncategorized',
+                  onTap: () => setState(() => _categoryFilter =
+                      _categoryFilter == 'uncategorized'
+                          ? ''
+                          : 'uncategorized'),
+                ),
+              ],
+            ],
+          ),
+        );
+
+        final miniMetrics = Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE8F5E9),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: const Color(0xFFA5D6A7)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.check_circle_outline,
+                      size: 13, color: Color(0xFF2E7D32)),
+                  const SizedBox(width: 4),
+                  Text(
+                    '已启用 $activeCount',
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF2E7D32),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+              decoration: BoxDecoration(
+                color: gapCount > 0
+                    ? const Color(0xFFFFF3E0)
+                    : theme.colorScheme.surface,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: gapCount > 0
+                      ? const Color(0xFFFFCC80)
+                      : theme.colorScheme.outlineVariant,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    gapCount > 0
+                        ? Icons.warning_amber_rounded
+                        : Icons.edit_note_outlined,
+                    size: 13,
+                    color: gapCount > 0
+                        ? const Color(0xFFE65100)
+                        : theme.colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '缺少问法 $gapCount',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: gapCount > 0
+                          ? const Color(0xFFE65100)
+                          : theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+
+        if (isNarrow) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              categoryChips,
+              const SizedBox(height: 6),
+              miniMetrics,
+            ],
+          );
+        }
+
+        return Row(
+          children: [
+            Expanded(child: categoryChips),
+            const SizedBox(width: 12),
+            miniMetrics,
+          ],
+        );
+      }),
+    );
+  }
+
+  Widget _filterChip({
+    required ThemeData theme,
+    required String label,
+    required int count,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    final scheme = theme.colorScheme;
+    return Material(
+      color:
+          selected ? scheme.primary.withValues(alpha: 0.1) : scheme.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(
+          color: selected ? scheme.primary : scheme.outlineVariant,
+          width: selected ? 1.4 : 1,
+        ),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  color: selected ? scheme.primary : scheme.onSurface,
+                ),
+              ),
+              const SizedBox(width: 5),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 5, vertical: 0.5),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? scheme.primary.withValues(alpha: 0.18)
+                      : scheme.onSurface.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  '$count',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w600,
+                    color:
+                        selected ? scheme.primary : scheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _buildList(ThemeData theme, bool canEdit) {
     return Container(
@@ -528,121 +605,170 @@ class _KnowledgePageState extends State<KnowledgePage> {
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: <Widget>[
-          Container(
-              padding: const EdgeInsets.fromLTRB(14, 11, 12, 10),
-              decoration: BoxDecoration(
-                  border: Border(
-                      bottom: BorderSide(
-                          color: theme.colorScheme.outlineVariant
-                              .withOpacity(.7)))),
-              child: Row(children: [
+          // 窄屏把标题与搜索/状态下拉拆成两行，避免固定宽搜索框把 Row 挤爆。
+          LayoutBuilder(builder: (context, headerBox) {
+            final stackTools = headerBox.maxWidth < 520;
+            final titleRow = Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
                 Container(
-                  width: 26,
-                  height: 26,
+                  width: 24,
+                  height: 24,
                   decoration: BoxDecoration(
-                      color: theme.colorScheme.primary.withOpacity(.08),
-                      borderRadius: BorderRadius.circular(7)),
+                    color: theme.colorScheme.primary.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
                   child: Icon(Icons.article_outlined,
-                      size: 15, color: theme.colorScheme.primary),
+                      size: 14, color: theme.colorScheme.primary),
                 ),
                 const SizedBox(width: 8),
-                Text('知识条目',
-                    style: theme.textTheme.titleSmall?.copyWith(fontSize: 13)),
-                const SizedBox(width: 8),
-                WorkspaceTag(text: '${_visibleEntries.length} 条'),
-              ])),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-            child: Row(
-              children: <Widget>[
-                Expanded(
-                  child: TextField(
-                    controller: _search,
-                    style: const TextStyle(fontSize: 12.5),
-                    decoration: const InputDecoration(
-                      hintText: '搜索标题或内容',
-                      prefixIcon: Icon(Icons.search_rounded, size: 17),
-                      prefixIconConstraints:
-                          BoxConstraints(minWidth: 34, minHeight: 34),
-                      contentPadding:
-                          EdgeInsets.symmetric(horizontal: 8, vertical: 9),
-                      isDense: true,
-                    ),
-                    onSubmitted: (_) => _load(),
+                Text(
+                  '知识条目',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(width: 6),
-                IconButton(
-                  tooltip: '搜索',
-                  visualDensity: VisualDensity.compact,
-                  onPressed: _load,
-                  icon: const Icon(Icons.arrow_forward_rounded, size: 18),
-                ),
+                const SizedBox(width: 8),
+                WorkspaceTag(text: '${_visibleEntries.length} 条'),
+                if (!canEdit) ...[
+                  const SizedBox(width: 8),
+                  Tooltip(
+                    message: '只读权限 · 点击条目可查看全文与测试',
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.info_outline,
+                            size: 13,
+                            color: theme.colorScheme.onSurfaceVariant),
+                        const SizedBox(width: 3),
+                        Text(
+                          '只读',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-            child: LayoutBuilder(builder: (context, constraints) {
-              final category = DropdownButtonFormField<String>(
-                value: [
-                  '',
-                  'uncategorized',
-                  ..._categories.map((c) => asString(c['id']))
-                ].contains(_categoryFilter)
-                    ? _categoryFilter
-                    : '',
-                isExpanded: true,
-                decoration: const InputDecoration(
-                    labelText: '知识分类',
-                    isDense: true,
-                    contentPadding:
-                        EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
-                items: [
-                  const DropdownMenuItem(value: '', child: Text('全部分类')),
-                  const DropdownMenuItem(
-                      value: 'uncategorized', child: Text('未分类')),
-                  for (final c in _categories)
-                    DropdownMenuItem(
-                        value: asString(c['id']),
-                        child: Text(asString(c['name'])))
-                ],
-                onChanged: (v) => setState(() => _categoryFilter = v ?? ''),
-              );
-              final status = DropdownButtonFormField<String>(
-                value: _statusFilter,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                    labelText: '启用状态',
-                    isDense: true,
-                    contentPadding:
-                        EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
-                items: const [
-                  DropdownMenuItem(value: '', child: Text('全部状态')),
-                  DropdownMenuItem(value: 'ACTIVE', child: Text('已启用')),
-                  DropdownMenuItem(value: 'DISABLED', child: Text('已停用'))
-                ],
-                onChanged: (v) => setState(() => _statusFilter = v ?? ''),
-              );
-              return Row(children: [
-                Expanded(child: category),
-                const SizedBox(width: 12),
-                Expanded(child: status)
-              ]);
-            }),
-          ),
-          if (!canEdit)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Text(
-                '只读权限 · 点击标题查看全文，点击测试检查回答。',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+            );
+            final searchField = TextField(
+              controller: _search,
+              style: const TextStyle(fontSize: 12),
+              decoration: InputDecoration(
+                hintText: '搜索标题或内容',
+                hintStyle: TextStyle(
+                  fontSize: 12,
+                  color: theme.colorScheme.onSurfaceVariant
+                      .withValues(alpha: 0.7),
+                ),
+                prefixIcon: const Icon(Icons.search_rounded, size: 15),
+                prefixIconConstraints:
+                    const BoxConstraints(minWidth: 28, minHeight: 28),
+                suffixIcon: _search.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 14),
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        onPressed: () {
+                          _search.clear();
+                          _load();
+                        },
+                      )
+                    : null,
+                suffixIconConstraints:
+                    const BoxConstraints(minWidth: 26, minHeight: 26),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                isDense: true,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(7),
+                  borderSide:
+                      BorderSide(color: theme.colorScheme.outlineVariant),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(7),
+                  borderSide:
+                      BorderSide(color: theme.colorScheme.outlineVariant),
                 ),
               ),
-            ),
-          const SizedBox(height: 4),
-          const Divider(height: 1),
+              onSubmitted: (_) => _load(),
+            );
+            final statusDropdown = SizedBox(
+              height: 32,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(7),
+                  border: Border.all(color: theme.colorScheme.outlineVariant),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _statusFilter,
+                    isDense: true,
+                    style: theme.textTheme.bodySmall?.copyWith(fontSize: 12),
+                    icon: const Icon(Icons.arrow_drop_down, size: 18),
+                    items: const [
+                      DropdownMenuItem(value: '', child: Text('全部状态')),
+                      DropdownMenuItem(
+                          value: 'ACTIVE', child: Text('已启用')),
+                      DropdownMenuItem(
+                          value: 'DISABLED', child: Text('已停用')),
+                    ],
+                    onChanged: (v) =>
+                        setState(() => _statusFilter = v ?? ''),
+                  ),
+                ),
+              ),
+            );
+            final toolsRow = Row(
+              children: [
+                Expanded(
+                  child: SizedBox(height: 32, child: searchField),
+                ),
+                const SizedBox(width: 8),
+                statusDropdown,
+              ],
+            );
+            return Container(
+              padding: EdgeInsets.fromLTRB(14, 8, 14, stackTools ? 10 : 8),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surface,
+                border: Border(
+                  bottom: BorderSide(
+                    color: theme.colorScheme.outlineVariant
+                        .withValues(alpha: 0.7),
+                  ),
+                ),
+              ),
+              child: stackTools
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        titleRow,
+                        const SizedBox(height: 8),
+                        toolsRow,
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        titleRow,
+                        const SizedBox(width: 12),
+                        const Spacer(),
+                        SizedBox(
+                          width: 170,
+                          height: 32,
+                          child: searchField,
+                        ),
+                        const SizedBox(width: 8),
+                        statusDropdown,
+                      ],
+                    ),
+            );
+          }),
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
@@ -877,34 +1003,41 @@ class _KnowledgePageState extends State<KnowledgePage> {
 
   Widget _buildBench(ThemeData theme) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          const Center(child: TongYuArtwork(ai: true, size: 145)),
-          const SizedBox(height: 10),
-          Text('让好知识，遇见好答案。',
-              style: theme.textTheme.titleLarge
-                  ?.copyWith(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 16),
+          const Center(child: TongYuArtwork(ai: true, size: 100)),
+          const SizedBox(height: 8),
+          Center(
+            child: Text(
+              '让好知识，遇见好答案。',
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w700),
+            ),
+          ),
+          const SizedBox(height: 12),
           Row(
             children: <Widget>[
               Icon(Icons.auto_awesome_outlined,
-                  size: 20, color: theme.colorScheme.primary),
-              const SizedBox(width: 8),
-              Text('AI 回答测试', style: theme.textTheme.titleSmall),
+                  size: 18, color: theme.colorScheme.primary),
+              const SizedBox(width: 7),
+              Text('AI 回答测试',
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w600)),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
           Text(
             '模拟真实提问，检查回答内容与知识来源。',
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
+              fontSize: 11.5,
             ),
           ),
           const SizedBox(height: 12),

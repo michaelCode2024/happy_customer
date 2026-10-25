@@ -41,7 +41,12 @@ extension QueueFilterLabel on QueueFilter {
 /// That is what makes a dropped connection a non-event rather than a data-loss
 /// bug.
 class WorkbenchController extends ChangeNotifier {
-  WorkbenchController({required this.api, this.selfId = '', this.visitorAlert});
+  WorkbenchController({
+    required this.api,
+    this.selfId = '',
+    this.visitorAlert,
+    Set<String> autoAcceptInboxIds = const <String>{},
+  }) : _autoAcceptInboxIds = Set<String>.unmodifiable(autoAcceptInboxIds);
 
   final void Function(String messageId, String senderName)? visitorAlert;
   final DateTime _alertsSince = DateTime.now();
@@ -55,6 +60,14 @@ class WorkbenchController extends ChangeNotifier {
   /// console compares `senderId` against this to decide who may edit or recall
   /// a message, and which reactions are already chosen.
   final String selfId;
+
+  /// 入口开了「分配后自动接单」时，打开可领取会话会直接 claim，不再多点一次。
+  /// 自动回复先答时会话仍未分配，靠这一步把「开了自动接单却还要点接待」补齐。
+  Set<String> _autoAcceptInboxIds;
+
+  void setAutoAcceptInboxIds(Iterable<String> ids) {
+    _autoAcceptInboxIds = Set<String>.unmodifiable(ids);
+  }
 
   // ------------------------------------------------------------------- state
 
@@ -840,7 +853,25 @@ class WorkbenchController extends ChangeNotifier {
     // pinned message itself has aged out of the window.
     unawaited(_loadPins(conversationId));
     await _loadLatest(conversationId);
+    if (_selectedId != conversationId) return;
+    await _maybeAutoClaim(conversationId);
+    if (_selectedId != conversationId) return;
     unawaited(markRead(conversationId));
+  }
+
+  /// 入口 autoAccept 开启时，点开待接待/待确认会话即接入，避免客服再点一次按钮。
+  Future<void> _maybeAutoClaim(String conversationId) async {
+    final conversation = selected;
+    if (conversation == null || conversation.id != conversationId) {
+      return;
+    }
+    if (!conversation.canClaim(selfId)) {
+      return;
+    }
+    if (!_autoAcceptInboxIds.contains(conversation.inboxId)) {
+      return;
+    }
+    await claim();
   }
 
   void clearSelection() {

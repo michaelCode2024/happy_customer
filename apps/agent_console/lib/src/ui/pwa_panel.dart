@@ -302,14 +302,24 @@ class _PwaPanelState extends State<PwaPanel> {
     if (!kIsWeb) return const SizedBox.shrink();
     final update = _status['update'] == true;
 
-    // 只保留热更新提示，不展示任何离线、离线安装恢复相关横幅
+    // 设置 /「更多」页入口：点一下检查；已有 waiting worker 则直接走确认更新。
     if (widget.settingsOnly) {
       return ListTile(
-        leading: const Icon(Icons.system_update_alt_rounded),
+        leading: Icon(
+          Icons.system_update_alt_rounded,
+          color: update ? const Color(0xFF3263FF) : null,
+        ),
         title: const Text('系统更新'),
-        subtitle: Text(update ? '新版本已就绪，请保存草稿后更新' : '已是最新版本'),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: () => _action('checkUpdate'),
+        subtitle: Text(update ? '新版本已就绪，请保存草稿后更新' : '检查并安装网页版新版本'),
+        trailing: update
+            ? const Icon(Icons.circle, size: 10, color: Color(0xFF3263FF))
+            : const Icon(Icons.chevron_right),
+        onTap: () async {
+          await _action('checkUpdate');
+          if (!mounted) return;
+          setState(() => _status = pwaStatus());
+          if (_status['update'] == true) await _confirmUpdate();
+        },
       );
     }
 

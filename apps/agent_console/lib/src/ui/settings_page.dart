@@ -635,9 +635,9 @@ class _SettingsPageState extends State<SettingsPage> {
     final allAutoAccept =
         inboxes.every((inbox) => inbox.autoAssign && inbox.autoAccept);
     if (allAutoAccept) {
-      return '在线时新会话会自动分到并接单，可直接回复。离开或离线后不再自动分配，已接待的会话保留。';
+      return '在线时系统会自动分单；打开待接待会话也会自动接入，可直接回复。离开或离线后不再自动分配，已接待的会话保留。';
     }
-    return '在线时可收到新会话分配；若入口未开「分配后自动接单」，仍需点一次接单。离开或离线后不再自动分配，已接待的会话保留。';
+    return '在线时可收到新会话分配；若入口未开「分配后自动接单」，打开会话后仍需点一次接单。离开或离线后不再自动分配，已接待的会话保留。';
   }
 
   static String _roleLabel(String role) => switch (role) {
@@ -861,7 +861,7 @@ class _VersionCard extends StatelessWidget {
           Text(
             showAndroidCheck
                 ? '安卓安装包会对照服务器发行清单检查更新；有新版本时将提示下载安装。'
-                : '网页 / 桌面安装版请使用上方「安装与离线」中的检查更新。',
+                : '网页 / 桌面安装版请点上方「系统更新」检查；有新版本时可立即应用。',
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),

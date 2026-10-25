@@ -105,6 +105,49 @@ function escapeAttr(value: string): string {
   return escapeHtml(value);
 }
 
+/** 解析 #RGB / #RRGGBB，失败返回 null。 */
+function parseHexColor(value: string): [number, number, number] | null {
+  const raw = value.trim().replace(/^#/, '');
+  if (!/^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(raw)) return null;
+  const hex = raw.length === 3
+    ? raw.split('').map((c) => c + c).join('')
+    : raw;
+  return [
+    Number.parseInt(hex.slice(0, 2), 16),
+    Number.parseInt(hex.slice(2, 4), 16),
+    Number.parseInt(hex.slice(4, 6), 16),
+  ];
+}
+
+/** 相对亮度（sRGB），用于判断浅色主色不能当白底字色。 */
+function relativeLuminance(rgb: [number, number, number]): number {
+  const linear = rgb.map((channel) => {
+    const s = channel / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * linear[0]! + 0.7152 * linear[1]! + 0.0722 * linear[2]!;
+}
+
+/**
+ * 铺在主色底上的字色：浅黄/奶油用深墨，通语蓝等深色用白。
+ * 渠道 customCss 可再覆盖 --rd-accent-ink。
+ */
+function onAccentInk(accent: string, lightTheme: boolean): string {
+  const rgb = parseHexColor(accent);
+  if (!rgb) return lightTheme ? '#ffffff' : '#eef2f1';
+  return relativeLuminance(rgb) > 0.55 ? '#171717' : '#ffffff';
+}
+
+/**
+ * 白底/淡染芯片字色：浅主色用深墨（彩站黄），深主色仍用主色本身（通语蓝）。
+ * 与 onAccentInk 分开，避免蓝主题芯片变成「白字浅底」。
+ */
+function chipInk(accent: string, lightTheme: boolean): string {
+  const rgb = parseHexColor(accent);
+  if (!rgb) return lightTheme ? '#1F2329' : '#eef2f1';
+  return relativeLuminance(rgb) > 0.55 ? '#171717' : accent;
+}
+
 function timeLabel(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) {
@@ -1597,13 +1640,16 @@ export class WidgetView {
   #styles(): string {
     const light = this.#options.theme !== 'dark';
     const accent = this.#options.primaryColor;
+    // 浅色品牌主色（彩站黄/奶油顶栏）不能直接当字色，否则常见问题芯片白底上看不见。
+    const accentInk = onAccentInk(accent, light);
+    const questionInk = chipInk(accent, light);
     const radius = this.#options.bubbleRadius ?? 12;
     const fontStack = this.#options.fontFamily ||
       'system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif';
     const side = this.#options.position === 'left' ? 'left' : 'right';
     return `
 :host { all: initial; }
-:host { --rd-accent: ${accent}; --rd-radius: ${radius}px; --rd-radius-sm: ${Math.max(0, radius - 8)}px; --rd-font: ${fontStack}; }
+:host { --rd-accent: ${accent}; --rd-accent-ink: ${accentInk}; --rd-chip-ink: ${questionInk}; --rd-radius: ${radius}px; --rd-radius-sm: ${Math.max(0, radius - 8)}px; --rd-font: ${fontStack}; }
 * { box-sizing: border-box; }
 /* 隐藏属性必须压过组件布局，避免文件输入框或导航按钮泄漏到界面。 */
 [hidden] { display: none !important; }
@@ -1611,9 +1657,9 @@ export class WidgetView {
 .rd-launcher-slot { bottom: 20px; }
 .rd-panel-slot { bottom: 20px; }
 .rd-launcher {
-  display: inline-flex; align-items: center; gap: 8px; border: 1px solid ${accent}; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--rd-accent, ${accent}); cursor: pointer;
   border-radius: var(--rd-radius, 12px); padding: 10px 14px; font: 600 14px/1.2 var(--rd-font);
-  color: #fff; background: ${accent};
+  color: var(--rd-accent-ink, ${accentInk}); background: var(--rd-accent, ${accent});
 }
 .rd-launcher:hover { filter: brightness(1.05); }
 .rd-launcher:focus-visible { outline: 2px solid ${accent}; outline-offset: 2px; }
@@ -1680,7 +1726,7 @@ ${this.#options.embedded ? `
 .rd-messages { background: ${light ? '#f7f8fa' : '#171b24'}; flex: 1; overflow-y: auto; padding: 20px 18px 12px; display: flex; flex-direction: column; gap: 16px; scrollbar-width: thin; }
 .rd-messages::-webkit-scrollbar { width: 6px; }
 .rd-messages::-webkit-scrollbar-thumb { background: ${light ? '#d1d5db' : '#4b5563'}; border-radius: 3px; }
-.rd-channel {padding:10px 16px;border-top:1px solid #edf0f5;background:${light ? '#fff' : '#1f2937'};max-height:104px;overflow:auto;flex-shrink:0}.rd-channel[hidden]{display:none}.rd-channel-row{display:flex;gap:8px;flex-wrap:wrap}.rd-channel-chip{font:inherit;font-size:12px;color:#3370ff;background:#f0f5ff;border:0;border-radius:6px;padding:7px 10px;text-decoration:none;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}.rd-welcome-suggestions{margin:12px 0 20px 38px}.rd-guide-title{color:#6b7280;font-size:12px;margin-bottom:8px}.rd-channel-card{display:flex;gap:12px;border:1px solid #edf0f5;border-radius:8px;padding:12px;margin:8px 0}.rd-channel-card img{width:56px;height:56px;object-fit:cover;border-radius:6px}.rd-channel-card p{font-size:12px;color:#6b7280;margin:5px 0}.rd-empty { display: flex; align-items: flex-start; gap: 10px; color: inherit; padding: 12px 0; }
+.rd-channel{padding:10px 16px;border-top:1px solid #edf0f5;background:${light ? '#fff' : '#1f2937'};max-height:104px;overflow:auto;flex-shrink:0}.rd-channel[hidden]{display:none}.rd-channel-row{display:flex;gap:8px;flex-wrap:wrap}.rd-channel-chip{font:inherit;font-size:12px;color:var(--rd-chip-ink,${questionInk});background:color-mix(in srgb,var(--rd-accent,${accent}) 16%,${light ? '#ffffff' : '#171b24'});border:1px solid color-mix(in srgb,var(--rd-accent,${accent}) 40%,transparent);border-radius:6px;padding:7px 10px;text-decoration:none;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}.rd-welcome-suggestions{margin:12px 0 20px 38px}.rd-guide-title{color:#6b7280;font-size:12px;margin-bottom:8px}.rd-channel-card{display:flex;gap:12px;border:1px solid #edf0f5;border-radius:8px;padding:12px;margin:8px 0}.rd-channel-card img{width:56px;height:56px;object-fit:cover;border-radius:6px}.rd-channel-card p{font-size:12px;color:#6b7280;margin:5px 0}.rd-empty { display: flex; align-items: flex-start; gap: 10px; color: inherit; padding: 12px 0; }
 .rd-empty p { margin: 0; max-width: 280px; line-height: 1.8; padding: 12px 14px; border-radius: 3px 12px 12px; background: ${light ? '#ffffff' : '#1f2937'}; border: 1px solid ${light ? '#eef0f1' : '#374151'}; }
 .rd-empty small { display: block; max-width: 280px; margin-top: 12px; font-size: 11px; line-height: 1.7; color: ${light ? '#858d97' : '#a8aebb'}; }
 .rd-empty .rd-avatar { align-self: flex-start; }
@@ -1898,7 +1944,7 @@ ${this.#options.embedded ? `
 .rd-input:focus { border-color: ${accent}; background: ${light ? '#ffffff' : '#111827'}; }
 .rd-send {
   display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex: none;
-  border: 0; border-radius: 6px; background: ${accent}; color: #fff; cursor: pointer;
+  border: 0; border-radius: 6px; background: var(--rd-accent, ${accent}); color: var(--rd-accent-ink, ${accentInk}); cursor: pointer;
 }
 .rd-send:hover:not(:disabled) { filter: brightness(1.05); }
 .rd-send svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
@@ -1940,7 +1986,7 @@ ${this.#options.launcher === 'bubble' ? '.rd-launcher-label { display: none; }' 
 .rd-body, .rd-messages { background: #F5F7FA; }
 .rd-messages { gap: 16px; padding: 16px 14px 12px; }
 .rd-empty { padding: 12px; border: 1px solid #E5E8EF; border-radius: 12px; background: #fff; box-shadow: 0 2px 6px rgba(31,35,41,.04); gap: 12px; }
-.rd-empty .rd-avatar.lg { width: 44px; height: 44px; border-radius: 12px; background: ${accent}; color: #fff; }
+.rd-empty .rd-avatar.lg { width: 44px; height: 44px; border-radius: 12px; background: var(--rd-accent, ${accent}); color: var(--rd-accent-ink, ${accentInk}); }
 .rd-welcome-body { flex: 1; min-width: 0; }
 .rd-welcome-body > strong { font-size: 14px; font-weight: 600; }
 .rd-empty p { padding: 0; border: 0; background: transparent; border-radius: 0; max-width: none; color: #646A73; font-size: 13px; line-height: 1.6; margin-top: 3px; }
@@ -1949,8 +1995,9 @@ ${this.#options.launcher === 'bubble' ? '.rd-launcher-label { display: none; }' 
 .rd-guide-title { color: #8F959E; margin-bottom: 6px; }
 .rd-channel { border-color: #E5E8EF; padding: 8px 14px; }
 .rd-channel-row { gap: 6px; }
-.rd-channel-chip { color: ${accent}; background: #fff; border: 1px solid ${accent}40; border-radius: 999px; padding: 4px 10px; font-size: 12px; }
-.rd-channel-chip:hover { background: ${accent}0d; }
+/* 芯片铺在浅底上：浅主色用深墨字，深主色可保留品牌色字；勿写死 color:${accent}。 */
+.rd-channel-chip { color: var(--rd-chip-ink, ${questionInk}); background: color-mix(in srgb, var(--rd-accent, ${accent}) 18%, #fff); border: 1px solid color-mix(in srgb, var(--rd-accent, ${accent}) 42%, transparent); border-radius: 999px; padding: 4px 10px; font-size: 12px; }
+.rd-channel-chip:hover { background: color-mix(in srgb, var(--rd-accent, ${accent}) 28%, #fff); }
 .rd-channel-card { border-color: #E5E8EF; border-radius: 10px; }
 .rd-row { align-items: flex-start; gap: 8px; }
 .rd-avatar.sm { width: 32px; height: 32px; border-radius: 50%; align-self: flex-start; background: color-mix(in srgb, var(--rd-accent, ${accent}) 12%, transparent); color: var(--rd-accent, ${accent}); }
@@ -1958,12 +2005,12 @@ ${this.#options.launcher === 'bubble' ? '.rd-launcher-label { display: none; }' 
 .rd-bubble-group { max-width: calc(100% - 44px); gap: 4px; }
 .rd-row.is-mine .rd-bubble-group { max-width: 85%; }
 .rd-sender { font-size: 12px; color: #646A73; }
-  .rd-ai-badge { display: inline-flex; align-items: center; justify-content: center; margin-left: 6px; padding: 0 6px; height: 15px; font-size: 10px; font-weight: 700; line-height: 1; color: #fff; background: ${accent}; border-radius: 4px; vertical-align: middle; letter-spacing: .5px; }
+  .rd-ai-badge { display: inline-flex; align-items: center; justify-content: center; margin-left: 6px; padding: 0 6px; height: 15px; font-size: 10px; font-weight: 700; line-height: 1; color: var(--rd-accent-ink, ${accentInk}); background: var(--rd-accent, ${accent}); border-radius: 4px; vertical-align: middle; letter-spacing: .5px; }
   .rd-ai-note { font-size: 11px; color: #8F959E; display: inline-flex; align-items: center; gap: 6px; margin-top: 2px; }
-  .rd-handoff-btn { border: 1px solid ${accent}; color: ${accent}; background: transparent; border-radius: 999px; padding: 1px 10px; font-size: 11px; line-height: 1.6; cursor: pointer; }
-  .rd-handoff-btn:hover { background: ${accent}; color: #fff; }
+  .rd-handoff-btn { border: 1px solid color-mix(in srgb, var(--rd-accent, ${accent}) 55%, #646A73); color: var(--rd-chip-ink, ${questionInk}); background: color-mix(in srgb, var(--rd-accent, ${accent}) 14%, #fff); border-radius: 999px; padding: 1px 10px; font-size: 11px; line-height: 1.6; cursor: pointer; }
+  .rd-handoff-btn:hover { background: var(--rd-accent, ${accent}); color: var(--rd-accent-ink, ${accentInk}); }
 .rd-bubble { padding: 9px 12px; border-color: #E5E8EF; border-radius: 4px 12px 12px; color: #1F2329; box-shadow: 0 1px 3px rgba(31,35,41,.02); }
-.rd-row.is-mine .rd-bubble { background: ${accent}; color: #fff; border-color: ${accent}; border-radius: var(--rd-radius, 12px) var(--rd-radius-sm, 4px) var(--rd-radius, 12px) var(--rd-radius, 12px); }
+.rd-row.is-mine .rd-bubble { background: var(--rd-accent, ${accent}); color: var(--rd-accent-ink, ${accentInk}); border-color: var(--rd-accent, ${accent}); border-radius: var(--rd-radius, 12px) var(--rd-radius-sm, 4px) var(--rd-radius, 12px) var(--rd-radius, 12px); }
 .rd-bubble:has(.rd-image) { padding: 6px; border-radius: 12px; }
 .rd-image { margin: 0; }
 .rd-image img { border-radius: 8px; min-width: 120px; min-height: 90px; }
@@ -1977,14 +2024,15 @@ ${this.#options.launcher === 'bubble' ? '.rd-launcher-label { display: none; }' 
 .rd-input::placeholder { color: #8F959E; }
 .rd-composer-row .rd-input:focus { border-color: ${accent}; }
 .rd-composer-row .rd-send { width: 60px; height: 36px; border-radius: 18px; font: 500 14px "Microsoft YaHei", sans-serif; }
-.is-embedded .rd-header { position: relative; min-height: 56px; padding: 6px 12px; }
+/* iPhone 嵌入：父页 viewport-fit=cover 时 iframe 能读到 safe-area；宿主不垫顶，顶栏必须自己让出，否则与状态栏重叠。 */
+.is-embedded .rd-header { position: relative; min-height: 56px; padding: calc(6px + env(safe-area-inset-top, 0px)) 12px 6px; }
 .is-embedded .rd-header-main { margin: 0 auto; max-width: calc(100% - 88px); text-align: center; }
 .is-embedded .rd-heading { align-items: center; }
 .is-embedded .rd-heading strong { font-size: 18px; }
 .is-embedded .rd-service-subtitle { display: block; }
 .is-embedded .rd-subtitle { font-size: 11px; }
-.is-embedded .rd-header-actions { position: absolute; right: 8px; top: 10px; }
-.is-embedded .rd-page-back { position: fixed; left: 8px; top: 10px; }
+.is-embedded .rd-header-actions { position: absolute; right: 8px; top: calc(10px + env(safe-area-inset-top, 0px)); }
+.is-embedded .rd-page-back { position: fixed; left: 8px; top: calc(10px + env(safe-area-inset-top, 0px)); }
 .is-embedded .rd-back { display: none; }
 .is-embedded .rd-body, .is-embedded .rd-messages { background: #F2F3F5; }
 @media (max-width: 480px) {

@@ -697,15 +697,22 @@ func (a *API) adminAgents(w http.ResponseWriter, r *http.Request, p auth.Princip
 	respond(w, 200, map[string]any{"items": items})
 }
 
-// 企业后台不可建号；服务端拒绝直调，避免只隐藏按钮留下绕过入口。
+// 客服主管在本企业席位额度内建号；普通坐席不能建同事账号。
 func (a *API) adminCreateAgent(w http.ResponseWriter, r *http.Request, p auth.Principal) {
-	failCode(w, 403, "PLATFORM_REQUIRED", "账户只能由超级管理员建立")
+	if p.Kind != auth.KindAgent || p.Role != auth.RoleSupervisor {
+		failCode(w, 403, "FORBIDDEN", "仅客服主管可添加团队成员")
+		return
+	}
+	a.createTenantAgent(w, r, p)
 }
 
-func (a *API) createPlatformAgent(w http.ResponseWriter, r *http.Request, p auth.Principal) {
-	// 建号逻辑只接收已通过平台会话鉴权的身份。
-	if p.Kind != auth.KindPlatform {
-		failCode(w, 403, "PLATFORM_REQUIRED", "账户只能由超级管理员建立")
+// 建号共用逻辑：平台超管代开，或企业主管在席位内自助添加。
+func (a *API) createTenantAgent(w http.ResponseWriter, r *http.Request, p auth.Principal) {
+	switch {
+	case p.Kind == auth.KindPlatform:
+	case p.Kind == auth.KindAgent && p.Role == auth.RoleSupervisor:
+	default:
+		failCode(w, 403, "FORBIDDEN", "无权建立账户")
 		return
 	}
 	var in struct {
@@ -746,7 +753,7 @@ func (a *API) createPlatformAgent(w http.ResponseWriter, r *http.Request, p auth
 	}
 	password := in.Password
 	if password == "" {
-		// Convenience for onboarding: generate a random password and return it once.
+		// 未指定密码时生成一次可见的初始密码，便于当面交付；不落库明文。
 		var err error
 		password, _, err = auth.NewOpaqueToken()
 		if err != nil {
@@ -806,7 +813,11 @@ func (a *API) createPlatformAgent(w http.ResponseWriter, r *http.Request, p auth
 		fail(w, 500, "创建坐席失败")
 		return
 	}
-	a.recordAudit(r.Context(), p.TenantID, "PLATFORM", p.PlatformAdminID, "agent.create", "agent", id, map[string]any{"email": email, "role": role})
+	actorType, actorID := "PLATFORM", p.PlatformAdminID
+	if p.Kind == auth.KindAgent {
+		actorType, actorID = "AGENT", p.AgentID
+	}
+	a.recordAudit(r.Context(), p.TenantID, actorType, actorID, "agent.create", "agent", id, map[string]any{"email": email, "role": role})
 	respond(w, 201, map[string]any{"id": id, "email": email, "role": role, "initialPassword": password})
 }
 

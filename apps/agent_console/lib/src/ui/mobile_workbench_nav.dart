@@ -257,9 +257,9 @@ class MobileBottomNavBar extends StatelessWidget {
             ),
           _buildNavItem(
             index: showKnowledge ? 3 : 2,
-            label: '设置',
-            icon: Icons.settings_outlined,
-            activeIcon: Icons.settings_rounded,
+            label: '更多',
+            icon: Icons.apps_outlined,
+            activeIcon: Icons.apps_rounded,
           ),
         ],
       ),
@@ -351,6 +351,217 @@ class MobileBottomNavBar extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 手机底栏「更多」入口项：按业务分组展示，点进各功能页。
+class MobileMoreEntry {
+  const MobileMoreEntry({
+    required this.label,
+    required this.group,
+    required this.icon,
+    required this.onTap,
+  });
+
+  final String label;
+  final String group;
+  final IconData icon;
+  final VoidCallback onTap;
+}
+
+/// 手机「更多」枢纽页：替代原来的 bottom sheet，做成完整页面更像原生 App。
+class MobileMoreHubPage extends StatelessWidget {
+  const MobileMoreHubPage({
+    super.key,
+    required this.entries,
+    this.agentName,
+    this.tenantName,
+    this.onOpenSettings,
+    this.header,
+  });
+
+  final List<MobileMoreEntry> entries;
+  final String? agentName;
+  final String? tenantName;
+  final VoidCallback? onOpenSettings;
+  /// 页顶附加入口（如网页版「系统更新」），避免埋进设置子页后找不到。
+  final Widget? header;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final bg = isDark ? theme.scaffoldBackgroundColor : const Color(0xFFF2F4F8);
+    final card = isDark ? theme.colorScheme.surface : Colors.white;
+
+    // 按 group 保序聚合，同一组内顺序与菜单配置一致。
+    final groups = <String, List<MobileMoreEntry>>{};
+    for (final e in entries) {
+      (groups[e.group.isEmpty ? '其它' : e.group] ??= []).add(e);
+    }
+
+    return ColoredBox(
+      color: bg,
+      child: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: SafeArea(
+              bottom: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '更多',
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 26,
+                        letterSpacing: -0.4,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      [
+                        if (tenantName != null && tenantName!.isNotEmpty)
+                          tenantName!,
+                        if (agentName != null && agentName!.isNotEmpty)
+                          agentName!,
+                      ].join(' · '),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (header != null)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: Material(
+                  color: card,
+                  borderRadius: BorderRadius.circular(14),
+                  clipBehavior: Clip.antiAlias,
+                  child: header,
+                ),
+              ),
+            ),
+          for (final entry in groups.entries) ...[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+                child: Text(
+                  entry.key,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Material(
+                  color: card,
+                  borderRadius: BorderRadius.circular(14),
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    children: [
+                      for (var i = 0; i < entry.value.length; i++) ...[
+                        if (i > 0)
+                          Divider(
+                            height: 1,
+                            indent: 60,
+                            color: theme.colorScheme.outlineVariant
+                                .withValues(alpha: 0.55),
+                          ),
+                        _MoreHubTile(entry: entry.value[i]),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+          if (onOpenSettings != null &&
+              !entries.any((e) => e.label == '设置'))
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
+                child: Material(
+                  color: card,
+                  borderRadius: BorderRadius.circular(14),
+                  clipBehavior: Clip.antiAlias,
+                  child: _MoreHubTile(
+                    entry: MobileMoreEntry(
+                      label: '设置',
+                      group: '个人设置',
+                      icon: Icons.settings_outlined,
+                      onTap: onOpenSettings!,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          const SliverToBoxAdapter(child: SizedBox(height: 32)),
+        ],
+      ),
+    );
+  }
+}
+
+class _MoreHubTile extends StatelessWidget {
+  const _MoreHubTile({required this.entry});
+
+  final MobileMoreEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        entry.onTap();
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: RelayTheme.blue.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              alignment: Alignment.center,
+              child: Icon(entry.icon, size: 20, color: RelayTheme.blue),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                entry.label,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15.5,
+                ),
+              ),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 22,
+              color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.55),
+            ),
+          ],
         ),
       ),
     );

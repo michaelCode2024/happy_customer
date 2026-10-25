@@ -53,9 +53,12 @@ class WorkspaceAppBar extends StatelessWidget implements PreferredSizeWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // 被 Navigator.push 打开时显示返回；嵌在底栏 section 里时 canPop 为 false，不画多余箭头。
+    final canPop = ModalRoute.of(context)?.canPop ?? false;
     return AppBar(
       toolbarHeight: 52,
-      titleSpacing: 16,
+      titleSpacing: canPop ? 0 : 16,
+      automaticallyImplyLeading: canPop,
       backgroundColor: scheme.surface,
       surfaceTintColor: Colors.transparent,
       shape: Border(bottom: BorderSide(color: scheme.outlineVariant)),

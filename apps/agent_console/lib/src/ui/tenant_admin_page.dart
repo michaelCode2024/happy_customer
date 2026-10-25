@@ -2,7 +2,6 @@ import 'package:tongyu_agent_console/src/util/labels.dart';
 import 'package:tongyu_agent_console/src/util/format.dart';
 import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
 import 'package:tongyu_agent_console/src/ui/support_assets_page.dart';
-import 'package:tongyu_agent_console/src/ui/automation_page.dart';
 import 'package:flutter/material.dart';
 import 'package:tongyu_agent_console/src/ui/console_form_dialog.dart';
 import 'package:tongyu_agent_console/src/api/api_exception.dart';
@@ -66,7 +65,8 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
 
   void _notice(String text) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
-  Future<void> _member(Map<String, dynamic> member) async {
+  Future<void> _member([Map<String, dynamic>? member]) async {
+    String? initialPassword;
     final saved = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
@@ -74,6 +74,21 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
             member: member,
             inboxes: _inboxes,
             onSubmit: (data) async {
+              if (member == null) {
+                // 主管自助建号：席位由服务端校验；初始密码仅本次响应返回。
+                final created = await widget.api.adminWrite(
+                    'POST',
+                    'agents',
+                    _fields(data, [
+                      'displayName',
+                      'email',
+                      'role',
+                      'maxConcurrent',
+                      'inboxIds'
+                    ]));
+                initialPassword = asString(created['initialPassword']);
+                return;
+              }
               await widget.api.adminWrite(
                   'PATCH',
                   'agents/${member['id']}',
@@ -88,6 +103,21 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
     if (saved == true && mounted) {
       await _load();
       await widget.onMemberSaved?.call();
+      if ((initialPassword ?? '').isNotEmpty && mounted) {
+        await showDialog<void>(
+            context: context,
+            builder: (_) => AlertDialog(
+                  title: const Text('成员已创建'),
+                  content: SelectableText(
+                      '登录用户名与初始密码仅显示一次，请立即交给对应成员：\n\n'
+                      '初始密码：$initialPassword'),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('已记下'))
+                  ],
+                ));
+      }
     }
   }
 
@@ -166,7 +196,8 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
 
   @override
   Widget build(BuildContext context) => DefaultTabController(
-      length: 6,
+      // 自动回复 / 渠道管理已提到左侧一级菜单，这里只留企业账号与入口。
+      length: 5,
       child: Scaffold(
         appBar: WorkspaceAppBar(
             title: '企业管理',
@@ -184,8 +215,6 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
               Tab(text: '套餐与用量'),
               Tab(text: '操作记录'),
               Tab(text: '团队素材'),
-              // 与「入口分配后自动接单」区分：本页是关键词/欢迎语等自动回复规则。
-              Tab(text: '自动回复')
             ])),
         body: _loading
             ? const Center(child: CircularProgressIndicator())
@@ -199,7 +228,6 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
                     _usage(),
                     _auditList(),
                     SupportAssetsPage(api: widget.api, embedded: true),
-                    AutomationPage(api: widget.api)
                   ]),
       ));
 
@@ -243,9 +271,18 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
             .length;
         final supervisors =
             _members.where((m) => m['role'] == 'SUPERVISOR').length;
+        final seatLimit = asInt(_subscription['seatLimit']);
+        final usedSeats = asInt(_subscription['usedSeats']);
+        final seatsLeft =
+            seatLimit > 0 ? (seatLimit - usedSeats).clamp(0, seatLimit) : 0;
         return ListView(padding: const EdgeInsets.fromLTRB(20, 16, 20, 24), children: [
-          const WorkspaceHeading('团队成员',
-              '集中查看团队账号、接待权限与在线状态。新账号由平台管理员建立。'),
+          _heading(
+              '团队成员',
+              seatLimit > 0
+                  ? '集中查看团队账号、接待权限与在线状态。可在席位额度内添加成员（已用 $usedSeats / $seatLimit，剩余 $seatsLeft）。'
+                  : '集中查看团队账号、接待权限与在线状态。可在席位额度内添加成员。',
+              '添加成员',
+              () => _member()),
           // 汇总当前企业的真实成员数据；搜索只筛选列表，不改变团队总览。
           Padding(
             padding: const EdgeInsets.only(bottom: 14),
@@ -291,7 +328,7 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
                   ? const WorkspaceEmptyState(
                       icon: Icons.person_search_outlined,
                       title: '没有匹配的团队成员',
-                      description: '换一个姓名或用户名再试，或联系平台管理员开通账号。',
+                      description: '换一个姓名或用户名再试，或点击「添加成员」新建账号。',
                       compact: true)
                   : Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -610,12 +647,16 @@ class _MemberDialogState extends State<_MemberDialog> {
 
   @override
   Widget build(BuildContext context) => ConsoleFormDialog(
-        description: '管理成员资料、账号状态与可接待的客服入口。',
+        description: widget.member == null
+            ? '在席位额度内新建成员，并分配可接待的客服入口。系统生成初始密码，创建后仅显示一次。'
+            : '管理成员资料、账号状态与可接待的客服入口。',
         busy: _saving,
         error: _error,
-        submitLabel: '保存修改',
+        submitLabel: widget.member == null ? '添加成员' : '保存修改',
         onSubmit: _save,
-        icon: Icons.manage_accounts_outlined,
+        icon: widget.member == null
+            ? Icons.person_add_alt_1_outlined
+            : Icons.manage_accounts_outlined,
         title: widget.member == null ? '添加团队成员' : '管理团队成员',
         child: SizedBox(
             width: 500,
@@ -836,7 +877,7 @@ class _InboxDialogState extends State<_InboxDialog> {
                             title: const Text('分配后自动接单'),
                             subtitle: Text(
                               _auto
-                                  ? '开启后，分到的客服无需再点「开始接待」，可直接回复'
+                                  ? '开启后：系统分到的会话直接可回复；客服打开待接待会话也会自动接入，无需再点「开始接待」'
                                   : '需先开启「自动分配给在线成员」',
                             ),
                             value: _auto && _autoAccept,

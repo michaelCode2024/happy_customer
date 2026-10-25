@@ -71,7 +71,7 @@ class _AutomationPageState extends State<AutomationPage> {
       if (items.isEmpty) {
         setState(() {
           _loading = false;
-          _error = '请先在「同事账号 → 客服入口」创建入口';
+          _error = '请先在「企业管理 → 客服入口」创建入口';
         });
         return;
       }
@@ -770,8 +770,13 @@ class _AutomationPageState extends State<AutomationPage> {
         return Scaffold(
             appBar: WorkspaceAppBar(
                 title: widget.channels ? '渠道管理' : '自动回复',
-                description: '按客服入口配置接待规则与 AI 应答边界',
-                icon: Icons.auto_awesome_outlined,
+                // 欢迎语在「打开客服回复」；渠道页管 H5/App 外观与菜单。
+                description: widget.channels
+                    ? '按客服入口配置 H5 / App 渠道、图文与底部菜单'
+                    : '按客服入口配置欢迎语、关键词与自动回复规则',
+                icon: widget.channels
+                    ? Icons.devices_outlined
+                    : Icons.smart_toy_outlined,
                 actions: [
                   TextButton.icon(
                       onPressed: _loading || _saving ? null : _save,

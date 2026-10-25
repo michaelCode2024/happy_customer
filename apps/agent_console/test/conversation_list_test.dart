@@ -62,7 +62,8 @@ void main() {
       expect(tester.takeException(), isNull);
       final queue = tester.getRect(find.text('待接待 999'));
       final all = tester.getRect(find.text('全部').first);
-      expect(queue.bottom, lessThanOrEqualTo(all.top));
+      // B 方案标题与筛选同行：角标与 Tab 同排，只要求不重叠、不溢出。
+      expect(queue.overlaps(all), isFalse);
       expect(queue.right, lessThanOrEqualTo(width));
     });
   }

@@ -7,22 +7,33 @@ class VoiceRecorderButton extends StatelessWidget {
       {super.key,
       required this.onRecorded,
       this.enabled = true,
-      this.recorderFactory});
+      this.recorderFactory,
+      this.color,
+      this.iconSize = 22});
   final Future<void> Function(RecordedVoice) onRecorded;
   final bool enabled;
   final VoiceRecorder Function()? recorderFactory;
+  final Color? color;
+  final double iconSize;
   @override
-  Widget build(BuildContext context) => IconButton(
-        tooltip: '录制语音',
-        icon: const Icon(Icons.mic_none_outlined, size: 22),
-        onPressed: !enabled
-            ? null
-            : () => showDialog<void>(
-                context: context,
-                barrierDismissible: false,
-                builder: (_) => _RecordingDialog(
-                    onRecorded: onRecorded, recorderFactory: recorderFactory)),
-      );
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return IconButton(
+      tooltip: '录制语音',
+      icon: Icon(Icons.mic_none_outlined,
+          size: iconSize,
+          color: enabled
+              ? (color ?? scheme.onSurfaceVariant)
+              : scheme.outline),
+      onPressed: !enabled
+          ? null
+          : () => showDialog<void>(
+              context: context,
+              barrierDismissible: false,
+              builder: (_) => _RecordingDialog(
+                  onRecorded: onRecorded, recorderFactory: recorderFactory)),
+    );
+  }
 }
 
 class _RecordingDialog extends StatefulWidget {
