@@ -479,7 +479,9 @@ class LoginAdvancedServerField extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     return Theme(
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
+      child: Material(
+        type: MaterialType.transparency,
+        child: ExpansionTile(
         key: ValueKey<bool>(expanded),
         initiallyExpanded: expanded,
         maintainState: true,
@@ -516,6 +518,7 @@ class LoginAdvancedServerField extends StatelessWidget {
           ),
         ],
       ),
+    ),
     );
   }
 }

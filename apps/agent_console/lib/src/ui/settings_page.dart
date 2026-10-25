@@ -203,17 +203,20 @@ class _SettingsPageState extends State<SettingsPage> {
                 _InfoRow(label: '登录用户名', value: agent?.email ?? '—'),
                 _InfoRow(label: '企业', value: session.tenant?.name ?? '—'),
                 _InfoRow(label: '角色', value: _roleLabel(agent?.role ?? '')),
-                ExpansionTile(
-                    tilePadding: EdgeInsets.zero,
-                    title:
-                        const Text('查看企业与连接信息', style: TextStyle(fontSize: 13)),
-                    children: [
-                      _InfoRow(
-                          label: '企业标识', value: session.tenant?.slug ?? '—'),
-                      _InfoRow(
-                          label: '企业 ID', value: session.tenant?.id ?? '—'),
-                      _InfoRow(label: '服务器', value: session.serverHint),
-                    ]),
+                Material(
+                  color: Colors.transparent,
+                  child: ExpansionTile(
+                      tilePadding: EdgeInsets.zero,
+                      title:
+                          const Text('查看企业与连接信息', style: TextStyle(fontSize: 13)),
+                      children: [
+                        _InfoRow(
+                            label: '企业标识', value: session.tenant?.slug ?? '—'),
+                        _InfoRow(
+                            label: '企业 ID', value: session.tenant?.id ?? '—'),
+                        _InfoRow(label: '服务器', value: session.serverHint),
+                      ]),
+                ),
               ],
             ),
             'presence': _Section(

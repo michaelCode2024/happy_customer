@@ -1,6 +1,7 @@
 import 'package:tongyu_agent_console/src/ui/error_banner.dart';
 import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
 import 'package:tongyu_agent_console/src/ui/ai_assist_panel.dart';
+import 'package:tongyu_agent_console/src/ui/mobile_canned_sheet.dart';
 import 'dart:async';
 import 'package:tongyu_agent_console/src/ui/reception_guidance.dart';
 
@@ -844,10 +845,8 @@ class _ChatPanelState extends State<ChatPanel> {
                         color: Theme.of(context).colorScheme.primary,
                         fontSize: 12)),
               ),
-            // 待接待：底部单行操作坞，不铺禁用输入区；写备注再展开输入。
             if (!conversation.isResolved &&
-                conversation.canClaim(workbench.selfId) &&
-                !_noteMode)
+                conversation.canClaim(workbench.selfId))
               ReceptionAction(
                 conversation: conversation,
                 busy: workbench.claiming,
@@ -863,9 +862,8 @@ class _ChatPanelState extends State<ChatPanel> {
                     _composerFocus.requestFocus();
                   }
                 },
-              )
-            else
-              _Composer(
+              ),
+            _Composer(
                 controller: _composer,
                 focusNode: _composerFocus,
                 noteMode: _noteMode,
@@ -3882,27 +3880,20 @@ class _MobileComposerState extends State<_MobileComposer> {
                             const Text('语音', style: TextStyle(fontSize: 11))
                           ])),
                       if (c.canned.isNotEmpty)
-                        SizedBox(
-                            width: 66,
-                            child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  SizedBox(
-                                      height: 48,
-                                      child: _CannedMenu(
-                                          canned: c.canned,
-                                          onPick: (text) {
-                                            c.controller.text = text;
-                                            c.controller.selection =
-                                                TextSelection.collapsed(
-                                                    offset: text.length);
-                                            c.onChanged(text);
-                                            c.focusNode.requestFocus();
-                                          })),
-                                  const SizedBox(height: 5),
-                                  const Text('常用回复',
-                                      style: TextStyle(fontSize: 11))
-                                ])),
+                        tool(Icons.bolt_outlined, '常用回复', () {
+                          MobileCannedBottomSheet.show(
+                            context: context,
+                            canned: c.canned,
+                            onSelect: (selected) {
+                              c.controller.text = selected;
+                              c.controller.selection = TextSelection.collapsed(
+                                  offset: selected.length);
+                              c.onChanged(selected);
+                              setState(() => _tools = false);
+                              c.focusNode.requestFocus();
+                            },
+                          );
+                        }),
                       tool(Icons.edit_note_outlined, '内部备注', () {
                         c.onToggleNote(true);
                         setState(() => _tools = false);

@@ -55,7 +55,7 @@ void main() {
   expect(workbench.replyTo,isNull);
   await tester.tap(find.byKey(const ValueKey('mobile-ai-assist')));await tester.pumpAndSettle();
   expect(find.text('建议回复'),findsOneWidget);await tester.tap(find.text('建议回复'));await tester.pumpAndSettle();
-  expect(assist,1);await tester.tap(find.text('采纳到输入框'));await tester.pumpAndSettle();
+  expect(assist,1);await tester.tap(find.text('插入输入框'));await tester.pumpAndSettle();
   expect(tester.widget<TextField>(find.byType(TextField).first).controller!.text,'可先使用网站接入代码。');
   expect(sent,0,reason:'AI 不能自动发送客户消息');
   await tester.binding.handlePopRoute();await tester.pumpAndSettle();

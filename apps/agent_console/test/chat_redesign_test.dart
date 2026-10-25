@@ -119,6 +119,8 @@ void main() {
         'visitorId': 'v1',
         'visitorName': '客户名称很长时仍可正常处理',
         'status': 'OPEN',
+        'assigneeId': 'other-agent',
+        'assigneeName': '其他坐席',
         'updatedAt': '2026-10-12T01:00:00Z',
       };
       final api = TongYuApi(
@@ -137,7 +139,7 @@ void main() {
               body = {'items': [], 'lastSequence': 0};
             return http.Response.bytes(utf8.encode(jsonEncode(body)), 200);
           }));
-      final controller = WorkbenchController(api: api);
+      final controller = WorkbenchController(api: api, selfId: 'a1');
       final draft = ValueNotifier<AssistResult?>(null);
       await controller.refreshConversations();
       await controller.select('c1');

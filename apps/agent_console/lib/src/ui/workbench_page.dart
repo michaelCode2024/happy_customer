@@ -24,6 +24,8 @@ import 'package:tongyu_agent_console/src/state/session_controller.dart';
 import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
 import 'package:tongyu_agent_console/src/ui/chat_panel.dart';
 import 'package:tongyu_agent_console/src/ui/conversation_list.dart';
+import 'package:tongyu_agent_console/src/ui/mobile_conversation_view.dart';
+import 'package:tongyu_agent_console/src/ui/mobile_workbench_nav.dart';
 import 'package:tongyu_agent_console/src/ui/reception_guidance.dart';
 import 'package:tongyu_agent_console/src/ui/integration_page.dart';
 import 'package:tongyu_agent_console/src/ui/knowledge_page.dart';
@@ -654,8 +656,11 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
               final phone = _phoneDestinations(sections);
               final phoneIndex =
                   phone.indexWhere((spec) => spec.section == _section);
+              final hasKnowledge =
+                  sections.any((s) => s.section == WorkbenchSection.knowledge);
+
               return Scaffold(
-                // 这两个页面已有自己的工具栏，窄屏不再重复占用一行标题。
+                // 窄屏使用原生风格移动应用栏
                 appBar:
                     hostedThread || _section != WorkbenchSection.conversations
                         ? null
@@ -663,29 +668,17 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                 body: body,
                 bottomNavigationBar: hostedThread
                     ? null
-                    : NavigationBar(
-                        selectedIndex:
-                            phoneIndex >= 0 ? phoneIndex : phone.length,
-                        onDestinationSelected: (index) {
-                          if (index >= phone.length) {
+                    : MobileBottomNavBar(
+                        currentIndex: phoneIndex >= 0 ? phoneIndex : (hasKnowledge ? 3 : 2),
+                        unreadCount: _workbench.unread,
+                        showKnowledge: hasKnowledge,
+                        onTap: (index) {
+                          if (index < phone.length) {
+                            setState(() => _section = phone[index].section);
+                          } else {
                             unawaited(_openMoreSections(sections));
-                            return;
                           }
-                          setState(() => _section = phone[index].section);
                         },
-                        destinations: <Widget>[
-                          for (final spec in phone)
-                            NavigationDestination(
-                              icon: Icon(spec.icon),
-                              selectedIcon: Icon(spec.selectedIcon),
-                              label: spec.label,
-                            ),
-                          const NavigationDestination(
-                            icon: Icon(Icons.more_horiz),
-                            selectedIcon: Icon(Icons.more_horiz),
-                            label: '更多',
-                          ),
-                        ],
                       ),
               );
             }
@@ -842,13 +835,23 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
   }
 
   Widget _conversations(double width) {
-    final list = ConversationListPanel(
-      workbench: _workbench,
-      session: widget.session,
-      onOpenKnowledge: _hasSection(WorkbenchSection.knowledge)
-          ? () => setState(() => _section = WorkbenchSection.knowledge)
-          : null,
-    );
+    // 窄屏采用专为触控与单手操作优化的 MobileConversationListView
+    final isMobile = width < 760;
+    final list = isMobile
+        ? MobileConversationListView(
+            workbench: _workbench,
+            session: widget.session,
+            onOpenKnowledge: _hasSection(WorkbenchSection.knowledge)
+                ? () => setState(() => _section = WorkbenchSection.knowledge)
+                : null,
+          )
+        : ConversationListPanel(
+            workbench: _workbench,
+            session: widget.session,
+            onOpenKnowledge: _hasSection(WorkbenchSection.knowledge)
+                ? () => setState(() => _section = WorkbenchSection.knowledge)
+                : null,
+          );
     // Three panes need genuine room. Below this the customer record is pushed on
     // top of the thread instead of shrinking it into uselessness.
     final inlineProfile = width >= 1040 && !_profileOpen;
@@ -936,27 +939,16 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
 
   PreferredSizeWidget _compactAppBar(AgentProfile? agent) {
     if (_section == WorkbenchSection.conversations) {
-      return AppBar(
-        title: ListenableBuilder(
-          listenable: _workbench,
-          builder: (context, _) => Row(
-            children: <Widget>[
-              const Text('客户会话'),
-              const SizedBox(width: 10),
-              if (_workbench.queued > 0)
-                Text(
-                  '${_workbench.queued} 位待领取',
-                  style: Theme.of(context).textTheme.labelSmall,
-                ),
-              const Spacer(),
-              _ConnectionBadge(workbench: _workbench),
-              NotificationCenter(
-                  api: widget.session.api,
-                  onConversation: _openNotificationConversation),
-              messageSoundButton(),
-            ],
-          ),
-        ),
+      return MobileTopAppBar(
+        session: widget.session,
+        workbench: _workbench,
+        title: '客户会话',
+        onNotificationConversation: _openNotificationConversation,
+        onShowQueue: () {
+          _workbench.clearSelection();
+          unawaited(_workbench.showReceptionQueue());
+        },
+        onTapAvatar: () => setState(() => _section = WorkbenchSection.settings),
       );
     }
     return AppBar(title: Text(_sectionTitle(_section)));

@@ -12,9 +12,8 @@ import 'package:tongyu_agent_console/src/ui/knowledge_page.dart';
 import 'package:tongyu_agent_console/src/ui/settings_page.dart';
 
 class _Session extends SessionController {
-  _Session(this.client, {this.role = 'SUPERVISOR'});
+  _Session(this.client);
   final TongYuApi client;
-  final String role;
   @override
   TongYuApi get api => client;
   @override
@@ -22,7 +21,7 @@ class _Session extends SessionController {
       id: 'a1',
       email: 'service@example.com',
       displayName: '客服小林',
-      role: role,
+      role: 'SUPERVISOR',
       presence: 'ONLINE');
   @override
   TenantInfo get tenant =>
@@ -167,9 +166,11 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, '修改密码'));
       await tester.pumpAndSettle();
       expect(find.text('请填写当前密码与新密码'), findsOneWidget);
-      await tester.tap(find.text('外观与通知').first);
+      final appearanceTab = find.text('外观与通知');
+      await tester.ensureVisible(appearanceTab.first);
+      await tester.tap(appearanceTab.first);
       await tester.pumpAndSettle();
-      expect(find.text('跟随系统'), findsOneWidget);
+      expect(find.text('当前为浅色模式'), findsOneWidget);
       expect(find.text('当前密码'), findsNothing);
       expect(tester.takeException(), isNull);
     });

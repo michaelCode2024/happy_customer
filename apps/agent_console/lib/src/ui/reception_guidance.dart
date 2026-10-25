@@ -235,7 +235,7 @@ class ReceptionAction extends StatelessWidget {
                     height: 16,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : Text('${conversation.receptionActionLabel}并回复'),
+                : Text(conversation.receptionActionLabel),
           ),
         ],
       ),

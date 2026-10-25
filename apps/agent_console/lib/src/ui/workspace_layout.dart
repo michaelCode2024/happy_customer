@@ -491,7 +491,7 @@ class WorkspaceEmptyState extends StatelessWidget {
     return Center(
       child: Padding(
         padding: EdgeInsets.symmetric(
-            horizontal: 24, vertical: compact ? 20 : 40),
+            horizontal: 24, vertical: compact ? 16 : 36),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

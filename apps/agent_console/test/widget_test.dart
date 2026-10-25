@@ -102,22 +102,22 @@ void main() {
   testWidgets('the remembered appearance is applied before signing in',
       (tester) async {
     final store = MemoryCredentialStore();
-    await store.saveThemeMode('dark');
+    await store.saveThemeMode('light');
 
     await boot(tester, store);
 
     final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
-    expect(app.themeMode, ThemeMode.dark);
+    expect(app.themeMode, ThemeMode.light);
     expect(tester.widget<Scaffold>(find.byType(Scaffold).first).backgroundColor,
-        const Color(0xFF171B22));
+        const Color(0xFFEEF2FB));
   });
 
-  testWidgets('浅色登录页与网页共享背景使用纯白色', (tester) async {
+  testWidgets('浅色登录页与网页共享背景使用柔和浅蓝底色', (tester) async {
     final store = MemoryCredentialStore();
     await store.saveThemeMode('light');
     await boot(tester, store);
     expect(tester.widget<Scaffold>(find.byType(Scaffold).first).backgroundColor,
-        Colors.white);
+        const Color(0xFFEEF2FB));
   });
 
   testWidgets('the operations console is reachable and comes back',
