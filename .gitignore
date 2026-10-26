@@ -42,32 +42,6 @@ pubspec.lock
 **/ios/Pods/
 **/macos/Pods/
 
-# Locally built binaries (the image build produces these outside Docker)
-.tongyu-server
-.tongyu-entrypoint
-/server
-server.exe
-server-linux
-server-linux-next
-.server-linux-before-saas
-
-# Local-only debug / deploy / static scratch
-.local-deploy/
-.local-static/
-.local-full-audit/
-.playwright-mcp/
-.workbuddy/
-data/
-.analyze.txt
-.bodysample.txt
-.inspect.js
-.inspect.out.txt
-.mkmessage.js
-.pubget.txt
-.rawcommit.txt
-.subject.txt
-.test.txt
-
 # 客户档案、专属账号密码与服务配置不进入 Git。
 /对外资料/02_平台专属/
 /docs/交付管理/客户/
@@ -82,10 +56,3 @@ data/
 AGENTS.md
 CLAUDE.md
 
-# 本机设计截图与验收产物，勿提交
-/UI/
-/outputs/
-
-# 本机代理切换与通知联调脚本（会读本机 Clash 与 .env），勿提交
-/scripts/local-tun-session.py
-/scripts/configure-local-notifications-ai.py
