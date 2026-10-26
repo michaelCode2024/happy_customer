@@ -527,7 +527,7 @@ func (a *API) adminInboxAI(w http.ResponseWriter, r *http.Request, p auth.Princi
 		fail(w, 500, "更新 AI 设置失败")
 		return
 	}
-	respond(w, 200, map[string]any{"status": "OK", "providerAvailable": a.ai.Available(), "provider": a.ai.ProviderName()})
+	respond(w, 200, map[string]any{"status": "OK", "providerAvailable": a.ai.Available()})
 }
 
 func (a *API) adminInboxRouting(w http.ResponseWriter, r *http.Request, p auth.Principal) {

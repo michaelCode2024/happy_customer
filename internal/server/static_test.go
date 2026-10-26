@@ -1,6 +1,9 @@
 package server
 
 import (
+	"bytes"
+	"compress/gzip"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -14,7 +17,10 @@ import (
 
 func TestStaticRoutes(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(dir, "console"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "console", "canvaskit", "chromium"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "console", "assets", "fonts"), 0755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Mkdir(filepath.Join(dir, "website"), 0755); err != nil {
@@ -23,7 +29,9 @@ func TestStaticRoutes(t *testing.T) {
 	for path, content := range map[string]string{
 		"widget.js":            "window.TongYu = {};",
 		"console/index.html":   `<base href="/console/">`,
-		"console/main.dart.js": "console.log('console');",
+		"console/main.dart.js":                    "console.log('console');",
+		"console/canvaskit/chromium/canvaskit.wasm": "wasm-bytes",
+		"console/assets/fonts/NotoSansSC-Regular.otf": "font-bytes",
 		"website/index.html":   `<title>通语 TongYu</title><a href="/console/?surface=agent">登录</a>`,
 		"website/site.css":     "body{margin:0}",
 	} {
@@ -65,6 +73,39 @@ func TestStaticRoutes(t *testing.T) {
 	mux.ServeHTTP(redirect, httptest.NewRequest(http.MethodGet, "/console", nil))
 	if redirect.Code != http.StatusPermanentRedirect || redirect.Header().Get("Location") != "/console/" {
 		t.Fatalf("console redirect: %d %q", redirect.Code, redirect.Header().Get("Location"))
+	}
+	plain := httptest.NewRecorder()
+	mux.ServeHTTP(plain, httptest.NewRequest(http.MethodGet, "/console/canvaskit/chromium/canvaskit.wasm", nil))
+	if plain.Code != 200 || plain.Body.String() != "wasm-bytes" || !strings.Contains(plain.Header().Get("Cache-Control"), "max-age=86400") {
+		t.Fatalf("wasm plain: %d %q %q", plain.Code, plain.Header().Get("Cache-Control"), plain.Body.String())
+	}
+	zippedReq := httptest.NewRequest(http.MethodGet, "/console/canvaskit/chromium/canvaskit.wasm", nil)
+	zippedReq.Header.Set("Accept-Encoding", "gzip")
+	zipped := httptest.NewRecorder()
+	mux.ServeHTTP(zipped, zippedReq)
+	if zipped.Code != 200 || zipped.Header().Get("Content-Encoding") != "gzip" {
+		t.Fatalf("wasm gzip: %d %q", zipped.Code, zipped.Header().Get("Content-Encoding"))
+	}
+	reader, err := gzip.NewReader(bytes.NewReader(zipped.Body.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(decoded) != "wasm-bytes" {
+		t.Fatalf("wasm gzip body: %q", decoded)
+	}
+	font := httptest.NewRecorder()
+	mux.ServeHTTP(font, httptest.NewRequest(http.MethodGet, "/console/assets/fonts/NotoSansSC-Regular.otf", nil))
+	if font.Code != 200 || !strings.Contains(font.Header().Get("Cache-Control"), "max-age=86400") {
+		t.Fatalf("font cache: %d %q", font.Code, font.Header().Get("Cache-Control"))
+	}
+	script := httptest.NewRecorder()
+	mux.ServeHTTP(script, httptest.NewRequest(http.MethodGet, "/console/main.dart.js", nil))
+	if script.Header().Get("Cache-Control") != "no-cache" {
+		t.Fatalf("script cache: %q", script.Header().Get("Cache-Control"))
 	}
 	for _, path := range []string{"/console/desktop.html?surface=agent", "/console/mobile.html?surface=platform"} {
 		legacy := httptest.NewRecorder()

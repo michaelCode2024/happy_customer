@@ -1,4 +1,5 @@
 import 'src/ui/app_safe_area.dart';
+import 'src/util/browser_chrome.dart';
 import 'src/util/browser_theme.dart';
 import 'dart:async';
 import 'package:tongyu_agent_console/src/util/host_session.dart';
@@ -14,6 +15,7 @@ import 'package:tongyu_agent_console/src/state/session_controller.dart';
 import 'package:flutter/foundation.dart';
 import 'package:tongyu_agent_console/src/theme.dart';
 import 'package:tongyu_agent_console/src/ui/login_page.dart';
+import 'package:tongyu_agent_console/src/ui/pwa_panel.dart';
 import 'package:tongyu_agent_console/src/ui/platform_login_page.dart';
 import 'package:tongyu_agent_console/src/ui/platform_page.dart';
 import 'package:tongyu_agent_console/src/ui/product_brand.dart';
@@ -177,16 +179,25 @@ class _TongYuConsoleAppState extends State<TongYuConsoleApp> {
             _startupComplete = true;
             WidgetsBinding.instance.addPostFrameCallback((_) => markAppReady());
           }
-          syncBrowserTheme(theme.colorScheme.surface.value,
-              theme.brightness == Brightness.dark);
-          return ColoredBox(
-              color: theme.colorScheme.surface,
-              child: AppSafeArea(
-                  browserBottom: isHostedConsole ? 0 : browserSafeBottom,
-                  child: wrapWithWebEmojiFallback(
-                      child ?? const SizedBox.shrink())));
+          return ValueListenableBuilder<Color?>(
+            valueListenable: BrowserChrome.top,
+            builder: (context, top, _) {
+              // 页面底色保持浅色；只有顶栏跟着登录头部或滚上来的卡片变。
+              syncBrowserTheme(
+                theme.colorScheme.surface.value,
+                theme.brightness == Brightness.dark,
+                topRgb: top?.value,
+              );
+              return ColoredBox(
+                  color: theme.colorScheme.surface,
+                  child: AppSafeArea(
+                      browserBottom: isHostedConsole ? 0 : browserSafeBottom,
+                      child: wrapWithWebEmojiFallback(
+                          child ?? const SizedBox.shrink())));
+            },
+          );
         },
-        home: isHostedConsole
+        home: _withUpdatePrompt(isHostedConsole
             ? Scaffold(
                 appBar: AppBar(
                     leading: IconButton(
@@ -196,8 +207,23 @@ class _TongYuConsoleAppState extends State<TongYuConsoleApp> {
                     title: const Text('店铺消息与群聊')),
                 body: _home(),
               )
-            : _home(),
+            : _home()),
       ),
+    );
+  }
+
+  /// 登录页没有工作台那条更新条。提示挂在根上，未进入工作台也能看到新版本。
+  Widget _withUpdatePrompt(Widget page) {
+    if (!kIsWeb) return page;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        page,
+        PwaPanel(
+          api: _session.isSignedIn ? _session.api : null,
+          hideUpdateBanner: true,
+        ),
+      ],
     );
   }
 

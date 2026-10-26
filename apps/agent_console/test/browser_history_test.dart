@@ -8,6 +8,7 @@ void main() {
     final sub = gate.listen(() => hits++);
     gate.push('conversation/c1');
     gate.syncAfterLocalPop();
+    gate.drain();
     await Future<void>.delayed(Duration.zero);
     expect(hits, 0);
     await sub.cancel();

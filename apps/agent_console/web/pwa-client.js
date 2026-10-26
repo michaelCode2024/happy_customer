@@ -107,6 +107,6 @@
   };
   window.tongyuSetBadge=count=>{if(count>0)navigator.setAppBadge?.(count).catch(()=>{});else navigator.clearAppBadge?.().catch(()=>{});};
   window.addEventListener('online',()=>registration?.update().catch(()=>{}));
-  setInterval(()=>{if(document.visibilityState==='visible'&&navigator.onLine)registration?.update().catch(()=>{});},60*60*1000);
+  setInterval(()=>{if(document.visibilityState==='visible'&&navigator.onLine)registration?.update().catch(()=>{});},2*60*1000);
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&navigator.onLine)registration?.update().catch(()=>{});});
 })();

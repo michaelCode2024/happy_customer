@@ -179,7 +179,7 @@ func (a *API) ready(w http.ResponseWriter, r *http.Request) {
 		"maxWsConnections":    a.cfg.MaxWSConnections,
 		"dbMaxConns":          a.cfg.DatabaseMaxConns,
 		"storage":             a.cfg.Storage.Driver,
-		"ai":                  a.ai.ProviderName(),
+		"ai":                  aiPublicLabel(a.ai.Available()),
 		"instance":            a.bus.InstanceID(),
 	})
 }

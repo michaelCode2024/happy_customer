@@ -17,6 +17,34 @@ import (
 
 type handlerContext = context.Context
 
+// aiPublicLabel 是页面上能看到的 AI 状态。厂商和模型名留在服务端配置里，不返回给页面。
+func aiPublicLabel(available bool) string {
+	if available {
+		return "已启用"
+	}
+	return "未配置"
+}
+
+// stripHiddenModel 去掉消息元数据里的模型标识，避免历史消息把厂商名带到页面。
+func stripHiddenModel(metadata []byte) []byte {
+	if len(metadata) == 0 {
+		return metadata
+	}
+	var meta map[string]any
+	if json.Unmarshal(metadata, &meta) != nil {
+		return metadata
+	}
+	if _, ok := meta["provider"]; !ok {
+		return metadata
+	}
+	delete(meta, "provider")
+	encoded, err := json.Marshal(meta)
+	if err != nil {
+		return metadata
+	}
+	return encoded
+}
+
 type inboxContext struct {
 	ID              uuid.UUID
 	TenantID        uuid.UUID

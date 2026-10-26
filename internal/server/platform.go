@@ -95,7 +95,7 @@ func (a *API) platformOverview(w http.ResponseWriter, r *http.Request, _ auth.Pr
 		"conversations": conversations, "openConversations": openConversations,
 		"messagesToday": messagesToday, "planDistribution": plans, "topTenants": top,
 		"instance": a.bus.InstanceID(), "realtimeConnections": a.hub.Count(),
-		"aiProvider": a.ai.ProviderName(), "serverTime": nowUTC(),
+		"aiProvider": aiPublicLabel(a.ai.Available()), "serverTime": nowUTC(),
 	})
 }
 
@@ -646,7 +646,8 @@ func (a *API) platformAIUsage(w http.ResponseWriter, r *http.Request, _ auth.Pri
 			fail(w, 500, "查询 AI 使用情况失败")
 			return
 		}
-		items = append(items, map[string]any{"provider": provider, "interactions": total,
+		// 用量按调用聚合展示，不把库里记下的厂商和模型名返回给页面。
+		items = append(items, map[string]any{"provider": "AI", "interactions": total,
 			"answered": answered, "avgLatencyMs": latency, "avgScore": score, "deflectionRate": deflection})
 	}
 	reasonRows, err := a.db.Query(r.Context(), `select coalesce(reason,'ANSWERED'), count(*)::int
@@ -665,15 +666,11 @@ func (a *API) platformAIUsage(w http.ResponseWriter, r *http.Request, _ auth.Pri
 }
 
 func (a *API) platformMeta(w http.ResponseWriter, r *http.Request, _ auth.Principal) {
-	// model 必须反映当前实例真实 AI 配置，不能写死开发期模型名误导运营。
-	model := strings.TrimSpace(a.cfg.AI.Model)
-	if model == "" {
-		model = "未配置"
-	}
+	// 只说明 AI 是否可用。具体厂商和模型名不进入平台设置页。
 	respond(w, 200, map[string]any{
 		"product": "通语客服", "version": version,
-		"model":            model,
-		"aiProvider":       a.ai.ProviderName(),
+		"model":            "",
+		"aiProvider":       aiPublicLabel(a.ai.Available()),
 		"aiAvailable":      a.ai.Available(),
 		"storage":          a.cfg.Storage.Describe(),
 		"rateLimits":       map[string]int{"widgetPerMinute": a.cfg.RateLimit.WidgetPerMinute, "loginPerMinute": a.cfg.RateLimit.LoginPerMinute},

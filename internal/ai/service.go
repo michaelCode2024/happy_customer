@@ -106,7 +106,7 @@ func (s *Service) Available() bool {
 	return s != nil && s.provider != nil && s.provider.Available()
 }
 
-// ProviderName is reported by /ready and stored on every ai_interaction row.
+// ProviderName 只写入 ai_interaction，供服务端记账。页面和对外接口不返回这个值。
 func (s *Service) ProviderName() string {
 	if s == nil || s.provider == nil {
 		return "disabled"

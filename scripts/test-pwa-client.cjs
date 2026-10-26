@@ -9,7 +9,7 @@ function fixture({installed=false,ios=false,waiting=false}={}){
  const context={CustomEvent:class{constructor(type){this.type=type;}},window,navigator,isSecureContext:true,matchMedia:()=>({matches:installed}),URL,MessageChannel:class{constructor(){this.port1={close(){}};this.port2={postMessage:data=>this.port1.onmessage?.({data})};}},sessionStorage:{getItem:k=>session.get(k),setItem:(k,v)=>session.set(k,v)},
   location:{href:'https://test.example/console/?surface=agent&install=1',reload(){reloads++;}},
   history:{state:null,replaceState(state,title,url){rewritten=url.toString();}},
-  document:{visibilityState:'visible',addEventListener:(name,fn)=>docEvents[name]=fn},setTimeout(){},setInterval(fn){intervals.push(fn);}};
+  document:{documentElement:{classList:{add(){},remove(){}},style:{}},getElementById(){return null;},visibilityState:'visible',addEventListener:(name,fn)=>docEvents[name]=fn},setTimeout(){},setInterval(fn){intervals.push(fn);}};
  vm.runInNewContext(fs.readFileSync('apps/agent_console/web/pwa-client.js','utf8'),context);
  return {window,events,docEvents,registration,intervals,nextVersion(){version="v3";},get updates(){return updates;},get rewritten(){return rewritten;},get reloads(){return reloads;},
   prompt(outcome){events.beforeinstallprompt({preventDefault(){},prompt:async()=>{prompts++;},userChoice:Promise.resolve({outcome})});},get prompts(){return prompts;}};

@@ -2,11 +2,15 @@
 import 'dart:html' as html;
 import 'dart:js_util' as js;
 
-/// 网页底色、安全区域与 Flutter 使用同一个主题表面色，不能写死白色。
-void syncBrowserTheme(int rgb, bool dark) {
-  final color = '#${(rgb & 0xffffff).toRadixString(16).padLeft(6, '0')}';
+String _hex(int rgb) =>
+    '#${(rgb & 0xffffff).toRadixString(16).padLeft(6, '0')}';
+
+/// 网页底色与底部安全区用页面底色。顶栏可以另给颜色，登录蓝头滚走后要换回浅色。
+void syncBrowserTheme(int rgb, bool dark, {int? topRgb}) {
+  final color = _hex(rgb);
+  final top = _hex(topRgb ?? rgb);
   if (js.hasProperty(html.window, 'tongyuSyncTheme')) {
-    js.callMethod(html.window, 'tongyuSyncTheme', [color, dark]);
+    js.callMethod(html.window, 'tongyuSyncTheme', [color, dark, top]);
   }
 }
 
@@ -23,4 +27,5 @@ double get browserSafeBottom {
   return double.tryParse(raw.replaceAll('px', '')) ?? 0;
 }
 
-void markAppReady() => html.window.dispatchEvent(html.CustomEvent('tongyu-app-ready'));
+void markAppReady() =>
+    html.window.dispatchEvent(html.CustomEvent('tongyu-app-ready'));

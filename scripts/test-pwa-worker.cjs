@@ -20,7 +20,11 @@ const vm=require('node:vm'),fs=require('node:fs'),assert=require('node:assert/st
   skipWaiting:()=>{skipped=true;},clients:{claim:async()=>{claimed=true;}},registration:{showNotification:async()=>{}}};
  vm.runInNewContext(fs.readFileSync('apps/agent_console/web/tongyu-push-sw.js','utf8'),{self,caches,fetch:fetcher,Request:class{constructor(url){this.url=key(url);}},Response,URL,Set});
  async function lifecycle(name){let promise;listeners[name]({waitUntil:p=>promise=p});await promise;}
- await lifecycle('install');assert(skipped,'入口更新必须 skipWaiting 尽快生效');await lifecycle('activate');assert(claimed);
+ await lifecycle('install');assert(skipped,'首次安装必须 skipWaiting，否则没有旧版本可提示');await lifecycle('activate');assert(claimed);
+ skipped=false;self.registration.active={scriptURL:'old'};
+ await lifecycle('install');assert.equal(skipped,false,'已有旧 worker 时必须停在 waiting，更新提示才看得到');
+ listeners.message({data:{type:'ACTIVATE_UPDATE'}});assert.equal(skipped,true,'用户确认后才激活新版本');
+ skipped=false;delete self.registration.active;
  network=false;
  async function read(url,mode='cors') {let response;listeners.fetch({request:{method:'GET',url:origin+url,mode},respondWith:p=>response=p});return response;}
  const navigation=await read('/console/?surface=agent','navigate');
@@ -30,6 +34,7 @@ const vm=require('node:vm'),fs=require('node:fs'),assert=require('node:assert/st
  assert.equal(await (await read('/console/mobile.html#chat','navigate')).text(),'APP SHELL','旧 HTML 手机壳书签必须回到 Flutter 入口');
  assert.equal(await read('/console/mobile-call.html','navigate'),undefined,'通话身份与信令页不能回退到离线首页');
  assert.equal(await (await read('/console/main.dart.js?release=42')).text(),'MAIN SCRIPT');
+ assert.equal(await read('/console/canvaskit/chromium/canvaskit.wasm'),undefined,'引擎 wasm 不进 worker，浏览器才能流式编译');
  assert.equal(await read('/api/v1/console/conversations'),undefined,'不能缓存 API');
  assert.equal(await read('/console/file?token=secret'),undefined,'不能缓存带令牌附件');
  await assert.rejects(()=>read('/console/unknown.js'));

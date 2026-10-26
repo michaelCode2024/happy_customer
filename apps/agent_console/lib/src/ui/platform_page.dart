@@ -437,7 +437,7 @@ class _OverviewSection extends StatelessWidget {
             runSpacing: 8,
             children: <Widget>[
               _Metric(label: '实例 ID', value: overview.instance),
-              _Metric(label: 'AI 提供方', value: overview.aiProvider),
+              _Metric(label: 'AI', value: _aiStatusLabel(overview.aiProvider)),
               _Metric(
                 label: '服务器时间',
                 value: fullTime(overview.serverTime),
@@ -724,7 +724,7 @@ class _AiSection extends StatelessWidget {
           children: <Widget>[
             Expanded(
               child: _Panel(
-                title: '按提供方',
+                title: '调用情况',
                 child: usage.providers.isEmpty
                     ? const Text('窗口内没有 AI 调用')
                     : Column(
@@ -737,7 +737,7 @@ class _AiSection extends StatelessWidget {
                                   SizedBox(
                                     width: 120,
                                     child: Text(
-                                      provider.provider,
+                                      'AI',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: theme.textTheme.bodyMedium,
@@ -770,7 +770,7 @@ class _AiSection extends StatelessWidget {
                                 children: <Widget>[
                                   Expanded(
                                     child: Text(
-                                      '${provider.provider} · 调用 ${provider.interactions} · '
+                                      'AI · 调用 ${provider.interactions} · '
                                       '平均 ${provider.avgLatencyMs}ms · '
                                       '平均覆盖率 ${provider.avgScore.toStringAsFixed(2)}',
                                       style:
@@ -860,9 +860,7 @@ class _AiSection extends StatelessWidget {
       };
 }
 
-/// What the instance says about itself. Kept deliberately short: it exists so an
-/// operator can confirm which build and which AI provider a server is running
-/// before filing a bug, not to be a control panel.
+/// 实例自身信息。只确认版本和 AI 是否启用，不展示厂商或模型名。
 class _AboutSection extends StatelessWidget {
   const _AboutSection({required this.controller});
 
@@ -890,10 +888,9 @@ class _AboutSection extends StatelessWidget {
             runSpacing: 14,
             children: <Widget>[
               _Metric(label: '服务端版本', value: meta.version),
-              _Metric(label: '模型', value: meta.model),
               _Metric(
-                label: 'AI 提供方',
-                value: meta.aiAvailable ? meta.aiProvider : '未配置',
+                label: 'AI',
+                value: meta.aiAvailable ? '已启用' : '未配置',
               ),
               _Metric(label: '存储', value: meta.storage),
               _Metric(label: '单文件上限', value: '${meta.uploadMaxMB} MB'),
@@ -997,6 +994,21 @@ class _Panel extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// 页面只区分 AI 开没开。接口里若仍带着厂商或模型名，这里也不原样展示。
+String _aiStatusLabel(String raw) {
+  switch (raw.trim()) {
+    case '':
+    case 'none':
+    case 'disabled':
+    case 'off':
+    case '未配置':
+    case '未启用':
+      return '未配置';
+    default:
+      return '已启用';
   }
 }
 

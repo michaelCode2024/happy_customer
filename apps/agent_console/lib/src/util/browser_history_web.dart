@@ -29,6 +29,13 @@ class BrowserHistoryGate {
     html.window.history.back();
   }
 
+  /// 卸掉本门闸压过的全部 History（切底栏卸会话页时用），避免留下幽灵条目让下次边缘滑动退出控制台。
+  void drain() {
+    while (_depth > 0) {
+      syncAfterLocalPop();
+    }
+  }
+
   StreamSubscription<void> listen(void Function() onBrowserBack) {
     return html.window.onPopState.listen((_) {
       if (_ignoreNextPop) {

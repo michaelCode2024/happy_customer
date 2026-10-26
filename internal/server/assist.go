@@ -126,7 +126,7 @@ func (a *API) consoleAssist(w http.ResponseWriter, r *http.Request, p auth.Princ
 	respond(w, 200, map[string]any{
 		"interactionId": interactionID,
 		"task":          result.Task, "text": result.Text, "label": result.Label, "score": result.Score,
-		"sources": result.Sources, "sourceDetails": result.SourceDetails, "provider": result.Provider, "usage": result.Usage,
+		"sources": result.Sources, "sourceDetails": result.SourceDetails, "usage": result.Usage,
 		"available": a.ai.Available(),
 	})
 }
@@ -275,7 +275,7 @@ func (a *API) consoleAIUsage(w http.ResponseWriter, r *http.Request, p auth.Prin
 	respond(w, 200, map[string]any{
 		"items": items, "series": series, "days": days,
 		"totalTokens": totalTokens, "totalCalls": totalCalls,
-		"provider": a.ai.ProviderName(), "available": a.ai.Available(),
+		"available": a.ai.Available(),
 	})
 }
 

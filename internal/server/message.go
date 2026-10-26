@@ -864,7 +864,7 @@ func scanMessageRow(rows rowScanner) (messageView, error) {
 	if err != nil {
 		return messageView{}, err
 	}
-	item.Metadata = metadata
+	item.Metadata = stripHiddenModel(metadata)
 	if item.DeletedAt != nil {
 		// A recalled message keeps its row so every client can replace the
 		// bubble in place, but the body never leaves the server again.
@@ -1196,10 +1196,9 @@ func (a *API) storeAIMessage(ctx context.Context, tenantID, conversationID, ques
 		MessageType:     "TEXT",
 		Content:         content,
 		Metadata: map[string]any{
-			"ai":       true,
-			"provider": reply.Provider,
-			"score":    reply.Score,
-			"sources":  reply.Sources,
+			"ai":      true,
+			"score":   reply.Score,
+			"sources": reply.Sources,
 		},
 	})
 	if err != nil {

@@ -235,7 +235,8 @@ class RelayTheme {
         style: TextButton.styleFrom(
           minimumSize: const Size(56, 32),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+          // 按钮会用这份 textStyle 换掉默认字体。不带中文字体时，中文标签在 CanvasKit 上是空的。
+          textStyle: _buttonText(13, FontWeight.w500),
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(radiusMd)),
         ),
@@ -245,7 +246,7 @@ class RelayTheme {
           foregroundColor: scheme.onSurface,
           minimumSize: const Size(72, 34),
           padding: const EdgeInsets.symmetric(horizontal: 12),
-          textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+          textStyle: _buttonText(13, FontWeight.w500),
           side: BorderSide(color: scheme.outlineVariant),
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(radiusMd)),
@@ -260,7 +261,7 @@ class RelayTheme {
             borderRadius: BorderRadius.circular(radiusMd)),
         side: BorderSide(color: scheme.outlineVariant),
         showCheckmark: false,
-        labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+        labelStyle: _buttonText(12, FontWeight.w500),
         backgroundColor: scheme.surface,
         selectedColor: scheme.primaryContainer,
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -305,7 +306,7 @@ class RelayTheme {
           foregroundColor: Colors.white,
           minimumSize: const Size(64, 34),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          textStyle: _buttonText(13, FontWeight.w600),
           elevation: 0,
           shadowColor: blueGlow,
           shape: RoundedRectangleBorder(
@@ -359,8 +360,7 @@ class RelayTheme {
       ),
       segmentedButtonTheme: SegmentedButtonThemeData(
         style: ButtonStyle(
-          textStyle: const WidgetStatePropertyAll(
-              TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+          textStyle: WidgetStatePropertyAll(_buttonText(13, FontWeight.w500)),
           shape: WidgetStatePropertyAll(
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusMd)),
           ),
@@ -419,6 +419,14 @@ class RelayTheme {
           const TooltipThemeData(waitDuration: Duration(milliseconds: 500)),
     );
   }
+
+  /// 按钮的 textStyle 会整份替换默认字体。中文必须写在这里，不能只靠 textTheme。
+  static TextStyle _buttonText(double size, FontWeight weight) => TextStyle(
+        fontFamily: _fontFamily.first,
+        fontFamilyFallback: _cjkFallback,
+        fontSize: size,
+        fontWeight: weight,
+      );
 
   static Color chatCanvas(ColorScheme scheme) =>
       scheme.brightness == Brightness.dark ? chatCanvasDark : chatCanvasLight;

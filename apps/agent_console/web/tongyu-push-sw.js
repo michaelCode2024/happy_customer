@@ -18,8 +18,9 @@ self.addEventListener('install', event => event.waitUntil((async () => {
   // 完整下载成功才完成安装，避免页面半更新、离线时缺少主脚本或字体。
   await cache.addAll(manifest.assets.map(url => new Request(url, {cache:'reload'})));
   await cache.put('/console/pwa-assets.json',response);
-  // 入口与壳资源必须尽快生效，不能等用户点「更新」才换掉旧缓存。
-  await self.skipWaiting();
+  // 已有旧 worker 时停在 waiting，登录页和工作台才能弹出更新。
+  // 首次安装没有 active worker，直接接管，避免第一打开一直等用户点更新。
+  if (!self.registration.active) await self.skipWaiting();
 })()));
 self.addEventListener('activate', event => event.waitUntil((async () => {
   for (const name of await caches.keys()) {
@@ -36,6 +37,8 @@ self.addEventListener('message', event => {
 self.addEventListener('fetch', event => {
   const request=event.request, url=new URL(request.url);
   if (request.method!=='GET' || url.origin!==self.location.origin || !url.pathname.startsWith('/console/') || url.pathname==='/console/mobile-call.html' || url.searchParams.has('token')) return;
+  // canvaskit.wasm 约 6MB。经 worker 转发会失去流式编译，每次打开都要等整包下完再编译。
+  if (url.pathname.startsWith('/console/canvaskit/')) return;
   event.respondWith((async () => {
     const cache=await caches.open(SHELL_CACHE);
     if (request.mode==='navigate') {

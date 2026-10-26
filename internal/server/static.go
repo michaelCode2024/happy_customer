@@ -1,13 +1,18 @@
 package server
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"html/template"
 	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 var h5Page = template.Must(template.New("h5").Parse(`<!doctype html>
@@ -151,9 +156,24 @@ func (a *API) registerStatic(mux *http.ServeMux) {
 				return
 			}
 			file = filepath.Join(console, "index.html")
+			path = "index.html"
 		}
-		// 后台资源使用固定文件名，更新后必须重新验证脚本与图标版本。
-		w.Header().Set("Cache-Control", "no-cache")
+		// 脚本和图标仍用固定文件名，更新后必须重新验证。
+		// canvaskit.wasm 约 6MB 且未压缩；条件请求在现网没有变成 304，每次打开都会整包重下。
+		w.Header().Set("Cache-Control", consoleCacheControl(path))
+		if strings.HasSuffix(strings.ToLower(path), ".wasm") && strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			body, err := gzipWasm(file)
+			if err != nil {
+				http.Error(w, "读取引擎文件失败", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/wasm")
+			w.Header().Set("Content-Encoding", "gzip")
+			w.Header().Set("Vary", "Accept-Encoding")
+			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+			_, _ = w.Write(body)
+			return
+		}
 		http.ServeFile(w, r, file)
 	})
 	mux.HandleFunc("GET /console", func(w http.ResponseWriter, r *http.Request) {
@@ -175,6 +195,61 @@ func (a *API) registerStatic(mux *http.ServeMux) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		http.ServeFile(w, r, file)
 	})
+}
+
+// consoleCacheControl keeps HTML and scripts revalidated, and lets the browser
+// keep the Flutter engine and bundled fonts. Those files are several megabytes;
+// no-cache plus a broken conditional GET made every open download them again.
+func consoleCacheControl(path string) string {
+	lower := strings.ToLower(path)
+	switch {
+	case strings.HasPrefix(lower, "canvaskit/"),
+		strings.HasSuffix(lower, ".otf"),
+		strings.HasSuffix(lower, ".ttf"),
+		strings.HasSuffix(lower, ".woff2"):
+		return "public, max-age=86400"
+	default:
+		return "no-cache"
+	}
+}
+
+type gzippedFile struct {
+	mod  time.Time
+	body []byte
+}
+
+var gzipWasmCache sync.Map
+
+func gzipWasm(path string) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if cached, ok := gzipWasmCache.Load(path); ok {
+		item := cached.(gzippedFile)
+		if item.mod.Equal(info.ModTime()) {
+			return item.body, nil
+		}
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	zw, err := gzip.NewWriterLevel(&buf, gzip.BestSpeed)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := zw.Write(raw); err != nil {
+		_ = zw.Close()
+		return nil, err
+	}
+	if err := zw.Close(); err != nil {
+		return nil, err
+	}
+	body := buf.Bytes()
+	gzipWasmCache.Store(path, gzippedFile{mod: info.ModTime(), body: body})
+	return body, nil
 }
 
 // setFrameAncestors lets the host product iframe /h5 while still allowing an

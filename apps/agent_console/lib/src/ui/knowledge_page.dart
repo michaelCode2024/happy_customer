@@ -1148,12 +1148,6 @@ class _KnowledgePageState extends State<KnowledgePage> {
                   visualDensity: VisualDensity.compact,
                   label: Text('置信度 ${_answer!.score.toStringAsFixed(2)}'),
                 ),
-                Chip(
-                  visualDensity: VisualDensity.compact,
-                  label: Text(
-                    '提供方 ${_answer!.provider.isEmpty ? '未启用' : _answer!.provider}',
-                  ),
-                ),
                 if (_answer!.handoff)
                   const Chip(
                     visualDensity: VisualDensity.compact,

@@ -10,6 +10,9 @@ class BrowserHistoryGate {
   /// 本地 Navigator 已弹出时，把浏览器历史对齐回去，避免下次边缘滑动空退。
   void syncAfterLocalPop() {}
 
+  /// 非 Web 无 History 可卸，留空实现与 Web 对称。
+  void drain() {}
+
   /// 监听浏览器 / iOS PWA 边缘返回；返回的订阅在 dispose 时取消。
   StreamSubscription<void> listen(void Function() onBrowserBack) =>
       const Stream<void>.empty().listen((_) {});

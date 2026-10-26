@@ -3,6 +3,7 @@ import 'fake_platform_api.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tongyu_agent_console/main.dart';
 import 'package:tongyu_agent_console/src/state/credential_store.dart';
+import 'package:tongyu_agent_console/src/util/browser_chrome.dart';
 
 /// The console's start-up behaviour, driven through the real [SessionController]
 /// against a store that never touches the platform channel.
@@ -176,6 +177,22 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('平台管理员登录'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('手机登录顶栏随露出的页面变色', (tester) async {
+    tester.view.physicalSize = const Size(390, 520);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      BrowserChrome.setTop(null);
+    });
+    await boot(tester, MemoryCredentialStore());
+    expect(BrowserChrome.top.value, const Color(0xFF2251F5));
+
+    await tester.drag(find.byType(SingleChildScrollView), const Offset(0, -320));
+    await tester.pumpAndSettle();
+    expect(BrowserChrome.top.value, const Color(0xFFFFFFFF));
   });
 
   testWidgets('记住平台门面且无令牌时落在平台登录页', (tester) async {

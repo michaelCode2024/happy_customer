@@ -101,6 +101,10 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
   /// 手机「更多」点进的二级页路由；与 section 切换分开，避免外层返回条 + 路由 pop 叠两次动画。
   MaterialPageRoute<void>? _moreChildRoute;
 
+  /// 「更多」二级页与边缘手势 / 系统返回共用：按钮 pop 与 popstate 都只退一层，不直跳首页。
+  final _moreBrowserHistory = BrowserHistoryGate();
+  StreamSubscription<void>? _moreBrowserBack;
+
   /// True while the customer record is open as a pushed page on a narrow window.
   bool _profileOpen = false;
   final _assistDraft = ValueNotifier<AssistResult?>(null);
@@ -138,6 +142,8 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
   void initState() {
     super.initState();
     initializeMessageAlerts();
+    // 边缘滑动 / 浏览器后退：只卸当前「更多」二级页，与顶栏返回同一条 Navigator 栈。
+    _moreBrowserBack = _moreBrowserHistory.listen(_onMoreBrowserBack);
     _notificationNavigation = notificationConversationEvents().listen((id) {
       if (mounted && RegExp(r'^[0-9a-fA-F-]{36}$').hasMatch(id))
         _openNotificationConversation(id);
@@ -286,6 +292,8 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
   @override
   void dispose() {
     _notificationNavigation?.cancel();
+    _moreBrowserBack?.cancel();
+    _moreBrowserHistory.drain();
     _planRefresh?.cancel();
     _assistDraft.dispose();
     _contextPanelTab.dispose();
@@ -295,6 +303,18 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     // audio backend.
     unawaited(VoicePlayer.instance.release());
     super.dispose();
+  }
+
+  void _onMoreBrowserBack() {
+    if (!mounted) return;
+    final route = _moreChildRoute;
+    if (route != null && route.isCurrent) {
+      // 与顶栏返回一致走 pop，禁止 removeRoute（Web 上会跳过收尾并留下点不中的层）。
+      route.navigator?.maybePop();
+      return;
+    }
+    final nav = Navigator.of(context);
+    if (nav.canPop()) nav.maybePop();
   }
 
   Map<String, String> _customMenuLabels = {};
@@ -625,23 +645,35 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     final route = _moreChildRoute;
     if (route == null) return;
     if (route.isCurrent) {
-      Navigator.of(context).removeRoute(route);
+      // 与手势/顶栏同一条 pop 收尾，顺带 sync History；禁止 removeRoute。
+      route.navigator?.maybePop();
+    } else {
+      _moreChildRoute = null;
     }
-    _moreChildRoute = null;
   }
 
-  /// 手机从「更多」进二级：只 push 一层，系统/页头返回只播一次。
+  /// 手机从「更多」进二级：只 push 一层，系统/页头/边缘手势返回都只退这一层。
   void _openMoreChild(WorkbenchSection section) {
     if (section == WorkbenchSection.more) return;
-    _popMoreChildIfAny();
+    // 已有二级时先卸完再开，避免旧页 whenComplete 的 History sync 误伤新页。
+    if (_moreChildRoute != null) {
+      _popMoreChildIfAny();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _openMoreChild(section);
+      });
+      return;
+    }
     final page = _moreChildPage(section);
     final route = MaterialPageRoute<void>(
       settings: RouteSettings(name: '/more/${section.name}'),
       builder: (_) => page,
     );
     _moreChildRoute = route;
+    // 压一条 History，边缘滑动才进 Flutter 栈，而不是浏览器直接退到站外首页。
+    _moreBrowserHistory.push('more/${section.name}');
     Navigator.of(context).push(route).whenComplete(() {
       if (_moreChildRoute == route) _moreChildRoute = null;
+      _moreBrowserHistory.syncAfterLocalPop();
     });
   }
 
@@ -1314,11 +1346,15 @@ class MobileConversationFlowState extends State<MobileConversationFlow> {
   @override
   void dispose() {
     widget.workbench.removeListener(_selectionChanged);
-    _browserBack?.cancel();
     final route = _threadRoute;
+    _threadRoute = null;
+    // 切底栏卸会话时先吐干净 History，避免留下幽灵条目，下次边缘滑动直接退出到首页。
+    _browserHistory.drain();
+    _browserBack?.cancel();
     if (route != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (route.isActive) route.navigator?.removeRoute(route);
+        // dispose 阶段用 pop 收尾；仍在栈上才卸，避免对已 pop 路由二次操作。
+        if (route.isActive) route.navigator?.maybePop();
       });
     }
     super.dispose();

@@ -107,22 +107,24 @@
         {childList:true,subtree:true,attributes:true,attributeFilter:['content']});
     retainSafeViewport();
     // 首帧前读取已保存的外观，避免深色登录页与白色网页安全区域拼接。
-    window.tongyuSyncTheme = function(color, dark) {
+    window.tongyuSyncTheme = function(color, dark, topColor) {
       if (!/^#[0-9a-f]{6}$/i.test(color)) return;
+      const top = (typeof topColor === 'string' && /^#[0-9a-f]{6}$/i.test(topColor)) ? topColor : color;
       const root = document.documentElement;
       root.style.setProperty('--tongyu-page-bg', color);
       root.style.backgroundColor = color;
       root.dataset.tongyuTheme = dark ? 'dark' : 'light';
       root.style.colorScheme = dark ? 'dark' : 'light';
       root.style.color = dark ? '#e2e8f0' : '#425466';
-      document.querySelector('meta[name="theme-color"]').content = color;
+      // 状态栏采顶色。底部安全区仍用页面底色，避免登录蓝头把底部也染蓝。
+      document.querySelector('meta[name="theme-color"]').content = top;
       document.querySelector('meta[name="color-scheme"]').content = dark ? 'dark' : 'light';
       if (document.body) document.body.style.backgroundColor = color;
       const loading = document.getElementById('tongyu-loading');
       if (loading) { loading.style.backgroundColor = color; loading.style.color = dark ? '#e2e8f0' : '#425466'; }
       const topTint = document.getElementById('safari-top-tint');
       const bottomTint = document.getElementById('safari-bottom-tint');
-      if (topTint) topTint.style.backgroundColor = color;
+      if (topTint) topTint.style.backgroundColor = top;
       if (bottomTint) bottomTint.style.backgroundColor = color;
       if (typeof window.tongyuPlaceSafariTints === 'function') window.tongyuPlaceSafariTints();
     };
@@ -272,6 +274,94 @@
     setTimeout(function () {
       if (!window.tongyuFirstFrameReady) window.tongyuLoadingFailed();
     }, 45000);
+  </script>
+  <script>
+    // 入口页每次走网络。已安装的旧工作台把脚本留在自己的缓存里，更新提示又只在登录后才挂上，
+    // 所以登录页会一直看不到新包。这里在入口页直接询问正在等待的版本。
+    (function () {
+      if (!navigator.serviceWorker) return;
+      var asked = false, pending = false;
+      function offer() {
+        if (asked || pending) return;
+        navigator.serviceWorker.getRegistration('/console/').then(function (reg) {
+          if (!reg || !reg.waiting || asked || pending) return;
+          pending = true;
+          var channel = new MessageChannel();
+          var timer = setTimeout(function () { pending = false; channel.port1.close(); }, 2000);
+          channel.port1.onmessage = function (event) {
+            clearTimeout(timer);
+            pending = false;
+            if (asked) return;
+            var shell = (event.data && event.data.version) || '';
+            var release = (event.data && event.data.release) || {};
+            if (!shell) return;
+            var key = 'tongyu.update.prompt.' + shell;
+            try {
+              if (sessionStorage.getItem(key)) return;
+              sessionStorage.setItem(key, '1');
+            } catch (e) {}
+            asked = true;
+            var notes = Array.isArray(release.notes) ? release.notes : [];
+            var version = release.version || '';
+            var root = document.createElement('div');
+            root.setAttribute('role', 'dialog');
+            root.setAttribute('aria-label', '通语有新版本');
+            root.style.cssText = 'position:fixed;inset:0;z-index:200000;display:flex;align-items:center;justify-content:center;background:rgba(15,23,42,.45);padding:24px;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif';
+            var card = document.createElement('div');
+            card.style.cssText = 'width:min(420px,100%);background:#fff;color:#1e293b;border-radius:16px;padding:22px 22px 16px;box-shadow:0 16px 40px rgba(15,23,42,.18)';
+            var title = document.createElement('div');
+            title.textContent = '通语有新版本';
+            title.style.cssText = 'font-size:18px;font-weight:650;margin:0 0 8px';
+            card.appendChild(title);
+            if (version) {
+              var ver = document.createElement('div');
+              ver.textContent = '版本 ' + version;
+              ver.style.cssText = 'font-size:13px;color:#64748b;margin-bottom:12px';
+              card.appendChild(ver);
+            }
+            if (!notes.length) {
+              var empty = document.createElement('div');
+              empty.textContent = '新版本已下载，可以立即更新。';
+              empty.style.cssText = 'font-size:14px;line-height:1.6';
+              card.appendChild(empty);
+            }
+            notes.forEach(function (note) {
+              var line = document.createElement('div');
+              line.textContent = '• ' + note;
+              line.style.cssText = 'font-size:14px;line-height:1.6;margin:0 0 8px';
+              card.appendChild(line);
+            });
+            var actions = document.createElement('div');
+            actions.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;margin-top:16px';
+            function button(label, primary) {
+              var el = document.createElement('button');
+              el.type = 'button';
+              el.textContent = label;
+              el.style.cssText = primary
+                ? 'border:0;border-radius:10px;background:#3263ff;color:#fff;font:14px inherit;padding:10px 16px;cursor:pointer'
+                : 'border:0;border-radius:10px;background:transparent;color:#334155;font:14px inherit;padding:10px 12px;cursor:pointer';
+              return el;
+            }
+            var later = button('稍后', false);
+            var now = button('立即更新', true);
+            later.addEventListener('click', function () { root.remove(); });
+            now.addEventListener('click', function () {
+              now.disabled = true;
+              navigator.serviceWorker.addEventListener('controllerchange', function () { location.reload(); });
+              if (reg.waiting) reg.waiting.postMessage({type: 'ACTIVATE_UPDATE'});
+            });
+            actions.appendChild(later);
+            actions.appendChild(now);
+            card.appendChild(actions);
+            root.appendChild(card);
+            document.body.appendChild(root);
+          };
+          reg.waiting.postMessage({type: 'SHELL_STATUS'}, [channel.port2]);
+        }).catch(function () { pending = false; });
+      }
+      offer();
+      setInterval(offer, 2000);
+    })();
   </script>
   <script src="pwa-client.js"></script>
   <script src="push-client.js"></script>

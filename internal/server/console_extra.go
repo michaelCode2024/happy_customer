@@ -526,7 +526,7 @@ func (a *API) consoleKnowledgeSearch(w http.ResponseWriter, r *http.Request, p a
 	respond(w, 200, map[string]any{
 		"answer":   reply.Content,
 		"score":    reply.Score,
-		"provider": reply.Provider,
+		"provider": "",
 		"handoff":  reply.Handoff,
 		"reason":   string(reply.Reason),
 		// 测试台需要本次检索的正文；自动回复和开放 API 仍保留原有标题列表协议。
@@ -557,7 +557,7 @@ func (a *API) consoleKnowledgePreview(w http.ResponseWriter, r *http.Request, p 
 	}
 	respond(w, 200, map[string]any{
 		"items": hits, "count": len(hits), "aiAvailable": a.ai.Available(),
-		"provider": a.ai.ProviderName(), "threshold": a.cfg.AI.ConfidenceThreshold,
+		"threshold": a.cfg.AI.ConfidenceThreshold,
 	})
 }
 
