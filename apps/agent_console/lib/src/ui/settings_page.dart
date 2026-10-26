@@ -491,42 +491,44 @@ class _SettingsPageState extends State<SettingsPage> {
             final content = ListView(
                 key: ValueKey(_settingsTab),
                 padding: EdgeInsets.fromLTRB(
-                    compact ? 16 : 22, 16, compact ? 16 : 22, 32),
+                    compact ? 14 : 22, compact ? 12 : 16, compact ? 14 : 22, 32),
                 children: [
-                  Row(children: [
-                    Container(
-                      width: 30,
-                      height: 30,
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.primary.withOpacity(.08),
-                        borderRadius: BorderRadius.circular(8),
+                  if (!compact) ...[
+                    Row(children: [
+                      Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primary.withOpacity(.08),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(icons[_settingsTab],
+                            size: 16, color: theme.colorScheme.primary),
                       ),
-                      child: Icon(icons[_settingsTab],
-                          size: 16, color: theme.colorScheme.primary),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(labels[_settingsTab],
-                              style: theme.textTheme.titleMedium
-                                  ?.copyWith(fontSize: 16)),
-                          const SizedBox(height: 2),
-                          Text(
-                              [
-                                '设置客户看到的名字，查看所属企业与客服入口',
-                                '选择是否接收新的会话分配',
-                                '更新登录密码，管理本次登录',
-                                '按你的工作习惯设置界面与提醒'
-                              ][_settingsTab],
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                  color: theme.colorScheme.onSurfaceVariant)),
-                        ],
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(labels[_settingsTab],
+                                style: theme.textTheme.titleMedium
+                                    ?.copyWith(fontSize: 16)),
+                            const SizedBox(height: 2),
+                            Text(
+                                [
+                                  '设置客户看到的名字，查看所属企业与客服入口',
+                                  '选择是否接收新的会话分配',
+                                  '更新登录密码，管理本次登录',
+                                  '按你的工作习惯设置界面与提醒'
+                                ][_settingsTab],
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant)),
+                          ],
+                        ),
                       ),
-                    ),
-                  ]),
-                  const SizedBox(height: 14),
+                    ]),
+                    const SizedBox(height: 14),
+                  ],
                   if (_settingsTab == 3)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12),
@@ -655,19 +657,53 @@ class _Section extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return WorkspaceCard(
-      title: title,
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          for (var i = 0; i < children.length; i++) ...[
-            if (i > 0) const SizedBox(height: 10),
-            children[i],
+    return LayoutBuilder(builder: (context, c) {
+      final compact = c.maxWidth < 600;
+      final theme = Theme.of(context);
+      final scheme = theme.colorScheme;
+      if (compact) {
+        return Container(
+          decoration: BoxDecoration(
+            color: scheme.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: scheme.outlineVariant.withOpacity(0.8)),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: scheme.primary,
+                  letterSpacing: 0.3,
+                ),
+              ),
+              const SizedBox(height: 10),
+              for (var i = 0; i < children.length; i++) ...[
+                if (i > 0) const SizedBox(height: 12),
+                children[i],
+              ],
+            ],
+          ),
+        );
+      }
+      return WorkspaceCard(
+        title: title,
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            for (var i = 0; i < children.length; i++) ...[
+              if (i > 0) const SizedBox(height: 10),
+              children[i],
+            ],
           ],
-        ],
-      ),
-    );
+        ),
+      );
+    });
   }
 }
 

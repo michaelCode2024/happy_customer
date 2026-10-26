@@ -37,8 +37,6 @@ class _AssistFeedbackActionsState extends State<AssistFeedbackActions> {
       if (action == 'ADOPT') {
         if (!widget.canAdopt) return;
         widget.onAdopt(result);
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('已插入输入框，请确认后发送')));
       } else {
         setState(() => _feedback = action);
       }

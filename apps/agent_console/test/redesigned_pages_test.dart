@@ -103,9 +103,7 @@ void main() {
           theme: RelayTheme.light(),
           home: KnowledgePage(session: session, workbench: workbench)));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(DropdownButtonFormField<String>, '知识分类'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('产品说明').last);
+      await tester.tap(find.text('产品说明').first);
       await tester.pumpAndSettle();
       expect(find.text('退换政策'), findsNothing);
       await tester.tap(find.text('App 接入指南').first);

@@ -20,8 +20,14 @@
     }
   }
   // 当前 Flutter 只提供 CanvasKit。指定 html 渲染器会停在开屏。
+  // fontFallbackBaseUrl：缺字时不要去 fonts.gstatic.com（国内失败会闪方框）；
+  // 指同源空目录，404 立刻放弃，中文只靠 pubspec 的 SportsChinese。
   _flutter.loader.load({
-    config: { renderer: 'canvaskit' },
+    config: {
+      renderer: 'canvaskit',
+      canvasKitBaseUrl: new URL('canvaskit/', document.baseURI).toString(),
+      fontFallbackBaseUrl: new URL('fonts/canvas-fallback/', document.baseURI).toString(),
+    },
   }).catch(function () {
     window.tongyuLoadingFailed && window.tongyuLoadingFailed();
   });

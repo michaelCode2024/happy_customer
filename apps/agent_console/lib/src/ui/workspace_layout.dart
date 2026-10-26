@@ -63,38 +63,48 @@ class WorkspaceAppBar extends StatelessWidget implements PreferredSizeWidget {
       surfaceTintColor: Colors.transparent,
       shape: Border(bottom: BorderSide(color: scheme.outlineVariant)),
       bottom: bottom,
-      title: Row(children: [
-        Container(
-          width: 26,
-          height: 26,
-          decoration: BoxDecoration(
-            color: scheme.primary.withOpacity(.08),
-            borderRadius: BorderRadius.circular(7),
-          ),
-          child: Icon(icon, color: scheme.primary, size: 15),
-        ),
-        const SizedBox(width: 9),
-        Expanded(
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  fontSize: 14,
-                  height: 1.25,
-                  fontWeight: FontWeight.w600,
-                  color: scheme.onSurface)),
-          Text(description,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  fontSize: 11.5,
-                  height: 1.25,
-                  fontWeight: FontWeight.w400,
-                  color: scheme.onSurfaceVariant)),
-        ])),
-      ]),
+      title: LayoutBuilder(
+        builder: (context, constraints) {
+          final isNarrow = constraints.maxWidth < 360;
+          return Row(children: [
+            Container(
+              width: 26,
+              height: 26,
+              decoration: BoxDecoration(
+                color: scheme.primary.withOpacity(.08),
+                borderRadius: BorderRadius.circular(7),
+              ),
+              child: Icon(icon, color: scheme.primary, size: 15),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 14,
+                          height: 1.25,
+                          fontWeight: FontWeight.w600,
+                          color: scheme.onSurface)),
+                  if (!isNarrow)
+                    Text(description,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 11,
+                            height: 1.2,
+                            fontWeight: FontWeight.w400,
+                            color: scheme.onSurfaceVariant)),
+                ],
+              ),
+            ),
+          ]);
+        },
+      ),
       actions: [...actions, const SizedBox(width: 8)],
     );
   }
@@ -131,7 +141,7 @@ class WorkspacePageHeader extends StatelessWidget {
         Text(title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.titleLarge),
+            style: theme.textTheme.titleMedium),
         const SizedBox(height: 1),
         Text(description,
             maxLines: 1,
@@ -142,7 +152,7 @@ class WorkspacePageHeader extends StatelessWidget {
     ]);
     return Container(
         color: Colors.transparent,
-        padding: const EdgeInsets.fromLTRB(20, 14, 16, 10),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
         child: LayoutBuilder(
             builder: (context, box) => box.maxWidth < 660
                 ? Column(
@@ -180,7 +190,8 @@ class WorkspaceTabs extends StatelessWidget {
             border: Border(bottom: BorderSide(color: scheme.outlineVariant))),
         child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+            physics: const BouncingScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(children: [
               for (var i = 0; i < labels.length; i++)
                 Semantics(
@@ -188,23 +199,24 @@ class WorkspaceTabs extends StatelessWidget {
                     selected: i == selectedIndex,
                     child: InkWell(
                         onTap: () => onSelected(i),
+                        borderRadius: BorderRadius.circular(8),
                         child: Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 11),
+                                horizontal: 14, vertical: 12),
                             decoration: BoxDecoration(
                                 border: Border(
                                     bottom: BorderSide(
-                                        width: 2,
+                                        width: 2.5,
                                         color: i == selectedIndex
                                             ? scheme.primary
                                             : Colors.transparent))),
                             child: Text(labels[i],
                                 style: TextStyle(
-                                    fontSize: 12.5,
+                                    fontSize: 13.5,
                                     height: 1.2,
                                     fontWeight: i == selectedIndex
-                                        ? FontWeight.w600
-                                        : FontWeight.w400,
+                                        ? FontWeight.w700
+                                        : FontWeight.w500,
                                     color: i == selectedIndex
                                         ? scheme.primary
                                         : scheme.onSurfaceVariant)))))

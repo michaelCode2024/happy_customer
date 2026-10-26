@@ -459,9 +459,6 @@ class _ResultCard extends StatelessWidget {
                         visualDensity: VisualDensity.compact),
                     onPressed: () {
                       onAdopt(result);
-                      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                        const SnackBar(content: Text('已插入输入框，请确认后发送')),
-                      );
                     },
                   ),
               ],

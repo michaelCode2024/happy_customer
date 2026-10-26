@@ -445,7 +445,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
               decoration: BoxDecoration(
                 color: const Color(0xFFE8F5E9),
                 borderRadius: BorderRadius.circular(6),
@@ -455,22 +455,22 @@ class _KnowledgePageState extends State<KnowledgePage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Icon(Icons.check_circle_outline,
-                      size: 13, color: Color(0xFF2E7D32)),
-                  const SizedBox(width: 4),
+                      size: 11, color: Color(0xFF2E7D32)),
+                  const SizedBox(width: 3),
                   Text(
-                    '已启用 $activeCount',
+                    '$activeCount',
                     style: const TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
                       color: Color(0xFF2E7D32),
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 6),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
               decoration: BoxDecoration(
                 color: gapCount > 0
                     ? const Color(0xFFFFF3E0)
@@ -489,17 +489,17 @@ class _KnowledgePageState extends State<KnowledgePage> {
                     gapCount > 0
                         ? Icons.warning_amber_rounded
                         : Icons.edit_note_outlined,
-                    size: 13,
+                    size: 11,
                     color: gapCount > 0
                         ? const Color(0xFFE65100)
                         : theme.colorScheme.onSurfaceVariant,
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 3),
                   Text(
-                    '缺少问法 $gapCount',
+                    '$gapCount',
                     style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
                       color: gapCount > 0
                           ? const Color(0xFFE65100)
                           : theme.colorScheme.onSurfaceVariant,

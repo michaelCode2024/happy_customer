@@ -5,6 +5,34 @@
   const embedded=()=>/MicroMessenger|QQ\/|FBAN|FBAV|Instagram|Line\//i.test(navigator.userAgent);
   const installed=()=>matchMedia('(display-mode: standalone)').matches||matchMedia('(display-mode: fullscreen)').matches||navigator.standalone===true;
   const installChanged=()=>window.dispatchEvent(new CustomEvent('tongyu:installchange'));
+  // iOS 26 主屏幕：启动瞬间采样贴边实色；冷启动采样条先压在启动遮罩上，首帧后再降回画布下。
+  let chromeReady=false;
+  function placeSafariTints(){
+    if(!ios())return;
+    const standalone=installed();
+    if(standalone)document.documentElement.classList.add('tongyu-ios-standalone');
+    else document.documentElement.classList.remove('tongyu-ios-standalone');
+    const topTint=document.getElementById('safari-top-tint');
+    const bottomTint=document.getElementById('safari-bottom-tint');
+    const z=standalone&&!chromeReady?'100000':'0';
+    if(topTint){
+      topTint.style.display=standalone?'block':'none';
+      topTint.style.height='12px';
+      topTint.style.zIndex=z;
+      if(!topTint.style.backgroundColor)topTint.style.backgroundColor='#ffffff';
+    }
+    if(bottomTint){
+      bottomTint.style.display=standalone?'block':'none';
+      bottomTint.style.height='12px';
+      bottomTint.style.zIndex=z;
+      if(!bottomTint.style.backgroundColor)bottomTint.style.backgroundColor='#ffffff';
+    }
+  }
+  window.tongyuPlaceSafariTints=placeSafariTints;
+  if(ios())placeSafariTints();
+  window.addEventListener('flutter-first-frame',()=>{chromeReady=true;placeSafariTints();},{once:true});
+  window.addEventListener('resize',placeSafariTints);
+  window.addEventListener('orientationchange',placeSafariTints);
   window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();installEvent=event;installChanged();});
   window.addEventListener('appinstalled',()=>{installEvent=null;installChanged();});
   const ready= async()=>{

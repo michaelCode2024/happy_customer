@@ -11,15 +11,23 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:tongyu_agent_console/src/platform/platform_controller.dart';
 import 'package:tongyu_agent_console/src/state/credential_store.dart';
 import 'package:tongyu_agent_console/src/state/session_controller.dart';
+import 'package:flutter/foundation.dart';
 import 'package:tongyu_agent_console/src/theme.dart';
 import 'package:tongyu_agent_console/src/ui/login_page.dart';
 import 'package:tongyu_agent_console/src/ui/platform_login_page.dart';
 import 'package:tongyu_agent_console/src/ui/platform_page.dart';
 import 'package:tongyu_agent_console/src/ui/product_brand.dart';
 import 'package:tongyu_agent_console/src/ui/workbench_page.dart';
+import 'package:tongyu_agent_console/src/util/web_emoji_font.dart';
 
 void main() {
   runApp(const TongYuConsoleApp());
+  // 首帧后立刻预拉表情字体。
+  if (kIsWeb) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(ensureWebEmojiFont());
+    });
+  }
 }
 
 /// 同一安装包里的两套门面：客服工作台与平台运营后台。
@@ -144,44 +152,52 @@ class _TongYuConsoleAppState extends State<TongYuConsoleApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: ProductBrand.consoleTitle,
-      locale: const Locale('zh', 'CN'),
-      supportedLocales: const <Locale>[Locale('zh', 'CN')],
-      localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
-        GlobalMaterialLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-      ],
-      theme: RelayTheme.light(),
-      darkTheme: RelayTheme.light(),
-      themeMode: ThemeMode.light,
-      builder: (context, child) {
-        final theme = Theme.of(context);
-        if (!_startupComplete && _surfaceRestored &&
-            _session.phase != SessionPhase.booting &&
-            (isHostedConsole || _platform.phase != PlatformPhase.booting)) {
-          _startupComplete = true;
-          WidgetsBinding.instance.addPostFrameCallback((_) => markAppReady());
-        }
-        syncBrowserTheme(theme.colorScheme.surface.value,
-            theme.brightness == Brightness.dark);
-        return ColoredBox(color: theme.colorScheme.surface,
-            child: AppSafeArea(browserBottom: isHostedConsole ? 0 : browserSafeBottom,
-                child: child ?? const SizedBox.shrink()));
-      },
-      home: isHostedConsole
-          ? Scaffold(
-              appBar: AppBar(
-                  leading: IconButton(
-                      icon: const Icon(Icons.arrow_back),
-                      tooltip: '返回商城',
-                      onPressed: closeHostedConsole),
-                  title: const Text('店铺消息与群聊')),
-              body: _home(),
-            )
-          : _home(),
+    // 表情字体就绪后重建，避免会话气泡里已画成的方框一直留着。
+    return ValueListenableBuilder<bool>(
+      valueListenable: webEmojiFontReady,
+      builder: (context, _, __) => MaterialApp(
+        debugShowCheckedModeBanner: false,
+        title: ProductBrand.consoleTitle,
+        locale: const Locale('zh', 'CN'),
+        supportedLocales: const <Locale>[Locale('zh', 'CN')],
+        localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
+          GlobalMaterialLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+        ],
+        theme: RelayTheme.light(),
+        darkTheme: RelayTheme.light(),
+        themeMode: ThemeMode.light,
+        builder: (context, child) {
+          final theme = Theme.of(context);
+          if (!_startupComplete &&
+              _surfaceRestored &&
+              _session.phase != SessionPhase.booting &&
+              (isHostedConsole || _platform.phase != PlatformPhase.booting)) {
+            _startupComplete = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) => markAppReady());
+          }
+          syncBrowserTheme(theme.colorScheme.surface.value,
+              theme.brightness == Brightness.dark);
+          return ColoredBox(
+              color: theme.colorScheme.surface,
+              child: AppSafeArea(
+                  browserBottom: isHostedConsole ? 0 : browserSafeBottom,
+                  child: wrapWithWebEmojiFallback(
+                      child ?? const SizedBox.shrink())));
+        },
+        home: isHostedConsole
+            ? Scaffold(
+                appBar: AppBar(
+                    leading: IconButton(
+                        icon: const Icon(Icons.arrow_back),
+                        tooltip: '返回商城',
+                        onPressed: closeHostedConsole),
+                    title: const Text('店铺消息与群聊')),
+                body: _home(),
+              )
+            : _home(),
+      ),
     );
   }
 

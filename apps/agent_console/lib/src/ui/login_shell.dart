@@ -26,249 +26,577 @@ class LoginShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    // 登录页连同安全区域共用 MaterialApp 同步给浏览器的表面色。
-    final pageBackground = const Color(0xFFEEF2FB);
     final platform = heroKind == LoginHeroKind.platform;
     return Scaffold(
-      backgroundColor: pageBackground,
+      // 手机稿是浅渐变底；宽屏右侧表单区仍用冷灰底。
+      backgroundColor: const Color(0xFFEEF2FB),
       body: LayoutBuilder(builder: (context, constraints) {
         final wide = constraints.maxWidth >= 960;
-        final padding = wide ? 48.0 : 24.0;
+        if (!wide) {
+          return _MobileLoginBody(
+            theme: theme,
+            platform: platform,
+            title: title,
+            subtitle: subtitle,
+            onSurfaceSwitch: onSurfaceSwitch,
+            child: child,
+          );
+        }
         return Row(children: [
-          if (wide) Expanded(child: _LoginHeroPanel(kind: heroKind)),
+          Expanded(child: _LoginHeroPanel(kind: heroKind)),
           Expanded(
-              child: Stack(children: [
-                Positioned(
-                  top: -60,
-                  right: constraints.maxWidth * 0.08,
-                  child: IgnorePointer(
-                    child: Container(
-                      width: 280,
-                      height: 280,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(120),
-                        gradient: const LinearGradient(
-                          colors: [Color(0x55845EF7), Color(0x333263FF)],
-                        ),
+            child: _DesktopLoginForm(
+              theme: theme,
+              platform: platform,
+              title: title,
+              subtitle: subtitle,
+              onSurfaceSwitch: onSurfaceSwitch,
+              child: child,
+            ),
+          ),
+        ]);
+      }),
+    );
+  }
+}
+
+/// 手机 / PWA：真正的原生移动 App 风格。
+/// 满屏沉浸式微渐变背景，顶部大气居中品牌 Header，呼吸质感浮层白卡，
+/// 底部布局自适应推底（Spacer / bottom pinning），消灭“悬空半截”的半成品网页感。
+class _MobileLoginBody extends StatelessWidget {
+  const _MobileLoginBody({
+    required this.theme,
+    required this.platform,
+    required this.title,
+    required this.subtitle,
+    required this.onSurfaceSwitch,
+    required this.child,
+  });
+
+  final ThemeData theme;
+  final bool platform;
+  final String title;
+  final String subtitle;
+  final VoidCallback? onSurfaceSwitch;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = theme.colorScheme;
+    final inset = MediaQuery.viewInsetsOf(context);
+
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Color(0xFFEBF1FF),
+            Color(0xFFF3F6FD),
+            Color(0xFFF8FAFC),
+          ],
+        ),
+      ),
+      child: Stack(
+        children: [
+          // 移动原生顶部大弧光晕背景
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 290,
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color(0xFF2251F5),
+                    Color(0xFF386CFB),
+                    Color(0xFF5B8EFF),
+                  ],
+                ),
+                borderRadius: BorderRadius.only(
+                  bottomLeft: Radius.circular(40),
+                  bottomRight: Radius.circular(40),
+                ),
+              ),
+            ),
+          ),
+          // 柔和光晕装饰泡泡
+          Positioned(
+            top: -60,
+            right: -40,
+            child: IgnorePointer(
+              child: Container(
+                width: 220,
+                height: 220,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withOpacity(0.09),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 80,
+            left: -50,
+            child: IgnorePointer(
+              child: Container(
+                width: 160,
+                height: 160,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withOpacity(0.06),
+                ),
+              ),
+            ),
+          ),
+          SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return SingleChildScrollView(
+                  padding: EdgeInsets.fromLTRB(20, 16, 20, 16 + inset.bottom),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight: constraints.maxHeight - 32 - inset.bottom,
+                    ),
+                    child: IntrinsicHeight(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // 顶部居中原生 App 品牌 Header
+                          Padding(
+                            padding: const EdgeInsets.only(top: 12, bottom: 20),
+                            child: Column(
+                              children: [
+                                Container(
+                                  width: 56,
+                                  height: 56,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(18),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: const Color(0xFF102A83).withOpacity(0.25),
+                                        blurRadius: 18,
+                                        offset: const Offset(0, 8),
+                                      ),
+                                    ],
+                                  ),
+                                  child: const Center(
+                                    child: TongYuLogoMark(size: 38),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Text(
+                                      '通语',
+                                      style: TextStyle(
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 1.0,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      platform ? '管理后台' : '客服工作台',
+                                      style: TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w700,
+                                        letterSpacing: 0.6,
+                                        color: Colors.white.withOpacity(0.95),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 5),
+                                Text(
+                                  platform
+                                      ? '平台专属管理后台 · 服务治理与系统配置'
+                                      : '新一代企业在线智能客服系统',
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    color: Colors.white.withOpacity(0.85),
+                                    letterSpacing: 0.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          // 原生移动端主表单卡片
+                          Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(24),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFF1B3B9E).withOpacity(0.08),
+                                  blurRadius: 28,
+                                  offset: const Offset(0, 12),
+                                ),
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.03),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 22, vertical: 24),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      title,
+                                      style: TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.w800,
+                                        color: scheme.onSurface,
+                                      ),
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 9, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFEFF4FF),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        platform ? '平台管理员登录' : '客服工作台登录',
+                                        style: const TextStyle(
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFF2855F6),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  subtitle,
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                                ),
+                                const SizedBox(height: 20),
+                                Theme(
+                                  data: theme.copyWith(
+                                    inputDecorationTheme:
+                                        theme.inputDecorationTheme.copyWith(
+                                      filled: true,
+                                      fillColor: const Color(0xFFF7F9FC),
+                                      contentPadding: const EdgeInsets.symmetric(
+                                          horizontal: 16, vertical: 15),
+                                      border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(14),
+                                          borderSide: BorderSide.none),
+                                      enabledBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(14),
+                                          borderSide: const BorderSide(
+                                              color: Color(0xFFE9EEF5))),
+                                      focusedBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(14),
+                                          borderSide: const BorderSide(
+                                              color: Color(0xFF3263FF), width: 1.8)),
+                                    ),
+                                  ),
+                                  child: AutofillGroup(child: child),
+                                ),
+                                const SizedBox(height: 12),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: TextButton.icon(
+                                    onPressed: () => _showLoginHelp(context, platform),
+                                    icon: const Icon(Icons.help_outline, size: 16),
+                                    label: const Text('需要登录帮助？'),
+                                    style: TextButton.styleFrom(
+                                      foregroundColor: scheme.onSurfaceVariant,
+                                      padding: EdgeInsets.zero,
+                                      visualDensity: VisualDensity.compact,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          // 弹性撑开区域：将底部版权与切换键推到屏幕最底部，消灭“悬空半截”
+                          const Spacer(),
+                          const SizedBox(height: 24),
+                          // 底部功能切换栏与原生品牌标语
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.65),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: const Color(0xFFE2E8F4).withOpacity(0.7),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  '通语企业服务',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                                ),
+                                TextButton.icon(
+                                  onPressed: onSurfaceSwitch,
+                                  icon: Icon(
+                                    platform
+                                        ? Icons.support_agent_rounded
+                                        : Icons.admin_panel_settings_outlined,
+                                    size: 16,
+                                  ),
+                                  label: Text(
+                                    platform ? '客服工作台登录' : '平台管理员登录',
+                                    style: const TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  style: TextButton.styleFrom(
+                                    visualDensity: VisualDensity.compact,
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 4),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          Center(
+                            child: Text(
+                              '通语 TongYu · 原生级企业在线客服',
+                              style: TextStyle(
+                                fontSize: 11,
+                                letterSpacing: 0.3,
+                                color: scheme.onSurfaceVariant.withOpacity(0.65),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                        ],
                       ),
                     ),
                   ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+
+/// 宽屏右侧表单：保留卡片与完整桌面说明。
+class _DesktopLoginForm extends StatelessWidget {
+  const _DesktopLoginForm({
+    required this.theme,
+    required this.platform,
+    required this.title,
+    required this.subtitle,
+    required this.onSurfaceSwitch,
+    required this.child,
+  });
+
+  final ThemeData theme;
+  final bool platform;
+  final String title;
+  final String subtitle;
+  final VoidCallback? onSurfaceSwitch;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = theme.colorScheme;
+    return Stack(
+      children: [
+        Positioned(
+          top: -60,
+          right: 40,
+          child: IgnorePointer(
+            child: Container(
+              width: 280,
+              height: 280,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(120),
+                gradient: const LinearGradient(
+                  colors: [Color(0x55845EF7), Color(0x333263FF)],
                 ),
-                Positioned(
-                  bottom: constraints.maxHeight * 0.08,
-                  right: constraints.maxWidth * 0.18,
-                  child: IgnorePointer(
-                    child: Container(
-                      width: 180,
-                      height: 180,
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: LinearGradient(
-                          colors: [Color(0x4412B886), Color(0x335B8CFF)],
-                        ),
-                      ),
-                    ),
+              ),
+            ),
+          ),
+        ),
+        SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 36),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 400),
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.92),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xE6E7EDF6)),
+                    boxShadow: RelayTheme.softShadow(Brightness.light),
                   ),
-                ),
-                Positioned(
-                  top: constraints.maxHeight * 0.22,
-                  right: constraints.maxWidth * 0.28,
-                  child: IgnorePointer(
-                    child: Transform.rotate(
-                      angle: 0.32,
-                      child: Container(
-                        width: 90,
-                        height: 90,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(24),
-                          gradient: const LinearGradient(
-                            colors: [Color(0x66FFD43B), Color(0x44F59F00)],
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (canReturnToWebsite) ...[
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            onPressed: openWebsite,
+                            icon: const Icon(Icons.arrow_back, size: 16),
+                            label: const Text('返回通语官网'),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: scheme.primaryContainer,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            platform ? '平台管理员登录' : '客服工作台登录',
+                            style: TextStyle(
+                                fontSize: 12, color: scheme.primary),
                           ),
                         ),
                       ),
-                    ),
-                  ),
-                ),
-                SafeArea(
-                  child: SingleChildScrollView(
-            padding: EdgeInsets.symmetric(horizontal: padding, vertical: 36),
-            child: Center(
-                child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 400),
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.92),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xE6E7EDF6)),
-                  boxShadow: RelayTheme.softShadow(Brightness.light),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // 移除登录页 PWA 离线提示
-                    // const PwaPanel(hideUpdateBanner: true),
-                    const SizedBox(height: 12),
-                    if (canReturnToWebsite) ...[
-                      Align(
-                          alignment: Alignment.centerLeft,
-                          child: TextButton.icon(
-                              onPressed: openWebsite,
-                              icon: const Icon(Icons.arrow_back, size: 16),
-                              label: const Text('返回通语官网'))),
                       const SizedBox(height: 24),
-                    ],
-                    if (!wide) ...[
-                      const TongYuBrand(showEnglish: true),
-                      const SizedBox(height: 18),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-                        decoration: BoxDecoration(
-                          gradient: RelayTheme.loginHeroGradient,
-                          borderRadius: BorderRadius.circular(18),
-                          boxShadow: [
-                            BoxShadow(
-                              color: const Color(0xFF3263FF).withOpacity(0.28),
-                              blurRadius: 28,
-                              offset: const Offset(0, 12),
-                            ),
-                          ],
-                        ),
-                        child: const Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'MOBILE AGENT',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Color(0xD9FFFFFF),
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            SizedBox(height: 6),
-                            Text(
-                              '随时接起咨询',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.white,
-                              ),
-                            ),
-                            SizedBox(height: 6),
-                            Text(
-                              '网站嵌入与 H5 入口的消息，统一在手机工作台处理。',
-                              style: TextStyle(
-                                fontSize: 12,
-                                height: 1.6,
-                                color: Color(0xE6FFFFFF),
-                              ),
-                            ),
-                          ],
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: 28,
+                          height: 1.4,
+                          fontWeight: FontWeight.w700,
+                          color: scheme.onSurface,
                         ),
                       ),
-                      const SizedBox(height: 20),
-                    ],
-                    Align(
-                        alignment: Alignment.centerLeft,
-                        child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                                color: scheme.primaryContainer,
-                                borderRadius: BorderRadius.circular(6)),
-                            child: Text(platform ? '平台管理员登录' : '客服工作台登录',
-                                style: TextStyle(
-                                    fontSize: 12, color: scheme.primary)))),
-                    const SizedBox(height: 24),
-                    Text(title,
+                      const SizedBox(height: 10),
+                      Text(
+                        subtitle,
                         style: TextStyle(
-                            fontSize: 28,
-                            height: 1.4,
-                            fontWeight: FontWeight.w700,
-                            color: scheme.onSurface)),
-                    const SizedBox(height: 10),
-                    Text(subtitle,
-                        style: TextStyle(
-                            fontSize: 13,
-                            height: 1.8,
-                            color: scheme.onSurfaceVariant)),
-                    const SizedBox(height: 28),
-                    Theme(
+                          fontSize: 13,
+                          height: 1.8,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 28),
+                      Theme(
                         data: theme.copyWith(
-                            inputDecorationTheme:
-                                theme.inputDecorationTheme.copyWith(
-                          filled: true,
-                          fillColor: const Color(0xFFF5F7FB),
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 14),
-                          border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide:
-                                  const BorderSide(color: Color(0xFFE7EDF6))),
-                          enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide:
-                                  const BorderSide(color: Color(0xFFE7EDF6))),
-                          focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: const BorderSide(
-                                  color: Color(0xFF3263FF), width: 1.5)),
-                        )),
-                        child: AutofillGroup(child: child)),
-                    const SizedBox(height: 16),
-                    TextButton.icon(
-                        onPressed: () => showDialog<void>(
-                            context: context,
-                            builder: (context) => AlertDialog(
-                                    title: const Text('登录帮助'),
-                                    content: Text(platform
-                                        ? '此入口仅供平台管理员使用。企业客服请切换到客服工作台登录。忘记密码时，请联系平台负责人。'
-                                        : '企业标识由企业管理员提供。请使用管理员为你创建的用户名和密码登录。忘记密码或无法进入工作台时，请联系企业管理员。'),
-                                    actions: [
-                                      TextButton(
-                                          onPressed: () =>
-                                              Navigator.pop(context),
-                                          child: const Text('知道了'))
-                                    ])),
+                          inputDecorationTheme:
+                              theme.inputDecorationTheme.copyWith(
+                            filled: true,
+                            fillColor: const Color(0xFFF5F7FB),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 14),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: const BorderSide(
+                                    color: Color(0xFFE7EDF6))),
+                            enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: const BorderSide(
+                                    color: Color(0xFFE7EDF6))),
+                            focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: const BorderSide(
+                                    color: Color(0xFF3263FF), width: 1.5)),
+                          ),
+                        ),
+                        child: AutofillGroup(child: child),
+                      ),
+                      const SizedBox(height: 16),
+                      TextButton.icon(
+                        onPressed: () => _showLoginHelp(context, platform),
                         icon: const Icon(Icons.help_outline, size: 16),
                         label: const Text('需要登录帮助？'),
                         style: TextButton.styleFrom(
-                            foregroundColor: scheme.onSurfaceVariant)),
-                    const SizedBox(height: 22),
-                    const Divider(),
-                    if (canOpenWebsite && canReturnToWebsite)
-                      TextButton.icon(
+                            foregroundColor: scheme.onSurfaceVariant),
+                      ),
+                      const SizedBox(height: 22),
+                      const Divider(),
+                      if (canOpenWebsite && canReturnToWebsite)
+                        TextButton.icon(
                           onPressed: openDownloads,
                           icon: const Icon(Icons.download_outlined),
-                          label: const Text('安卓客户端下载 / iPhone 添加到桌面')),
-                    const SizedBox(height: 12),
-                    Wrap(
+                          label: const Text('安卓客户端下载 / iPhone 添加到桌面'),
+                        ),
+                      const SizedBox(height: 12),
+                      Wrap(
                         alignment: WrapAlignment.spaceBetween,
                         crossAxisAlignment: WrapCrossAlignment.center,
                         spacing: 12,
                         runSpacing: 8,
                         children: [
-                          Text('通语企业服务',
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  color: scheme.onSurfaceVariant)),
+                          Text(
+                            '通语企业服务',
+                            style: TextStyle(
+                                fontSize: 12, color: scheme.onSurfaceVariant),
+                          ),
                           TextButton(
-                              onPressed: onSurfaceSwitch,
-                              child: Text(platform ? '客服工作台登录' : '平台管理员登录',
-                                  style: const TextStyle(fontSize: 12))),
-                        ]),
-                  ]),
+                            onPressed: onSurfaceSwitch,
+                            child: Text(
+                              platform ? '客服工作台登录' : '平台管理员登录',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            )),
-          )),
-              ]),
             ),
-        ]);
-      }),
+          ),
+        ),
+      ],
     );
   }
+}
+
+void _showLoginHelp(BuildContext context, bool platform) {
+  showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('登录帮助'),
+      content: Text(platform
+          ? '此入口仅供平台管理员使用。企业客服请切换到客服工作台登录。忘记密码时，请联系平台负责人。'
+          : '企业标识由企业管理员提供。请使用管理员为你创建的用户名和密码登录。忘记密码或无法进入工作台时，请联系企业管理员。'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('知道了'),
+        ),
+      ],
+    ),
+  );
 }
 
 class _LoginHeroPanel extends StatelessWidget {
@@ -556,12 +884,20 @@ class LoginSubmitButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final narrow = MediaQuery.sizeOf(context).width < 560;
-    final radius = narrow ? 40.0 : 14.0;
+    final radius = narrow ? 16.0 : 14.0;
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: RelayTheme.actionGradient,
         borderRadius: BorderRadius.circular(radius),
-        boxShadow: RelayTheme.popShadow(),
+        boxShadow: narrow
+            ? [
+                BoxShadow(
+                  color: const Color(0xFF3263FF).withOpacity(0.35),
+                  blurRadius: 18,
+                  offset: const Offset(0, 6),
+                ),
+              ]
+            : RelayTheme.popShadow(),
       ),
       child: FilledButton(
         onPressed: busy ? null : onPressed,
@@ -571,18 +907,22 @@ class LoginSubmitButton extends StatelessWidget {
           shadowColor: Colors.transparent,
           foregroundColor: Colors.white,
           elevation: 0,
-          minimumSize: Size.fromHeight(narrow ? 44 : 46),
+          minimumSize: Size.fromHeight(narrow ? 48 : 46),
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius)),
-          textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+          textStyle: TextStyle(
+            fontSize: narrow ? 16 : 15,
+            fontWeight: FontWeight.w600,
+            letterSpacing: narrow ? 1.5 : 0.5,
+          ),
         ),
         child: busy
             ? const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                 SizedBox(
-                    width: 16,
-                    height: 16,
+                    width: 18,
+                    height: 18,
                     child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white)),
+                        strokeWidth: 2.2, color: Colors.white)),
                 SizedBox(width: 10),
                 Text('正在登录…'),
               ])

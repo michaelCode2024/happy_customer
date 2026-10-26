@@ -137,7 +137,7 @@ class OverviewPage extends StatelessWidget {
         physics: const NeverScrollableScrollPhysics(),
         mainAxisSpacing: 10,
         crossAxisSpacing: 10,
-        childAspectRatio: 1.45,
+        childAspectRatio: 1.35,
         children: metrics,
       );
     }

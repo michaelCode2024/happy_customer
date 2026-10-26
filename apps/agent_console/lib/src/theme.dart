@@ -184,19 +184,14 @@ class RelayTheme {
     return light();
   }
 
+  // Web CanvasKit 必须用本地清单字体；系统名与 Plus Jakarta（仅 CSS @font-face）
+  // Skia 都看不见，写进 fallback 只会触发 gstatic 拉片、国内闪方框。
   static const List<String> _fontFamily = <String>[
-    'Plus Jakarta Sans',
+    'SportsChinese',
   ];
 
-  static const List<String> _cjkFallback = <String>[
-    'Microsoft YaHei UI',
-    'Microsoft YaHei',
-    'PingFang SC',
-    'Noto Sans SC',
-    'Source Han Sans SC',
-    'WenQuanYi Micro Hei',
-    'sans-serif',
-  ];
+  // ChatEmoji 由 web_emoji_font.dart 首屏后注册；封掉 gstatic 后气泡 emoji 靠它。
+  static const List<String> _cjkFallback = <String>['ChatEmoji'];
 
   static ThemeData _base(ColorScheme scheme) {
     final isDark = scheme.brightness == Brightness.dark;
@@ -211,10 +206,11 @@ class RelayTheme {
 
     final radius = BorderRadius.circular(radiusLg);
 
+    // 不要把 fontFamily 挂到 ThemeData 根上：CanvasKit 会让 Material Icons
+    // 跟着走中文字体栈，图标变空白。中文只通过 textTheme 注入。
     return ThemeData(
       useMaterial3: true,
       colorScheme: scheme,
-      fontFamily: _fontFamily.first,
       textTheme: textTheme.copyWith(
         titleLarge: textTheme.titleLarge?.copyWith(
             fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.2),
@@ -411,10 +407,13 @@ class RelayTheme {
         dense: true,
         visualDensity: VisualDensity.compact,
       ),
+      // 桌面大屏下 SnackBar 默认贴底居中，容易挡住输入框；加边距并允许关闭。
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         showCloseIcon: true,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusMd)),
+        insetPadding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(radiusMd)),
       ),
       tooltipTheme:
           const TooltipThemeData(waitDuration: Duration(milliseconds: 500)),

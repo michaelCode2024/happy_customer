@@ -89,6 +89,8 @@ class _LoginPageState extends State<LoginPage> {
         listenable: widget.session,
         builder: (context, _) {
           final busy = widget.session.busy;
+          // 手机/PWA 收紧字段间距，避免一屏挤满滚动。
+          final gap = MediaQuery.sizeOf(context).width < 560 ? 12.0 : 18.0;
           return Form(
             key: _formKey,
             child: Column(
@@ -113,7 +115,7 @@ class _LoginPageState extends State<LoginPage> {
                         validator: (value) =>
                             (value ?? '').trim().isEmpty ? '请填写企业标识' : null,
                       ),
-                      const SizedBox(height: 18),
+                      SizedBox(height: gap),
                       TextFormField(
                         controller: _email,
                         autofillHints: const [AutofillHints.username],
@@ -135,7 +137,7 @@ class _LoginPageState extends State<LoginPage> {
                           return null;
                         },
                       ),
-                      const SizedBox(height: 18),
+                      SizedBox(height: gap),
                       TextFormField(
                         controller: _password,
                         focusNode: _passwordFocus,
@@ -184,7 +186,7 @@ class _LoginPageState extends State<LoginPage> {
                     onDismiss: widget.session.clearError,
                   ),
                 ],
-                const SizedBox(height: 18),
+                SizedBox(height: gap),
                 LoginSubmitButton(
                   label: '登录',
                   busy: busy,

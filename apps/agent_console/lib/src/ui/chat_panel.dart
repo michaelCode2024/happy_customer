@@ -18,6 +18,8 @@ import 'package:tongyu_agent_console/src/ui/voice_recorder_button.dart';
 import 'package:tongyu_agent_console/src/util/format.dart';
 import 'package:tongyu_agent_console/src/util/labels.dart';
 import 'package:tongyu_agent_console/src/util/voice_player.dart';
+import 'package:tongyu_agent_console/src/util/web_emoji_font.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 /// The middle pane: the conversation itself.
 ///
@@ -122,6 +124,10 @@ class _ChatPanelState extends State<ChatPanel> {
   @override
   void initState() {
     super.initState();
+    // 打开会话立刻拉表情字体，历史气泡不等点表情菜单。
+    if (kIsWeb) {
+      unawaited(ensureWebEmojiFont());
+    }
     _readTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       final id = widget.workbench.selectedId;
       if (mounted && _stickToBottom && _scroll.hasClients && id != null) {
@@ -813,12 +819,76 @@ class _ChatPanelState extends State<ChatPanel> {
               Container(
                 width: double.infinity,
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 22, vertical: 8),
-                color: Theme.of(context).colorScheme.surface,
-                child: Text('✦ AI 草稿 · 请确认后发送',
-                    style: TextStyle(
-                        color: Theme.of(context).colorScheme.primary,
-                        fontSize: 12)),
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primaryContainer.withAlpha(90),
+                  border: Border(
+                    top: BorderSide(
+                      color: Theme.of(context).colorScheme.primary.withAlpha(45),
+                      width: 1,
+                    ),
+                    bottom: BorderSide(
+                      color: Theme.of(context).colorScheme.outlineVariant,
+                      width: 0.5,
+                    ),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.auto_awesome,
+                      size: 14,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'AI 辅助生成草稿 · 请确认后发送',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.primary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(4),
+                      onTap: () {
+                        setState(() {
+                          _isAiDraft = false;
+                          _composer.clear();
+                        });
+                        _onComposerChanged('');
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.close_rounded,
+                              size: 13,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              '清除草稿',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             if (!conversation.isResolved &&
                 conversation.canClaim(workbench.selfId))
@@ -855,15 +925,6 @@ class _ChatPanelState extends State<ChatPanel> {
                     conversation.publicReplyBlockReason(workbench.selfId) !=
                         null,
                 aiOpen: false,
-                onToggleAi: workbench.messages.isEmpty
-                    ? null
-                    : () {
-                        if (widget.onOpenAiAssist != null) {
-                          widget.onOpenAiAssist!();
-                        } else if (widget.onOpenProfile != null) {
-                          widget.onOpenProfile!();
-                        }
-                      },
                 aiPanel: null,
                 onChanged: _onComposerChanged,
                 onToggleNote: (value) => setState(() {
@@ -2108,12 +2169,22 @@ class _MessageBubble extends StatelessWidget {
                       ),
                       child: MediaQuery.sizeOf(context).width < 760
                           ? Text(message.content,
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: textColor, fontSize: 15, height: 1.65))
+                              style: withWebEmojiFallback(
+                                  theme.textTheme.bodyMedium?.copyWith(
+                                        color: textColor,
+                                        fontSize: 15,
+                                        height: 1.65,
+                                      ) ??
+                                      TextStyle(
+                                          color: textColor,
+                                          fontSize: 15,
+                                          height: 1.65)))
                           : SelectableText(
                               message.content,
-                              style: theme.textTheme.bodyMedium
-                                  ?.copyWith(color: textColor),
+                              style: withWebEmojiFallback(
+                                  theme.textTheme.bodyMedium?.copyWith(
+                                          color: textColor) ??
+                                      TextStyle(color: textColor)),
                             ),
                     ),
                 ],
@@ -2503,7 +2574,8 @@ class _ReactionRow extends StatelessWidget {
               ),
               child: Text(
                 '${reaction.emoji} ${reaction.count}',
-                style: theme.textTheme.labelSmall,
+                style: withWebEmojiFallback(
+                    theme.textTheme.labelSmall ?? const TextStyle()),
               ),
             ),
           ),
@@ -2776,7 +2848,8 @@ class _NoteBubble extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 SelectableText(message.content,
-                    style: theme.textTheme.bodySmall),
+                    style: withWebEmojiFallback(
+                        theme.textTheme.bodySmall ?? const TextStyle())),
               ],
             ),
           ),
@@ -3171,7 +3244,6 @@ class _Composer extends StatelessWidget {
     this.statusHint,
     this.lockPublicReply = false,
     this.aiOpen = false,
-    this.onToggleAi,
     this.aiPanel,
     required this.onChanged,
     required this.onToggleNote,
@@ -3205,7 +3277,6 @@ class _Composer extends StatelessWidget {
 
   /// AI 芯片是否展开；面板由父级传入，嵌在模式行下方。
   final bool aiOpen;
-  final VoidCallback? onToggleAi;
   final Widget? aiPanel;
 
   final ValueChanged<String> onChanged;
@@ -3306,7 +3377,11 @@ class _Composer extends StatelessWidget {
                   ])
                     PopupMenuItem(
                       value: emoji,
-                      child: Text(emoji, style: const TextStyle(fontSize: 22)),
+                      child: Text(emoji,
+                          style: const TextStyle(
+                            fontSize: 22,
+                            fontFamilyFallback: <String>['ChatEmoji'],
+                          )),
                     )
                 ],
               ),
@@ -3338,42 +3413,6 @@ class _Composer extends StatelessWidget {
                     focusNode.requestFocus();
                   },
                 ),
-              if (onToggleAi != null && !noteMode) ...[
-                const SizedBox(width: 2),
-                Material(
-                  color: aiOpen
-                      ? const Color(0xFF845EF7).withOpacity(0.16)
-                      : const Color(0xFFF3F0FF),
-                  borderRadius: BorderRadius.circular(8),
-                  child: InkWell(
-                    key: const ValueKey('ai-assist-toggle'),
-                    borderRadius: BorderRadius.circular(8),
-                    onTap: onToggleAi,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 5),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.auto_awesome,
-                              size: 14,
-                              color: const Color(0xFF845EF7)
-                                  .withOpacity(aiOpen ? 1 : 0.9)),
-                          const SizedBox(width: 4),
-                          const Text(
-                            'AI 助手',
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w600,
-                              color: Color(0xFF6F4BD8),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
               const Spacer(),
               if (uploading)
                 const SizedBox(
@@ -3486,6 +3525,8 @@ class _Composer extends StatelessWidget {
                     onChanged: onChanged,
                     textInputAction: TextInputAction.newline,
                     keyboardType: TextInputType.multiline,
+                    style: withWebEmojiFallback(
+                        theme.textTheme.bodyMedium ?? const TextStyle()),
                     decoration: InputDecoration(
                       hintText: noteMode
                           ? '写一条内部备注，访客看不到'
@@ -3775,8 +3816,9 @@ class _MobileComposerState extends State<_MobileComposer> {
                                       onChanged: c.onChanged,
                                       textInputAction: TextInputAction.newline,
                                       keyboardType: TextInputType.multiline,
-                                      style: const TextStyle(
-                                          fontSize: 15, height: 1.6),
+                                      style: withWebEmojiFallback(
+                                          const TextStyle(
+                                              fontSize: 15, height: 1.6)),
                                       decoration: InputDecoration(
                                           hintText: c.noteMode
                                               ? '添加内部备注…'
@@ -3812,7 +3854,13 @@ class _MobileComposerState extends State<_MobileComposer> {
                                           '✅'
                                         ])
                                           PopupMenuItem(
-                                              value: emoji, child: Text(emoji))
+                                              value: emoji,
+                                              child: Text(emoji,
+                                                  style: const TextStyle(
+                                                    fontFamilyFallback: <String>[
+                                                      'ChatEmoji'
+                                                    ],
+                                                  )))
                                       ]),
                             ]))),
                 const SizedBox(width: 6),

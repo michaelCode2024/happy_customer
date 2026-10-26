@@ -237,6 +237,8 @@ export class WidgetView {
   #msgMenuTargetId?: string;
   #onLightboxKey?: (event: KeyboardEvent) => void;
   #longPressTimer?: ReturnType<typeof setTimeout>;
+  /** 全屏嵌入只绑一次，白标重建面板后仍用同一套监听。 */
+  #keyboardPinBound = false;
 
   constructor(root: ShadowRoot, options: ResolvedOptions, store: ChatStore, handlers: UiHandlers) {
     this.#root = root;
@@ -299,6 +301,52 @@ export class WidgetView {
   /** True while the microphone is capturing, so the host can warn on unload. */
   get recording(): boolean {
     return this.#recording;
+  }
+
+  /**
+   * iOS 键盘弹起时布局视口高度不变，系统会把聚焦的输入框滚到可视区顶部，
+   * 输入栏和键盘之间就空出一大块。全屏嵌入改为跟 visualViewport，底边贴住键盘。
+   */
+  #bindKeyboardPin(): void {
+    if (this.#keyboardPinBound || !this.#options.embedded || !window.visualViewport) {
+      return;
+    }
+    this.#keyboardPinBound = true;
+    const pin = () => this.#pinComposerToKeyboard();
+    window.visualViewport.addEventListener('resize', pin);
+    window.visualViewport.addEventListener('scroll', pin);
+    window.addEventListener('scroll', pin);
+    // 键盘动画晚于 focus，补两次才能贴住。
+    window.addEventListener('focusin', () => {
+      pin();
+      window.setTimeout(pin, 80);
+      window.setTimeout(pin, 320);
+    });
+    window.addEventListener('focusout', () => window.setTimeout(pin, 80));
+    pin();
+  }
+
+  #pinComposerToKeyboard(): void {
+    const vv = window.visualViewport;
+    const panel = this.#root.querySelector('.rd-panel') as HTMLElement | null;
+    if (!vv || !panel || panel.hidden) {
+      return;
+    }
+    const top = Math.max(0, Math.round(vv.offsetTop));
+    const height = Math.round(vv.height);
+    if (height < 1) {
+      return;
+    }
+    panel.style.top = '0px';
+    panel.style.bottom = 'auto';
+    panel.style.height = `${height}px`;
+    panel.style.transform = top > 0 ? `translateY(${top}px)` : '';
+    // 键盘盖住底边时不再留 Home 条，否则输入栏会悬在键盘上方一截。
+    const keyboard = window.innerHeight - height - top > 80;
+    panel.classList.toggle('is-keyboard', keyboard);
+    if (window.scrollY !== 0) {
+      window.scrollTo(0, 0);
+    }
   }
 
   #buildLauncher(): void {
@@ -518,6 +566,7 @@ export class WidgetView {
       input.dispatchEvent(new Event('input', { bubbles: true }));
     }));
     this.#input.addEventListener('focus', closePanels);
+    this.#bindKeyboardPin();
 
     this.#composer.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -1924,6 +1973,7 @@ ${this.#options.embedded ? `
 .rd-composer-row .rd-input { min-width: 0; border: 0; border-radius: 8px; background: ${light ? '#ffffff' : '#111827'}; padding: 10px; font-size: 15px; }
 .rd-composer-row .rd-send { width: 52px; font: 500 13px system-ui; border-radius: 8px; }
 .rd-composer { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.rd-panel.is-keyboard .rd-composer { padding-bottom: 0; }
 .rd-reply { display: flex; align-items: center; gap: 8px; padding: 8px 16px 0; font-size: 12px; color: ${light ? '#6b7280' : '#9ca3af'}; }
 .rd-reply[hidden] { display: none; }
 .rd-reply-icon svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; display: block; color: ${accent}; }

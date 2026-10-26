@@ -6,6 +6,8 @@
   <!-- 工作台唯一入口：本页加载 Flutter。禁止再跳转到 desktop.html / mobile.html。 -->
   <!-- 本机自托管字体；禁止再引外网字体 CDN，避免国内网络卡住首屏。 -->
   <link rel="stylesheet" href="fonts.css">
+  <!-- 与引擎字体请求同 URL，提前下载；CanvasKit 首帧中文靠 SportsChinese。 -->
+  <link rel="preload" href="assets/assets/fonts/NotoSansSC-Regular.otf" as="fetch" type="font/otf" crossorigin="anonymous">
   <!--
     If you are serving your web app in a path other than the root, change the
     href value below to reflect the base path you are serving from.
@@ -27,7 +29,8 @@
   <meta name="theme-color" content="#ffffff">
   <meta name="color-scheme" content="light">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <!-- black-translucent：内容铺进状态栏；顶色由采样条实色决定，避免 iOS 26 冷启动毛玻璃发糊 -->
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="通语客服">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
@@ -46,8 +49,36 @@
       font-family: "Plus Jakarta Sans", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC",
         "Noto Sans SC", "Segoe UI", sans-serif;
     }
+    /*
+      iOS 26 忽略 theme-color，改采贴边 fixed 的 background-color。
+      冷启动时启动遮罩 z 极高，采样条须先压在上面，否则采到透明 → 状态栏毛玻璃发糊并锁定到下次启动。
+    */
+    #safari-top-tint, #safari-bottom-tint {
+      position: fixed;
+      left: 0;
+      width: 100%;
+      height: 12px;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      pointer-events: none;
+      z-index: 0;
+      background-color: #ffffff;
+    }
+    #safari-top-tint { top: 0; }
+    #safari-bottom-tint { bottom: 0; }
+    html.tongyu-ios-standalone #safari-top-tint,
+    html.tongyu-ios-standalone #safari-bottom-tint {
+      z-index: 100000;
+    }
+    flt-glass-pane, flt-scene-host, flutter-view {
+      background: transparent !important;
+      background-color: transparent !important;
+      backdrop-filter: none !important;
+    }
 
-    #tongyu-loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--tongyu-page-bg,#fff);color:inherit;z-index:99999;opacity:1;transition:opacity .22s ease;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif}
+    /* 启动层必须写实色 background-color；渐变/插画不算采样色 */
+    #tongyu-loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background-color:var(--tongyu-page-bg,#ffffff);color:inherit;z-index:99999;opacity:1;transition:opacity .22s ease;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif}
     #tongyu-loading.leaving{opacity:0;pointer-events:none}
     .tongyu-start-identity{text-align:center;padding:24px;transform:translateY(-20px)}
     .tongyu-start-icon{position:relative;display:grid;place-items:center;width:108px;height:108px;margin:0 auto 18px}
@@ -89,6 +120,11 @@
       if (document.body) document.body.style.backgroundColor = color;
       const loading = document.getElementById('tongyu-loading');
       if (loading) { loading.style.backgroundColor = color; loading.style.color = dark ? '#e2e8f0' : '#425466'; }
+      const topTint = document.getElementById('safari-top-tint');
+      const bottomTint = document.getElementById('safari-bottom-tint');
+      if (topTint) topTint.style.backgroundColor = color;
+      if (bottomTint) bottomTint.style.backgroundColor = color;
+      if (typeof window.tongyuPlaceSafariTints === 'function') window.tongyuPlaceSafariTints();
     };
     // Product is light-theme only; ignore OS preference and any legacy dark preference.
     try { localStorage.setItem('flutter.tongyu.themeMode', JSON.stringify('light')); } catch (_) {}
@@ -96,6 +132,8 @@
   </script>
 </head>
 <body>
+  <div id="safari-top-tint" aria-hidden="true"></div>
+  <div id="safari-bottom-tint" aria-hidden="true"></div>
   <!-- 主脚本下载期间给出明确反馈，首帧绘制后移除。 -->
   <div id="tongyu-loading" role="status" aria-label="正在打开通语">
     <div class="tongyu-start-identity"><div class="tongyu-start-icon"><svg xmlns="http://www.w3.org/2000/svg" width="76" height="76" viewBox="0 0 40 40"><defs><linearGradient id="brand-blue" x1="8" y1="6" x2="34" y2="31" gradientUnits="userSpaceOnUse"><stop stop-color="#6087ff"/><stop offset=".48" stop-color="#3765ff"/><stop offset="1" stop-color="#2450ed"/></linearGradient><linearGradient id="brand-light" x1="7" y1="14" x2="24" y2="30" gradientUnits="userSpaceOnUse"><stop stop-color="#d8e8ff"/><stop offset="1" stop-color="#7ea8ff"/></linearGradient></defs><path d="M5 20C5 10.6 12.6 4 22 4c9.2 0 16 6.2 16 14.5S31.2 33 22.5 33H14L7.4 38C6.3 38.8 5 38 5 36.7Z" fill="url(#brand-blue)"/><path d="M5 22c0-5.9 4.1-10 9.4-10 6.2 0 10.6 4.4 10.6 10 0 5.3-4.2 9.5-9.7 9.5C9.5 31.5 5 27.8 5 22Z" fill="url(#brand-light)"/><path d="M5 22c0 4.3 2.8 7.5 6.3 8.8L7.4 38C6.3 38.8 5 38 5 36.7Z" fill="#3765ff"/></svg>
