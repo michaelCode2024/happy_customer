@@ -65,12 +65,20 @@ self.addEventListener('fetch', event => {
     return fetch(request);
   })());
 });
+// 锁屏按发送者和正文展示。控制符和双向文字符先清掉，避免把通知方向改掉或截断。
+function noticeText(value, limit, fallback) {
+  const clean = String(value || '').replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim();
+  const chars = Array.from(clean);
+  if (!chars.length) return fallback;
+  if (chars.length <= limit) return clean;
+  return chars.slice(0, limit).join('') + '…';
+}
 self.addEventListener('push', event => {
   let data={};
   try {data=event.data.json();}catch(_){}
   self.navigator.setAppBadge?.().catch(()=>{});
-  event.waitUntil(self.registration.showNotification('通语 · 新消息', {
-    body:'有客户消息待处理，请打开工作台查看。',
+  event.waitUntil(self.registration.showNotification(noticeText(data.title, 48, '客户'), {
+    body:noticeText(data.body, 120, '发来一条消息'),
     icon:'/console/icons/Icon-192.png', badge:'/console/icons/Icon-192.png',
     tag:typeof data.tag==='string'?data.tag:'tongyu-message',
     data:{url:typeof data.url==='string'&&data.url.startsWith('/console/')?data.url:'/console/?surface=agent'}

@@ -234,8 +234,10 @@ Future<void> _dispatchMessageAlert(String name, String body,
       html.Notification.supported &&
       html.Notification.permission == 'granted' &&
       html.window.localStorage['tongyu.desktopAlerts'] == 'on') {
-    html.Notification('通语 · 新消息',
-        body: '有客户消息待处理，请打开工作台查看。', tag: 'tongyu-message');
+    // 页面还在、只是切到后台时，系统通知和手机推送用同一套：谁发的、发了什么。
+    final sender = senderName.trim().isEmpty ? '客户' : senderName.trim();
+    final text = body.trim().isEmpty ? '发来一条消息' : body.trim();
+    html.Notification(sender, body: text, tag: 'tongyu-$name');
   }
 }
 
@@ -308,7 +310,7 @@ class _AlertSettingsState extends State<_AlertSettings> {
             const SizedBox(height: 12),
             SwitchListTile(
                 title: const Text('桌面通知'),
-                subtitle: Text(_status ?? '离开当前页面时提醒；不展示客户消息内容'),
+                subtitle: Text(_status ?? '离开当前页面时提醒，并显示发送者和消息内容'),
                 value:
                     html.window.localStorage['tongyu.desktopAlerts'] == 'on' &&
                         html.Notification.permission == 'granted',

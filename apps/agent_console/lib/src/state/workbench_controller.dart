@@ -446,7 +446,13 @@ class WorkbenchController extends ChangeNotifier {
               _conversations.where((c) => c.id == event.conversationId);
           if (matches.isNotEmpty) senderName = matches.first.visitorName;
         }
-        _alertVisitor(event.data['id'].toString(), senderName);
+        _alertVisitor(
+            event.data['id'].toString(),
+            senderName,
+            messageNoticeBody(
+              messageType: asString(event.data['messageType']),
+              content: asString(event.data['content']),
+            ));
       }
       _applyIncomingMessage(event);
     }
@@ -763,12 +769,12 @@ class WorkbenchController extends ChangeNotifier {
     }
   }
 
-  void _alertVisitor(String id, String senderName) {
+  void _alertVisitor(String id, String senderName, String body) {
     if (id.isEmpty || !_alertedMessages.add(id)) return;
     if (visitorAlert != null) {
       visitorAlert!(id, senderName);
     } else {
-      messageAlert(id, '', senderName: senderName);
+      messageAlert(id, body, senderName: senderName);
     }
     if (_alertedMessages.length > 500) {
       _alertedMessages.remove(_alertedMessages.first);
@@ -787,7 +793,8 @@ class WorkbenchController extends ChangeNotifier {
               message.id,
               message.senderName.isEmpty
                   ? row.visitorName
-                  : message.senderName);
+                  : message.senderName,
+              message.noticeBody);
         }
       }
       // 未返回的页不能跳过，接口失败也不推进游标，下一次继续补拉。

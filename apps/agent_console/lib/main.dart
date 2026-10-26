@@ -1,4 +1,5 @@
 import 'src/ui/app_safe_area.dart';
+import 'src/util/activity_monitor.dart';
 import 'src/util/browser_chrome.dart';
 import 'src/util/browser_theme.dart';
 import 'dart:async';
@@ -47,7 +48,8 @@ class TongYuConsoleApp extends StatefulWidget {
   State<TongYuConsoleApp> createState() => _TongYuConsoleAppState();
 }
 
-class _TongYuConsoleAppState extends State<TongYuConsoleApp> {
+class _TongYuConsoleAppState extends State<TongYuConsoleApp>
+    with WidgetsBindingObserver {
   StreamSubscription<String>? _hostSession;
   late final CredentialStore _store;
   late final SessionController _session;
@@ -85,10 +87,20 @@ class _TongYuConsoleAppState extends State<TongYuConsoleApp> {
     }
     if (!isHostedConsole) unawaited(_platform.bootstrap());
     if (isHostedConsole) _platformResolved = true;
+    WidgetsBinding.instance.addObserver(this);
+    startActivityMonitor(_session.setViewing);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 原生端没有网页可见性事件，用前台/后台生命周期上报同一件事。
+    _session.setViewing(state == AppLifecycleState.resumed);
   }
 
   @override
   void dispose() {
+    stopActivityMonitor();
+    WidgetsBinding.instance.removeObserver(this);
     _hostSession?.cancel();
     _session.removeListener(_onSessionChanged);
     _platform.removeListener(_onPlatformChanged);

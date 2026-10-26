@@ -80,6 +80,8 @@ class SessionController extends ChangeNotifier {
 
   String _lastServer = '';
   Timer? _presenceRefresh;
+  Timer? _activityRefresh;
+  bool _viewing = true;
 
   /// Restores a stored session, then verifies it against the server.
   ///
@@ -214,6 +216,7 @@ class SessionController extends ChangeNotifier {
   Future<void> logout() async {
     await disableBackgroundAlerts();
     _presenceRefresh?.cancel();
+    _activityRefresh?.cancel();
     final api = _api;
     if (api != null) {
       try {
@@ -282,11 +285,38 @@ class SessionController extends ChangeNotifier {
       const Duration(minutes: 4),
       (_) => setPresence(_session?.agent.presence ?? 'ONLINE'),
     );
+    // 活跃状态只用于「跳过推送」，比在线状态变化快得多：服务端 90 秒算过期。
+    _activityRefresh?.cancel();
+    _activityRefresh = Timer.periodic(
+      const Duration(seconds: 45),
+      (_) => reportActivity(_viewing),
+    );
+    reportActivity(_viewing);
   }
 
   void stopPresenceHeartbeat() {
     _presenceRefresh?.cancel();
     _presenceRefresh = null;
+    _activityRefresh?.cancel();
+    _activityRefresh = null;
+  }
+
+  /// 工作台可见性变化时立即上报，不等下一个心跳。
+  void setViewing(bool viewing) {
+    if (_viewing == viewing) return;
+    _viewing = viewing;
+    if (_phase == SessionPhase.loggedIn) unawaited(reportActivity(viewing));
+  }
+
+  /// 上报失败按设计吞掉：活跃状态只是省一次重复提醒，不能影响接待。
+  Future<void> reportActivity(bool visible) async {
+    final api = _api;
+    if (api == null || _session == null) return;
+    try {
+      await api.reportActivity(visible);
+    } on ApiException {
+      // Ignored by design.
+    }
   }
 
   void clearError() {
@@ -315,6 +345,7 @@ class SessionController extends ChangeNotifier {
     await _store.clear();
     if (_api != api || _disposed) return;
     _presenceRefresh?.cancel();
+    _activityRefresh?.cancel();
     _api = null;
     _session = null;
     api.close();
@@ -332,6 +363,7 @@ class SessionController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _presenceRefresh?.cancel();
+    _activityRefresh?.cancel();
     _api?.close();
     super.dispose();
   }

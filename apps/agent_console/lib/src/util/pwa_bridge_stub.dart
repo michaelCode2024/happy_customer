@@ -2,6 +2,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 bool get browserOffline => false;
+
+/// 原生端没有网页可见性；工作台在前台即视为可见。
+bool get browserVisible => true;
 Map<String, dynamic> pwaStatus() => {};
 Future<String> pwaAction(String action) async => '';
 

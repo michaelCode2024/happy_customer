@@ -4,6 +4,9 @@ import 'dart:js_util' as js;
 import 'dart:convert';
 
 bool get browserOffline => html.window.navigator.onLine == false;
+
+/// 页面是否正被用户看着。服务端据此跳过推送，避免盯屏时手机重复响。
+bool get browserVisible => html.document.visibilityState == 'visible';
 Map<String, dynamic> pwaStatus() {
   try {
     return Map<String, dynamic>.from(

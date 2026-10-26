@@ -307,6 +307,15 @@ class TongYuApi {
     );
   }
 
+  /// 上报工作台是否正被看着。服务端据此跳过推送，避免盯屏时手机重复提醒。
+  Future<void> reportActivity(bool visible) async {
+    await _send(
+      'POST',
+      '/api/v1/console/me/activity',
+      body: <String, dynamic>{'visible': visible},
+    );
+  }
+
   Future<void> updateProfile(String displayName) async {
     await _send(
       'PATCH',

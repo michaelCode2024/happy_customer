@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:tongyu_agent_console/src/api/models.dart';
 import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
 import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
 
@@ -38,5 +39,20 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(alerts, ['m8']);
     expect(requestedAfter, ['7']);
+  });
+
+  test('通知正文带原文，图片带类型，撤回不再露出原话', () {
+    expect(
+      messageNoticeBody(messageType: 'TEXT', content: '你好，订单到了'),
+      '你好，订单到了',
+    );
+    expect(
+      messageNoticeBody(messageType: 'IMAGE', content: '现场.jpg'),
+      '[图片] 现场.jpg',
+    );
+    expect(
+      messageNoticeBody(messageType: 'TEXT', content: '原话', deleted: true),
+      '消息已撤回',
+    );
   });
 }

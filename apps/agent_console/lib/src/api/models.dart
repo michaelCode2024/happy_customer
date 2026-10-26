@@ -301,8 +301,34 @@ String messageTypeLabel(String messageType) => switch (messageType) {
       'RATING' => '评价',
       'EVENT' => '事件',
       'SYSTEM' => '系统消息',
+      'LOCATION' => '位置',
       _ => '消息',
     };
+
+/// 系统通知正文。文本直接用原文；图片和文件带上类型，避免锁屏上只剩一个文件名。
+String messageNoticeBody({
+  required String messageType,
+  required String content,
+  bool deleted = false,
+}) {
+  if (deleted) return '消息已撤回';
+  final text = content.trim().replaceAll(RegExp(r'\s+'), ' ');
+  final kind = messageType.trim().toUpperCase();
+  if (kind.isEmpty || kind == 'TEXT' || kind == 'RICH') {
+    if (text.isEmpty) return '发来一条消息';
+    return _clipNotice(text, 80);
+  }
+  final label = '[${messageTypeLabel(kind)}]';
+  if (text.isEmpty) return label;
+  if (text.startsWith(label)) return _clipNotice(text, 80);
+  return _clipNotice('$label $text', 80);
+}
+
+String _clipNotice(String value, int limit) {
+  final runes = value.runes.toList();
+  if (runes.length <= limit) return value;
+  return '${String.fromCharCodes(runes.take(limit))}…';
+}
 
 /// One search hit inside a transcript. The excerpt carries `<< >>` around the
 /// matched terms, which the console renders as a highlight; the server builds
@@ -522,6 +548,12 @@ class ChatMessage {
   bool get isSystem => senderType == 'SYSTEM';
 
   bool get isDeleted => deletedAt != null;
+
+  String get noticeBody => messageNoticeBody(
+        messageType: messageType,
+        content: content,
+        deleted: isDeleted,
+      );
 
   bool get isEdited => editedAt != null;
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -23,6 +24,32 @@ func (a *API) registerNotifications(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/console/push/subscription/status", a.requireAgent(a.pushSubscriptionStatus))
 	mux.HandleFunc("PUT /api/v1/console/push/subscription", a.requireAgent(a.subscribePush))
 	mux.HandleFunc("DELETE /api/v1/console/push/subscription", a.requireAgent(a.unsubscribePush))
+	mux.HandleFunc("POST /api/v1/console/me/activity", a.requireAgent(a.consoleActivity))
+}
+
+// 可见性单独记录，不动坐席手工设置的 ONLINE/AWAY：状态是「愿不愿意接活」，
+// 可见是「眼睛在不在这个屏上」。推送只跳过后者，避免人盯着工作台时手机还响。
+func (a *API) consoleActivity(w http.ResponseWriter, r *http.Request, p auth.Principal) {
+	var in struct {
+		Visible *bool `json:"visible"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if in.Visible == nil {
+		fail(w, 400, "缺少可见状态")
+		return
+	}
+	var focused any
+	if *in.Visible {
+		focused = time.Now()
+	}
+	if _, err := a.db.Exec(r.Context(), `insert into agent_presence(agent_id,status,last_seen_at,focused_at) values($1,'ONLINE',now(),$2)
+		on conflict (agent_id) do update set last_seen_at=now(), focused_at=$2`, p.AgentID, focused); err != nil {
+		fail(w, 500, "更新活跃状态失败")
+		return
+	}
+	respond(w, 200, map[string]any{"visible": *in.Visible})
 }
 
 // 通知收件人沿用工作台入口权限；不广播到其他企业或无入口权限的坐席。
@@ -230,6 +257,16 @@ func (a *API) pushLoop(ctx context.Context) {
 		}
 	}
 }
+
+// pushJob 是一次待发送的推送：通知、订阅、会话与渲染锁屏所需的字段。
+type pushJob struct {
+	n, s, c                                         uuid.UUID
+	kind, storedTitle, messageType, content, sender string
+	deleted                                         bool
+	attempts                                        int
+	endpoint, key, secret                           string
+}
+
 func (a *API) deliverPushBatch(ctx context.Context) {
 	// 事务锁领取批次，多实例不会同时推送同一条；到期重试，进程退出后可恢复。
 	tx, err := a.db.Begin(ctx)
@@ -237,27 +274,33 @@ func (a *API) deliverPushBatch(ctx context.Context) {
 		return
 	}
 	defer tx.Rollback(ctx)
-	rows, err := tx.Query(ctx, `select d.notification_id,d.subscription_id,n.conversation_id,s.endpoint,s.p256dh,s.auth
+	// 消息正文和访客称呼在投递时再读：撤回、改名要反映到锁屏，不能用入队时的占位句。
+	rows, err := tx.Query(ctx, `select d.notification_id,d.subscription_id,n.conversation_id,n.kind,n.title,
+ coalesce(msg.message_type,''),coalesce(msg.content,''),coalesce(msg.deleted_at is not null,false),
+ coalesce(nullif(vs.display_name,''),''),
+ s.endpoint,s.p256dh,s.auth
  from push_delivery d join agent_notification n on n.id=d.notification_id join push_subscription s on s.id=d.subscription_id
  join agent_session ss on ss.id=s.session_id and ss.expires_at>now()
  join agent ag on ag.id=s.agent_id and ag.status='ACTIVE'
  join tenant t on t.id=n.tenant_id and t.status='ACTIVE'
+ left join message msg on msg.id=n.message_id
+ left join conversation cv on cv.id=n.conversation_id
+ left join visitor vs on vs.id=cv.visitor_id
  where d.completed_at is null and d.attempts<5 and d.next_attempt_at<=now() and n.read_at is null
  and not exists(select 1 from agent_alert_preference pref where pref.agent_id=n.agent_id and pref.quiet_until>now())
  and n.created_at>now()-interval '24 hours'
  and exists(select 1 from conversation c join agent_inbox ai on ai.inbox_id=c.inbox_id where c.id=n.conversation_id and ai.agent_id=n.agent_id and (c.assignee_id is null or c.assignee_id=n.agent_id))
+ and not exists(select 1 from agent_presence ap where ap.agent_id=n.agent_id and ap.focused_at>now()-interval '90 seconds')
  order by d.next_attempt_at limit 10 for update of d skip locked`)
 	if err != nil {
+		a.logger.Warn("claim push batch failed", "error", err)
 		return
 	}
-	type job struct {
-		n, s, c               uuid.UUID
-		endpoint, key, secret string
-	}
-	jobs := []job{}
+	jobs := []pushJob{}
 	for rows.Next() {
-		var j job
-		if rows.Scan(&j.n, &j.s, &j.c, &j.endpoint, &j.key, &j.secret) != nil {
+		var j pushJob
+		if err := rows.Scan(&j.n, &j.s, &j.c, &j.kind, &j.storedTitle, &j.messageType, &j.content, &j.deleted, &j.sender, &j.endpoint, &j.key, &j.secret); err != nil {
+			a.logger.Warn("read push job failed", "error", err)
 			rows.Close()
 			return
 		}
@@ -266,35 +309,123 @@ func (a *API) deliverPushBatch(ctx context.Context) {
 	rowErr := rows.Err()
 	rows.Close()
 	if rowErr != nil {
+		a.logger.Warn("iterate push jobs failed", "error", rowErr)
 		return
 	}
-	for _, j := range jobs {
-		if _, err = tx.Exec(ctx, `update push_delivery set attempts=attempts+1,next_attempt_at=now()+interval '2 minutes' where notification_id=$1 and subscription_id=$2`, j.n, j.s); err != nil {
+	// range 变量是副本，次数必须写回切片，后面失败日志才能读到真实 attempt。
+	for i := range jobs {
+		if err = tx.QueryRow(ctx, `update push_delivery set attempts=attempts+1,next_attempt_at=now()+interval '2 minutes' where notification_id=$1 and subscription_id=$2 returning attempts`, jobs[i].n, jobs[i].s).Scan(&jobs[i].attempts); err != nil {
+			a.logger.Warn("reserve push attempt failed", "error", err, "notification", jobs[i].n, "subscription", jobs[i].s)
 			return
 		}
 	}
-	if tx.Commit(ctx) != nil || len(jobs) == 0 {
+	if err := tx.Commit(ctx); err != nil {
+		a.logger.Warn("commit push batch failed", "error", err)
+		return
+	}
+	if len(jobs) == 0 {
 		return
 	}
 	private, public, err := a.vapidKeys(ctx)
 	if err != nil {
+		a.logger.Error("load vapid keys failed", "error", err)
 		return
 	}
 	client := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
 	for _, j := range jobs {
 		if !validPushEndpoint(j.endpoint) {
+			a.logger.Warn("skip push to disallowed endpoint", "notification", j.n, "subscription", j.s)
 			continue
 		}
-		payload, _ := json.Marshal(map[string]any{"title": "通语 · 新消息", "body": "有客户消息待处理，请打开工作台查看。", "url": "/console/?surface=agent&conversation=" + j.c.String(), "tag": "tongyu-" + j.c.String()})
+		title, body := pushNotice(j.kind, j.storedTitle, j.sender, j.messageType, j.content, j.deleted)
+		payload, _ := json.Marshal(map[string]any{"title": title, "body": body, "url": "/console/?surface=agent&conversation=" + j.c.String(), "tag": "tongyu-" + j.c.String()})
 		resp, err := webpush.SendNotificationWithContext(ctx, payload, &webpush.Subscription{Endpoint: j.endpoint, Keys: webpush.Keys{P256dh: j.key, Auth: j.secret}}, &webpush.Options{Subscriber: a.cfg.PublicBaseURL, VAPIDPublicKey: public, VAPIDPrivateKey: private, TTL: 300, HTTPClient: client})
 		if err != nil {
+			a.pushAttemptFailed(ctx, j, err)
 			continue
 		}
 		resp.Body.Close()
-		if resp.StatusCode == 404 || resp.StatusCode == 410 {
-			_, _ = a.db.Exec(ctx, `delete from push_subscription where id=$1`, j.s)
-		} else if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			_, _ = a.db.Exec(ctx, `update push_delivery set completed_at=now() where notification_id=$1 and subscription_id=$2`, j.n, j.s)
+		switch {
+		case resp.StatusCode == 404 || resp.StatusCode == 410:
+			// 端点已失效：删除订阅，后续会话不再重复尝试。
+			if _, err := a.db.Exec(ctx, `delete from push_subscription where id=$1`, j.s); err != nil {
+				a.logger.Warn("drop stale push subscription failed", "error", err, "subscription", j.s, "status", resp.StatusCode)
+			}
+		case resp.StatusCode >= 200 && resp.StatusCode < 300:
+			if _, err := a.db.Exec(ctx, `update push_delivery set completed_at=now() where notification_id=$1 and subscription_id=$2`, j.n, j.s); err != nil {
+				a.logger.Warn("mark push delivered failed", "error", err, "notification", j.n, "subscription", j.s)
+			}
+		default:
+			a.pushAttemptFailed(ctx, j, fmt.Errorf("push service status %d", resp.StatusCode))
 		}
 	}
+}
+
+// 每次投递失败都留日志，重试用尽单独记一条：坐席感知不到推送失效，只有日志能查。
+func (a *API) pushAttemptFailed(ctx context.Context, j pushJob, cause error) {
+	attrs := []any{"error", cause, "notification", j.n, "subscription", j.s, "attempt", j.attempts}
+	if j.attempts >= 5 {
+		a.logger.Error("push delivery gave up", attrs...)
+		return
+	}
+	a.logger.Warn("push delivery failed; will retry", attrs...)
+}
+
+// 系统通知按会话里能看见的内容来写：标题是谁，正文是说了什么。
+// 分配提醒没有消息正文，正文沿用入队时的那句说明。
+// 控制符和双向文字符先去掉，避免锁屏上的名字或正文被改向。
+func pushNotice(kind, storedTitle, sender, messageType, content string, deleted bool) (string, string) {
+	name := noticeField(sender, 40)
+	if name == "" {
+		name = "客户"
+	}
+	if kind != "" && kind != "MESSAGE" {
+		text := noticeField(storedTitle, 80)
+		if text == "" {
+			text = "有新的工作台提醒"
+		}
+		return name, text
+	}
+	if messageType == "" && strings.TrimSpace(content) == "" && !deleted {
+		if text := noticeField(storedTitle, 80); text != "" {
+			return name, text
+		}
+	}
+	return name, pushMessageBody(messageType, content, deleted)
+}
+
+func pushMessageBody(messageType, content string, deleted bool) string {
+	if deleted {
+		return "消息已撤回"
+	}
+	switch strings.ToUpper(strings.TrimSpace(messageType)) {
+	case "", "TEXT", "RICH":
+		body := noticeField(content, 80)
+		if body == "" {
+			return "发来一条消息"
+		}
+		return body
+	default:
+		label := messageTypeLabel(messageType)
+		caption := noticeField(content, 60)
+		if caption == "" {
+			return label
+		}
+		if strings.HasPrefix(caption, label) {
+			return noticeField(caption, 80)
+		}
+		return noticeField(label+" "+caption, 80)
+	}
+}
+
+func noticeField(value string, limit int) string {
+	var b strings.Builder
+	for _, r := range value {
+		if r < 0x20 || r == 0x7f || (r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069) {
+			b.WriteRune(' ')
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return truncateRunes(strings.Join(strings.Fields(b.String()), " "), limit)
 }
