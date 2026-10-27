@@ -39,8 +39,8 @@ class _LoginPageState extends State<LoginPage> {
     _server = TextEditingController(text: hint);
     // Web 已能从页面 origin 推断地址时默认收起；桌面端空地址则展开，避免找不到字段。
     _advancedOpen = hint.trim().isEmpty && !kIsWeb;
-    // 登录字段默认空白。禁止把演示账号/密码写进 defaultValue，否则会打进正式包。
-    // 仅本机联调可用 --dart-define=TONGYU_TENANT/EMAIL/PASSWORD 显式预填；密码仍不要进发布构建。
+    // 登录字段默认空白；演示账号/密码不要写进 defaultValue，否则会打进正式包。
+    // 需要预填时用编译参数 TONGYU_TENANT / TONGYU_EMAIL / TONGYU_PASSWORD，勿写死源码。
     _tenant.text = const String.fromEnvironment('TONGYU_TENANT');
     _email.text = const String.fromEnvironment('TONGYU_EMAIL');
     _password.text = const String.fromEnvironment('TONGYU_PASSWORD');

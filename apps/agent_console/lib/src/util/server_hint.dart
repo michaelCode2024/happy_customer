@@ -10,7 +10,7 @@ String initialServerHint(String saved, {bool? web, Uri? location}) {
   }
   final onWeb = web ?? kIsWeb;
   if (!onWeb) {
-    // 安装包没有页面来源。未传 dart-define 时连线上；本机联调自行传入 TONGYU_SERVER。
+    // 安装包没有页面来源。未传 TONGYU_SERVER 时默认线上地址。
     return 'https://chat.lookfunny.xyz';
   }
   final page = location ?? Uri.base;

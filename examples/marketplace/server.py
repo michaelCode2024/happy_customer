@@ -72,7 +72,7 @@ class Handler(BaseHTTPRequestHandler):
         except HTTPError as error:
             self.respond(json.loads(error.read()), error.code)
         except Exception as error:
-            self.respond({'message': type(error).__name__ + '，请检查本机联调服务'}, 500)
+            self.respond({'message': type(error).__name__ + '，上游服务不可用'}, 500)
 
-print('商城联调示例：http://127.0.0.1:18090 （模拟账号，仅供本机验收）', flush=True)
+print('商城示例服务：http://127.0.0.1:18090 （模拟账号，仅本地验收）', flush=True)
 ThreadingHTTPServer(('127.0.0.1', 18090), Handler).serve_forever()
