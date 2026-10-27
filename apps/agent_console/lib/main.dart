@@ -207,18 +207,44 @@ class _TongYuConsoleAppState extends State<TongYuConsoleApp>
           return ValueListenableBuilder<Color?>(
             valueListenable: BrowserChrome.top,
             builder: (context, top, _) {
-              // 页面底色保持浅色；只有顶栏跟着登录头部或滚上来的卡片变。
-              syncBrowserTheme(
-                theme.colorScheme.surface.value,
-                theme.brightness == Brightness.dark,
-                topRgb: top?.value,
+              return ValueListenableBuilder<Color?>(
+                valueListenable: BrowserChrome.bottom,
+                builder: (context, bottomBar, _) {
+                  final browserBottom =
+                      isHostedConsole ? 0.0 : browserSafeBottom;
+                  final bottomInset = AppSafeArea.resolveBottom(
+                      MediaQuery.of(context), browserBottom);
+                  // 页面底色保持浅色；顶栏跟着登录头部/滚上来的卡片变，
+                  // 底部安全区跟着真正贴底的那条栏变（iOS Home 条不能和 tabbar 有色差）。
+                  syncBrowserTheme(
+                    theme.colorScheme.surface.toARGB32(),
+                    theme.brightness == Brightness.dark,
+                    topRgb: top?.toARGB32(),
+                    bottomRgb: bottomBar?.toARGB32(),
+                  );
+                  return ColoredBox(
+                    color: theme.colorScheme.surface,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        if (bottomInset > 0 && bottomBar != null)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            height: bottomInset,
+                            child: ColoredBox(color: bottomBar),
+                          ),
+                        AppSafeArea(
+                          browserBottom: browserBottom,
+                          child: wrapWithWebEmojiFallback(
+                              child ?? const SizedBox.shrink()),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               );
-              return ColoredBox(
-                  color: theme.colorScheme.surface,
-                  child: AppSafeArea(
-                      browserBottom: isHostedConsole ? 0 : browserSafeBottom,
-                      child: wrapWithWebEmojiFallback(
-                          child ?? const SizedBox.shrink())));
             },
           );
         },

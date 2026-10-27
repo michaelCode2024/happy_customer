@@ -86,8 +86,6 @@ card字段：kind为PRODUCT/ORDER；id是稳定商品或订单ID；title为1至1
 
 群卡片使用 `POST /api/v1/marketplace/shops/{shopId}/groups/{id}/cards`，body为externalId、clientMessageId、card；同样检查群成员及发言模式。订单分享额外要求shareOrder:true，宿主必须先确认订单可分享给群成员。群消息与私聊统一返回messageType:CARD及metadata.card，现有Widget、客服工作台、群页面和Flutter客服组件支持展示。重试使用同一clientMessageId，避免重复消息；不能用新ID重发同一网络重试。
 
-历史专项环境与宿主联调记录见 [2026-10-14 归档](历史资料/20261014_商城与Flutter接入联调.md)，不作为当前通用环境配置。
-
 ## 后续开发者中心（尚未实现）
 
 1. 每个企业下管理多个“应用”：应用 ID、接入端（网站 / H5 / App / 服务端）、关联的客服入口、允许域名与启停状态。应用与企业绑定，不允许跨企业读取密钥或身份映射。

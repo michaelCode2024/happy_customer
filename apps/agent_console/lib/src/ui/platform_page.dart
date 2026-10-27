@@ -12,6 +12,7 @@ import 'package:tongyu_agent_console/src/platform/platform_controller.dart';
 import 'package:tongyu_agent_console/src/platform/tenant_detail.dart';
 import 'package:tongyu_agent_console/src/platform/tenant_table.dart';
 import 'package:tongyu_agent_console/src/ui/error_banner.dart';
+import 'package:tongyu_agent_console/src/util/browser_chrome.dart';
 import 'package:tongyu_agent_console/src/util/format.dart';
 import 'package:tongyu_agent_console/src/util/labels.dart';
 
@@ -70,26 +71,31 @@ class _PlatformPageState extends State<PlatformPage> {
       builder: (context, _) {
         final controller = widget.controller;
         final wide = MediaQuery.sizeOf(context).width >= 700;
+        final theme = Theme.of(context);
         return Scaffold(
           bottomNavigationBar: wide
               ? null
-              : NavigationBar(
-                  selectedIndex: _navIndex(controller.section),
-                  onDestinationSelected: (index) =>
-                      controller.selectSection(_nav[index]),
-                  destinations: const [
-                    NavigationDestination(
-                        icon: Icon(Icons.dashboard_outlined), label: '概览'),
-                    NavigationDestination(
-                        icon: Icon(Icons.apartment_outlined), label: '企业'),
-                    NavigationDestination(
-                        icon: Icon(Icons.workspace_premium_outlined),
-                        label: '额度'),
-                    NavigationDestination(
-                        icon: Icon(Icons.receipt_long_outlined), label: '记录'),
-                    NavigationDestination(
-                        icon: Icon(Icons.settings_outlined), label: '设置'),
-                  ],
+              : BrowserBottomChrome(
+                  color: theme.navigationBarTheme.backgroundColor ??
+                      theme.colorScheme.surface,
+                  child: NavigationBar(
+                    selectedIndex: _navIndex(controller.section),
+                    onDestinationSelected: (index) =>
+                        controller.selectSection(_nav[index]),
+                    destinations: const [
+                      NavigationDestination(
+                          icon: Icon(Icons.dashboard_outlined), label: '概览'),
+                      NavigationDestination(
+                          icon: Icon(Icons.apartment_outlined), label: '企业'),
+                      NavigationDestination(
+                          icon: Icon(Icons.workspace_premium_outlined),
+                          label: '额度'),
+                      NavigationDestination(
+                          icon: Icon(Icons.receipt_long_outlined), label: '记录'),
+                      NavigationDestination(
+                          icon: Icon(Icons.settings_outlined), label: '设置'),
+                    ],
+                  ),
                 ),
           body: Column(
             children: <Widget>[

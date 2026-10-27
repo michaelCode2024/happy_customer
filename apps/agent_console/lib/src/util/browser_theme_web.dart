@@ -6,11 +6,13 @@ String _hex(int rgb) =>
     '#${(rgb & 0xffffff).toRadixString(16).padLeft(6, '0')}';
 
 /// 网页底色与底部安全区用页面底色。顶栏可以另给颜色，登录蓝头滚走后要换回浅色。
-void syncBrowserTheme(int rgb, bool dark, {int? topRgb}) {
+/// 底部安全区若已有贴底栏，必须用栏的颜色，不能再用页面底色。
+void syncBrowserTheme(int rgb, bool dark, {int? topRgb, int? bottomRgb}) {
   final color = _hex(rgb);
   final top = _hex(topRgb ?? rgb);
+  final bottom = _hex(bottomRgb ?? rgb);
   if (js.hasProperty(html.window, 'tongyuSyncTheme')) {
-    js.callMethod(html.window, 'tongyuSyncTheme', [color, dark, top]);
+    js.callMethod(html.window, 'tongyuSyncTheme', [color, dark, top, bottom]);
   }
 }
 

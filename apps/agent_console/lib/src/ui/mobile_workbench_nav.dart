@@ -5,6 +5,7 @@ import 'package:tongyu_agent_console/src/state/session_controller.dart';
 import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
 import 'package:tongyu_agent_console/src/theme.dart';
 import 'package:tongyu_agent_console/src/ui/notification_center.dart';
+import 'package:tongyu_agent_console/src/util/browser_chrome.dart';
 import 'package:tongyu_agent_console/src/util/message_alert_stub.dart'
     if (dart.library.html) 'package:tongyu_agent_console/src/util/message_alert_web.dart';
 
@@ -208,60 +209,65 @@ class MobileBottomNavBar extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final bottomPadding = MediaQuery.paddingOf(context).bottom;
+    // 贴底栏真正的实色：外层安全区按这个色补齐 Home 条那一截。
+    final barColor = isDark ? theme.colorScheme.surface : Colors.white;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: isDark ? theme.colorScheme.surface : Colors.white,
-        border: Border(
-          top: BorderSide(
-            color: isDark
-                ? theme.colorScheme.outlineVariant.withAlpha(50)
-                : const Color(0xFFE8EEF5),
-            width: 0.8,
-          ),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withAlpha(isDark ? 50 : 12),
-            blurRadius: 10,
-            offset: const Offset(0, -2),
-          ),
-        ],
-      ),
-      padding: EdgeInsets.only(
-        top: 6,
-        bottom: bottomPadding > 0 ? bottomPadding : 6,
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: [
-          _buildNavItem(
-            index: 0,
-            label: '消息',
-            icon: Icons.chat_bubble_outline_rounded,
-            activeIcon: Icons.chat_bubble_rounded,
-            badgeCount: unreadCount,
-          ),
-          _buildNavItem(
-            index: 1,
-            label: '工作台',
-            icon: Icons.dashboard_outlined,
-            activeIcon: Icons.dashboard_rounded,
-          ),
-          if (showKnowledge)
-            _buildNavItem(
-              index: 2,
-              label: '知识库',
-              icon: Icons.menu_book_outlined,
-              activeIcon: Icons.menu_book_rounded,
+    return BrowserBottomChrome(
+      color: barColor,
+      child: Container(
+        decoration: BoxDecoration(
+          color: barColor,
+          border: Border(
+            top: BorderSide(
+              color: isDark
+                  ? theme.colorScheme.outlineVariant.withAlpha(50)
+                  : const Color(0xFFE8EEF5),
+              width: 0.8,
             ),
-          _buildNavItem(
-            index: showKnowledge ? 3 : 2,
-            label: '更多',
-            icon: Icons.apps_outlined,
-            activeIcon: Icons.apps_rounded,
           ),
-        ],
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withAlpha(isDark ? 50 : 12),
+              blurRadius: 10,
+              offset: const Offset(0, -2),
+            ),
+          ],
+        ),
+        padding: EdgeInsets.only(
+          top: 6,
+          bottom: bottomPadding > 0 ? bottomPadding : 6,
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: [
+            _buildNavItem(
+              index: 0,
+              label: '消息',
+              icon: Icons.chat_bubble_outline_rounded,
+              activeIcon: Icons.chat_bubble_rounded,
+              badgeCount: unreadCount,
+            ),
+            _buildNavItem(
+              index: 1,
+              label: '工作台',
+              icon: Icons.dashboard_outlined,
+              activeIcon: Icons.dashboard_rounded,
+            ),
+            if (showKnowledge)
+              _buildNavItem(
+                index: 2,
+                label: '知识库',
+                icon: Icons.menu_book_outlined,
+                activeIcon: Icons.menu_book_rounded,
+              ),
+            _buildNavItem(
+              index: showKnowledge ? 3 : 2,
+              label: '更多',
+              icon: Icons.apps_outlined,
+              activeIcon: Icons.apps_rounded,
+            ),
+          ],
+        ),
       ),
     );
   }

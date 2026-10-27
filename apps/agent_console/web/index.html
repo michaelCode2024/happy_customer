@@ -107,16 +107,18 @@
         {childList:true,subtree:true,attributes:true,attributeFilter:['content']});
     retainSafeViewport();
     // 首帧前读取已保存的外观，避免深色登录页与白色网页安全区域拼接。
-    window.tongyuSyncTheme = function(color, dark, topColor) {
+    window.tongyuSyncTheme = function(color, dark, topColor, bottomColor) {
       if (!/^#[0-9a-f]{6}$/i.test(color)) return;
       const top = (typeof topColor === 'string' && /^#[0-9a-f]{6}$/i.test(topColor)) ? topColor : color;
+      // 底部安全区优先跟贴底栏，没有贴底栏才退回页面底色。
+      const bottom = (typeof bottomColor === 'string' && /^#[0-9a-f]{6}$/i.test(bottomColor)) ? bottomColor : color;
       const root = document.documentElement;
       root.style.setProperty('--tongyu-page-bg', color);
       root.style.backgroundColor = color;
       root.dataset.tongyuTheme = dark ? 'dark' : 'light';
       root.style.colorScheme = dark ? 'dark' : 'light';
       root.style.color = dark ? '#e2e8f0' : '#425466';
-      // 状态栏采顶色。底部安全区仍用页面底色，避免登录蓝头把底部也染蓝。
+      // 状态栏采顶色。底部安全区用贴底栏颜色，避免登录蓝头把底部也染蓝。
       document.querySelector('meta[name="theme-color"]').content = top;
       document.querySelector('meta[name="color-scheme"]').content = dark ? 'dark' : 'light';
       if (document.body) document.body.style.backgroundColor = color;
@@ -125,7 +127,7 @@
       const topTint = document.getElementById('safari-top-tint');
       const bottomTint = document.getElementById('safari-bottom-tint');
       if (topTint) topTint.style.backgroundColor = top;
-      if (bottomTint) bottomTint.style.backgroundColor = color;
+      if (bottomTint) bottomTint.style.backgroundColor = bottom;
       if (typeof window.tongyuPlaceSafariTints === 'function') window.tongyuPlaceSafariTints();
     };
     // Product is light-theme only; ignore OS preference and any legacy dark preference.

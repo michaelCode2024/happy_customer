@@ -18,6 +18,8 @@ class BrowserBackPageRoute<T> extends MaterialPageRoute<T> {
       navigator?.maybePop();
       return;
     }
+    // 反向时长是 AnimationController 创建时按 reverseTransitionDuration 定的，
+    // 事后改 route.reverseDuration 不会影响这个 controller，仍会播满 300ms。
     final previous = transition.reverseDuration;
     transition.reverseDuration = Duration.zero;
     unawaited(navigator?.maybePop().then((popped) {

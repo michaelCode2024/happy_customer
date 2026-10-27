@@ -1,4 +1,4 @@
-void syncBrowserTheme(int rgb, bool dark, {int? topRgb}) {}
+void syncBrowserTheme(int rgb, bool dark, {int? topRgb, int? bottomRgb}) {}
 
 double get browserSafeBottom => 0;
 
