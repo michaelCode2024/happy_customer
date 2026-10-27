@@ -131,7 +131,7 @@
     }
     return '';
   };
-  window.tongyuSetBadge=count=>{if(count>0)navigator.setAppBadge?.(count).catch(()=>{});else navigator.clearAppBadge?.().catch(()=>{});};
+  window.tongyuSetBadge=count=>{try{if(count>0){const p=navigator.setAppBadge?.(count);if(p&&typeof p.catch==='function')p.catch(()=>{});}else{const p=navigator.clearAppBadge?.();if(p&&typeof p.catch==='function')p.catch(()=>{});}}catch(_){}};
   window.addEventListener('online',()=>registration?.update().catch(()=>{}));
   setInterval(()=>{if(document.visibilityState==='visible'&&navigator.onLine)registration?.update().catch(()=>{});},2*60*1000);
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&navigator.onLine)registration?.update().catch(()=>{});});

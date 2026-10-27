@@ -1585,6 +1585,7 @@ class WorkbenchController extends ChangeNotifier {
         );
         // 侧栏未读角标跟服务端汇总对齐：本地已读后立刻扣掉差额，不等整表刷新。
         _unread = math.max(0, _unread - previous + next);
+        setAppBadge(_unread);
       }
       _notify();
     } on ApiException {

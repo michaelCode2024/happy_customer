@@ -76,7 +76,16 @@ function noticeText(value, limit, fallback) {
 self.addEventListener('push', event => {
   let data={};
   try {data=event.data.json();}catch(_){}
-  self.navigator.setAppBadge?.().catch(()=>{});
+  const unread = typeof data.unread === 'number' && data.unread > 0 ? data.unread : (typeof data.badge === 'number' && data.badge > 0 ? data.badge : null);
+  try {
+    if (unread != null) {
+      const p = navigator.setAppBadge?.(unread);
+      if (p && typeof p.catch === 'function') p.catch(()=>{});
+    } else {
+      const p = navigator.setAppBadge?.();
+      if (p && typeof p.catch === 'function') p.catch(()=>{});
+    }
+  } catch (_) {}
   event.waitUntil(self.registration.showNotification(noticeText(data.title, 48, '客户'), {
     body:noticeText(data.body, 120, '发来一条消息'),
     icon:'/console/icons/Icon-192.png', badge:'/console/icons/Icon-192.png',

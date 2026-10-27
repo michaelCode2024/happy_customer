@@ -261,10 +261,12 @@ func (a *API) pushLoop(ctx context.Context) {
 // pushJob 是一次待发送的推送：通知、订阅、会话与渲染锁屏所需的字段。
 type pushJob struct {
 	n, s, c                                         uuid.UUID
+	agent                                           uuid.UUID
 	kind, storedTitle, messageType, content, sender string
 	deleted                                         bool
 	attempts                                        int
 	endpoint, key, secret                           string
+	unread                                          int
 }
 
 func (a *API) deliverPushBatch(ctx context.Context) {
@@ -278,7 +280,11 @@ func (a *API) deliverPushBatch(ctx context.Context) {
 	rows, err := tx.Query(ctx, `select d.notification_id,d.subscription_id,n.conversation_id,n.kind,n.title,
  coalesce(msg.message_type,''),coalesce(msg.content,''),coalesce(msg.deleted_at is not null,false),
  coalesce(nullif(vs.display_name,''),''),
- s.endpoint,s.p256dh,s.auth
+ s.endpoint,s.p256dh,s.auth,s.agent_id,
+ (select coalesce(sum(c.agent_unread),0)::int from conversation c
+   where c.tenant_id=n.tenant_id and c.status<>'RESOLVED'
+   and exists (select 1 from agent_inbox ai where ai.inbox_id=c.inbox_id and ai.agent_id=s.agent_id)
+   and (c.assignee_id=s.agent_id or (c.assignee_id is null and exists (select 1 from agent_inbox ai2 where ai2.inbox_id=c.inbox_id and ai2.agent_id=s.agent_id)))) as agent_unread
  from push_delivery d join agent_notification n on n.id=d.notification_id join push_subscription s on s.id=d.subscription_id
  join agent_session ss on ss.id=s.session_id and ss.expires_at>now()
  join agent ag on ag.id=s.agent_id and ag.status='ACTIVE'
@@ -299,7 +305,7 @@ func (a *API) deliverPushBatch(ctx context.Context) {
 	jobs := []pushJob{}
 	for rows.Next() {
 		var j pushJob
-		if err := rows.Scan(&j.n, &j.s, &j.c, &j.kind, &j.storedTitle, &j.messageType, &j.content, &j.deleted, &j.sender, &j.endpoint, &j.key, &j.secret); err != nil {
+		if err := rows.Scan(&j.n, &j.s, &j.c, &j.kind, &j.storedTitle, &j.messageType, &j.content, &j.deleted, &j.sender, &j.endpoint, &j.key, &j.secret, &j.agent, &j.unread); err != nil {
 			a.logger.Warn("read push job failed", "error", err)
 			rows.Close()
 			return
@@ -338,7 +344,7 @@ func (a *API) deliverPushBatch(ctx context.Context) {
 			continue
 		}
 		title, body := pushNotice(j.kind, j.storedTitle, j.sender, j.messageType, j.content, j.deleted)
-		payload, _ := json.Marshal(map[string]any{"title": title, "body": body, "url": "/console/?surface=agent&conversation=" + j.c.String(), "tag": "tongyu-" + j.c.String()})
+		payload, _ := json.Marshal(map[string]any{"title": title, "body": body, "url": "/console/?surface=agent&conversation=" + j.c.String(), "tag": "tongyu-" + j.c.String(), "unread": j.unread})
 		resp, err := webpush.SendNotificationWithContext(ctx, payload, &webpush.Subscription{Endpoint: j.endpoint, Keys: webpush.Keys{P256dh: j.key, Auth: j.secret}}, &webpush.Options{Subscriber: a.cfg.PublicBaseURL, VAPIDPublicKey: public, VAPIDPrivateKey: private, TTL: 300, HTTPClient: client})
 		if err != nil {
 			a.pushAttemptFailed(ctx, j, err)
