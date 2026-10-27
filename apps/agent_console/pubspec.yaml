@@ -1,7 +1,7 @@
 name: tongyu_agent_console
 description: TongYu cross-platform agent and operations console.
 publish_to: none
-version: 0.1.1+2026102601
+version: 0.1.1+2026102701
 
 # One codebase, four shapes: the desktop build is what an agent sits in all day,
 # the phone build is for on-call shifts, and the web build is a zero-install

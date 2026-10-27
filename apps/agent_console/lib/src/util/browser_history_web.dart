@@ -7,7 +7,11 @@ import 'dart:html' as html;
 /// 只在我们主动 pushState 的层数内处理 popstate，避免误吞站外历史。
 class BrowserHistoryGate {
   int _depth = 0;
-  bool _consumingBrowserPop = false;
+
+  /// popstate 已带走浏览器历史、等待本地 pop 完成对账的层数。
+  /// pop 的 whenComplete 跑在 popstate 监听器之后（微任务），布尔守卫接不住，
+  /// 用计数才能保证手势弹掉的那层不再补一次 history.back。
+  int _reconcilePops = 0;
   bool _ignoreNextPop = false;
 
   void push(String name) {
@@ -21,7 +25,11 @@ class BrowserHistoryGate {
   }
 
   void syncAfterLocalPop() {
-    if (_consumingBrowserPop) return;
+    if (_reconcilePops > 0) {
+      // 这层是浏览器返回弹掉的，历史已经走掉，再补 back 会多退一条真实历史。
+      _reconcilePops -= 1;
+      return;
+    }
     if (_depth <= 0) return;
     _depth -= 1;
     // 页面按钮返回时补一次 history.back；紧随其后的 popstate 只对账、不再弹路由。
@@ -36,7 +44,9 @@ class BrowserHistoryGate {
     }
   }
 
-  StreamSubscription<void> listen(void Function() onBrowserBack) {
+  /// [onBrowserBack] 返回是否真的发起了本地 pop；只有发起了才登记对账层，
+  /// 否则后续按钮返回会漏补 history.back。
+  StreamSubscription<void> listen(bool Function() onBrowserBack) {
     return html.window.onPopState.listen((_) {
       if (_ignoreNextPop) {
         _ignoreNextPop = false;
@@ -44,12 +54,7 @@ class BrowserHistoryGate {
       }
       if (_depth <= 0) return;
       _depth -= 1;
-      _consumingBrowserPop = true;
-      try {
-        onBrowserBack();
-      } finally {
-        _consumingBrowserPop = false;
-      }
+      if (onBrowserBack()) _reconcilePops += 1;
     });
   }
 }

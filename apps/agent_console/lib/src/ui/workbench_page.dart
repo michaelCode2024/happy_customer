@@ -23,6 +23,7 @@ import 'package:tongyu_agent_console/src/api/models.dart';
 import 'package:tongyu_agent_console/src/realtime/console_socket.dart';
 import 'package:tongyu_agent_console/src/state/session_controller.dart';
 import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
+import 'package:tongyu_agent_console/src/ui/browser_back_page_route.dart';
 import 'package:tongyu_agent_console/src/ui/chat_panel.dart';
 import 'package:tongyu_agent_console/src/ui/conversation_list.dart';
 import 'package:tongyu_agent_console/src/ui/mobile_conversation_view.dart';
@@ -99,7 +100,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
   WorkbenchSection _section = WorkbenchSection.conversations;
 
   /// 手机「更多」点进的二级页路由；与 section 切换分开，避免外层返回条 + 路由 pop 叠两次动画。
-  MaterialPageRoute<void>? _moreChildRoute;
+  BrowserBackPageRoute<void>? _moreChildRoute;
 
   /// 「更多」二级页与边缘手势 / 系统返回共用：按钮 pop 与 popstate 都只退一层，不直跳首页。
   final _moreBrowserHistory = BrowserHistoryGate();
@@ -305,16 +306,21 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     super.dispose();
   }
 
-  void _onMoreBrowserBack() {
-    if (!mounted) return;
+  bool _onMoreBrowserBack() {
+    if (!mounted) return false;
     final route = _moreChildRoute;
     if (route != null && route.isCurrent) {
-      // 与顶栏返回一致走 pop，禁止 removeRoute（Web 上会跳过收尾并留下点不中的层）。
-      route.navigator?.maybePop();
-      return;
+      // 边缘手势已播过系统返回动画，这里瞬时收层；顶栏按钮仍走带动画的 pop。
+      // 禁止 removeRoute（Web 上会跳过收尾并留下点不中的层）。
+      route.popFromBrowser();
+      return true;
     }
     final nav = Navigator.of(context);
-    if (nav.canPop()) nav.maybePop();
+    if (nav.canPop()) {
+      nav.maybePop();
+      return true;
+    }
+    return false;
   }
 
   Map<String, String> _customMenuLabels = {};
@@ -664,7 +670,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
       return;
     }
     final page = _moreChildPage(section);
-    final route = MaterialPageRoute<void>(
+    final route = BrowserBackPageRoute<void>(
       settings: RouteSettings(name: '/more/${section.name}'),
       builder: (_) => page,
     );
@@ -1330,7 +1336,8 @@ class MobileConversationFlow extends StatefulWidget {
 
 class MobileConversationFlowState extends State<MobileConversationFlow> {
   bool _scheduled = false;
-  Route<void>? _threadRoute;
+  BrowserBackPageRoute<void>? _threadRoute;
+  BrowserBackPageRoute<void>? _profileRoute;
   final _browserHistory = BrowserHistoryGate();
   StreamSubscription<void>? _browserBack;
 
@@ -1360,16 +1367,26 @@ class MobileConversationFlowState extends State<MobileConversationFlow> {
     super.dispose();
   }
 
-  void _onBrowserBack() {
-    if (!mounted) return;
+  bool _onBrowserBack() {
+    if (!mounted) return false;
+    // 边缘手势已播过系统返回动画，这里瞬时收层；页内按钮返回仍走带动画的 pop。
+    final profile = _profileRoute;
+    if (profile != null && profile.isCurrent) {
+      profile.popFromBrowser();
+      return true;
+    }
     final route = _threadRoute;
     if (route != null && route.isCurrent) {
-      route.navigator?.maybePop();
-      return;
+      route.popFromBrowser();
+      return true;
     }
-    // 客户资料等子页：只退当前 Navigator 顶层。
+    // 其它子层（弹窗等）：只退当前 Navigator 顶层。
     final nav = Navigator.of(context);
-    if (nav.canPop()) nav.maybePop();
+    if (nav.canPop()) {
+      nav.maybePop();
+      return true;
+    }
+    return false;
   }
 
   void _selectionChanged() {
@@ -1384,7 +1401,7 @@ class MobileConversationFlowState extends State<MobileConversationFlow> {
       }
       if (_threadRoute != null) return;
       final conversationId = widget.workbench.selectedId!;
-      final route = MaterialPageRoute<void>(
+      final route = BrowserBackPageRoute<void>(
           settings: RouteSettings(name: '/conversation/$conversationId'),
           builder: (routeContext) => Scaffold(
                 body: ChatPanel(
@@ -1395,18 +1412,21 @@ class MobileConversationFlowState extends State<MobileConversationFlow> {
                   onOpenProfile: () {
                     // 客户资料也压一层历史，边缘滑动先关资料再回列表。
                     _browserHistory.push('profile/$conversationId');
-                    Navigator.of(routeContext)
-                        .push(
-                      MaterialPageRoute<void>(
-                        settings: RouteSettings(
-                            name: '/conversation/$conversationId/profile'),
-                        builder: (_) => Scaffold(
-                          appBar: AppBar(title: const Text('客户资料')),
-                          body: VisitorSidebar(workbench: widget.workbench),
-                        ),
+                    final profileRoute = BrowserBackPageRoute<void>(
+                      settings: RouteSettings(
+                          name: '/conversation/$conversationId/profile'),
+                      builder: (_) => Scaffold(
+                        appBar: AppBar(title: const Text('客户资料')),
+                        body: VisitorSidebar(workbench: widget.workbench),
                       ),
-                    )
-                        .whenComplete(_browserHistory.syncAfterLocalPop);
+                    );
+                    _profileRoute = profileRoute;
+                    Navigator.of(routeContext)
+                        .push(profileRoute)
+                        .whenComplete(() {
+                      if (_profileRoute == profileRoute) _profileRoute = null;
+                      _browserHistory.syncAfterLocalPop();
+                    });
                   },
                 ),
               ));

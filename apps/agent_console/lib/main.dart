@@ -7,7 +7,9 @@ import 'package:tongyu_agent_console/src/util/host_session.dart';
 import 'package:tongyu_agent_console/src/util/console_surface.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:tongyu_agent_console/src/platform/platform_api.dart';
+import 'package:tongyu_agent_console/src/util/app_platform.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'package:tongyu_agent_console/src/platform/platform_controller.dart';
@@ -24,6 +26,17 @@ import 'package:tongyu_agent_console/src/ui/workbench_page.dart';
 import 'package:tongyu_agent_console/src/util/web_emoji_font.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (runningOnAndroid) {
+    // 手势条/导航键区域与白色底部导航栏一体：旧系统给实色白；
+    // Android 15+ 强制全面屏会忽略实色并自动加半透明对比遮罩，这里关掉遮罩露出应用白底。
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      systemNavigationBarColor: Colors.white,
+      systemNavigationBarDividerColor: Colors.white,
+      systemNavigationBarIconBrightness: Brightness.dark,
+      systemNavigationBarContrastEnforced: false,
+    ));
+  }
   runApp(const TongYuConsoleApp());
   // 首帧后立刻预拉表情字体。
   if (kIsWeb) {

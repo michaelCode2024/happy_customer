@@ -14,6 +14,7 @@ class BrowserHistoryGate {
   void drain() {}
 
   /// 监听浏览器 / iOS PWA 边缘返回；返回的订阅在 dispose 时取消。
-  StreamSubscription<void> listen(void Function() onBrowserBack) =>
+  /// [onBrowserBack] 返回是否真的发起了本地 pop（Web 实现用来对账）。
+  StreamSubscription<void> listen(bool Function() onBrowserBack) =>
       const Stream<void>.empty().listen((_) {});
 }

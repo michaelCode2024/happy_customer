@@ -5,7 +5,10 @@ void main() {
   test('非 Web 的 History 门闸可安全调用且不影响监听', () async {
     final gate = BrowserHistoryGate();
     var hits = 0;
-    final sub = gate.listen(() => hits++);
+    final sub = gate.listen(() {
+      hits++;
+      return true;
+    });
     gate.push('conversation/c1');
     gate.syncAfterLocalPop();
     gate.drain();
