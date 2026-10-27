@@ -18,3 +18,9 @@ class BrowserHistoryGate {
   StreamSubscription<void> listen(bool Function() onBrowserBack) =>
       const Stream<void>.empty().listen((_) {});
 }
+
+/// 非 Web 没有网页引擎跟着 history.back 再发路由消息。
+bool consumeBrowserEnginePopSuppression() => false;
+
+/// 同一次系统返回里只允许卸一层。引擎和页面监听可能各收到一次。
+bool claimSingleBrowserPop() => true;

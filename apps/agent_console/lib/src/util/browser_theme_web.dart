@@ -10,7 +10,8 @@ String _hex(int rgb) =>
 void syncBrowserTheme(int rgb, bool dark, {int? topRgb, int? bottomRgb}) {
   final color = _hex(rgb);
   final top = _hex(topRgb ?? rgb);
-  final bottom = _hex(bottomRgb ?? rgb);
+  // 没有贴底栏时传空串，网页不要用页面底色去盖 Home 条。
+  final bottom = bottomRgb == null ? '' : _hex(bottomRgb);
   if (js.hasProperty(html.window, 'tongyuSyncTheme')) {
     js.callMethod(html.window, 'tongyuSyncTheme', [color, dark, top, bottom]);
   }

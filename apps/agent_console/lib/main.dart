@@ -1,6 +1,8 @@
 import 'src/ui/app_safe_area.dart';
+import 'src/ui/browser_back_page_route.dart';
 import 'src/util/activity_monitor.dart';
 import 'src/util/browser_chrome.dart';
+import 'src/util/browser_history.dart';
 import 'src/util/browser_theme.dart';
 import 'dart:async';
 import 'package:tongyu_agent_console/src/util/host_session.dart';
@@ -78,6 +80,21 @@ class _TongYuConsoleAppState extends State<TongYuConsoleApp>
   /// 门面偏好读完前先挡一层，避免先闪客服登录再跳运营台。
   bool _surfaceRestored = false;
   bool _manualSurface = false;
+  final _navigatorKey = GlobalKey<NavigatorState>();
+
+  /// 网页上 iOS 转场不要再挂一套边缘手势，浏览器历史已经负责这一下。
+  ThemeData get _theme {
+    final theme = RelayTheme.light();
+    if (!kIsWeb) return theme;
+    return theme.copyWith(
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: <TargetPlatform, PageTransitionsBuilder>{
+          TargetPlatform.iOS: WebSlideTransitionsBuilder(),
+          TargetPlatform.macOS: WebSlideTransitionsBuilder(),
+        },
+      ),
+    );
+  }
 
   @override
   void initState() {
@@ -102,6 +119,28 @@ class _TongYuConsoleAppState extends State<TongYuConsoleApp>
     if (isHostedConsole) _platformResolved = true;
     WidgetsBinding.instance.addObserver(this);
     startActivityMonitor(_session.setViewing);
+  }
+
+  @override
+  Future<bool> didPushRouteInformation(RouteInformation routeInformation) async {
+    // 网页引擎把后退到 flutter 历史当成「再推一个命名路由」。工作台不用地址路由，
+    // 吃掉它，否则同一次手势会先退一层再推进来一页。
+    if (!kIsWeb) return false;
+    consumeBrowserEnginePopSuppression();
+    return true;
+  }
+
+  @override
+  Future<bool> didPopRoute() async {
+    if (!kIsWeb) return false;
+    // 这一层已经卸过（页内按钮的 history.back，或手势监听先到）。引擎再要一次 pop 时直接吃掉。
+    if (consumeBrowserEnginePopSuppression()) return true;
+    final navigator = _navigatorKey.currentState;
+    if (navigator == null) return false;
+    // 页面自己的 popstate 监听若已经卸过这一下，不要再卸一层。
+    if (!claimSingleBrowserPop()) return true;
+    // 浏览器滑动已经播过，这里瞬时卸页，避免再播一段 Flutter 转场。
+    return popNavigatorWithoutTransition(navigator);
   }
 
   @override
@@ -183,6 +222,7 @@ class _TongYuConsoleAppState extends State<TongYuConsoleApp>
     return ValueListenableBuilder<bool>(
       valueListenable: webEmojiFontReady,
       builder: (context, _, __) => MaterialApp(
+        navigatorKey: _navigatorKey,
         debugShowCheckedModeBanner: false,
         title: ProductBrand.consoleTitle,
         locale: const Locale('zh', 'CN'),
@@ -192,8 +232,8 @@ class _TongYuConsoleAppState extends State<TongYuConsoleApp>
           GlobalCupertinoLocalizations.delegate,
           GlobalWidgetsLocalizations.delegate,
         ],
-        theme: RelayTheme.light(),
-        darkTheme: RelayTheme.light(),
+        theme: _theme,
+        darkTheme: _theme,
         themeMode: ThemeMode.light,
         builder: (context, child) {
           final theme = Theme.of(context);
@@ -223,23 +263,27 @@ class _TongYuConsoleAppState extends State<TongYuConsoleApp>
                     bottomRgb: bottomBar?.toARGB32(),
                   );
                   return ColoredBox(
-                    color: theme.colorScheme.surface,
+                    // 有贴底栏时，栏外面那截 Home 条也用栏的颜色，避免露出脚手架浅底。
+                    color: bottomBar ?? theme.colorScheme.surface,
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
+                        AppSafeArea(
+                          browserBottom: browserBottom,
+                          child: wrapWithWebEmojiFallback(
+                              child ?? const SizedBox.shrink()),
+                        ),
+                        // 贴在最上层：Home 条那一截必须盖住脚手架底色，并跟 tab 栏同一实色。
                         if (bottomInset > 0 && bottomBar != null)
                           Positioned(
                             left: 0,
                             right: 0,
                             bottom: 0,
                             height: bottomInset,
-                            child: ColoredBox(color: bottomBar),
+                            child: IgnorePointer(
+                              child: ColoredBox(color: bottomBar),
+                            ),
                           ),
-                        AppSafeArea(
-                          browserBottom: browserBottom,
-                          child: wrapWithWebEmojiFallback(
-                              child ?? const SizedBox.shrink()),
-                        ),
                       ],
                     ),
                   );

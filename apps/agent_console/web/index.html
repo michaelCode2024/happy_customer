@@ -66,7 +66,11 @@
       background-color: #ffffff;
     }
     #safari-top-tint { top: 0; }
-    #safari-bottom-tint { bottom: 0; }
+    #safari-bottom-tint {
+      bottom: 0;
+      /* 有真实 inset 时铺满 Home 条，颜色由贴底栏同步；否则至少 12px，避免采到透明锁死 */
+      height: max(12px, env(safe-area-inset-bottom, 0px));
+    }
     html.tongyu-ios-standalone #safari-top-tint,
     html.tongyu-ios-standalone #safari-bottom-tint {
       z-index: 100000;
@@ -110,8 +114,10 @@
     window.tongyuSyncTheme = function(color, dark, topColor, bottomColor) {
       if (!/^#[0-9a-f]{6}$/i.test(color)) return;
       const top = (typeof topColor === 'string' && /^#[0-9a-f]{6}$/i.test(topColor)) ? topColor : color;
-      // 底部安全区优先跟贴底栏，没有贴底栏才退回页面底色。
-      const bottom = (typeof bottomColor === 'string' && /^#[0-9a-f]{6}$/i.test(bottomColor)) ? bottomColor : color;
+      // 只有贴底栏登记了颜色才盖住 Home 条；没有底栏时不拿页面底色去垫。
+      const hasBottom = typeof bottomColor === 'string' && /^#[0-9a-f]{6}$/i.test(bottomColor);
+      window.tongyuHasBottomBar = hasBottom;
+      const bottom = hasBottom ? bottomColor : color;
       const root = document.documentElement;
       root.style.setProperty('--tongyu-page-bg', color);
       root.style.backgroundColor = color;

@@ -22,17 +22,43 @@
       if(!topTint.style.backgroundColor)topTint.style.backgroundColor='#ffffff';
     }
     if(bottomTint){
-      bottomTint.style.display=standalone?'block':'none';
-      bottomTint.style.height='12px';
-      bottomTint.style.zIndex=z;
+      // Home 条要跟 tab 栏同色：有栏时采样条铺满安全区并压在画布上。
+      // 独立模式不能整段藏起来，否则系统会采到脚手架底色并锁住。
+      const raw=readSafeBottom();
+      if(standalone&&raw>=8)lockedBottomInset=raw;
+      const vv=window.visualViewport;
+      const keyboard=vv?Math.max(0,window.innerHeight-vv.height-(vv.offsetTop||0)):0;
+      const inset=lockedBottomInset>=8?lockedBottomInset:(raw>=8?raw:12);
+      // 有贴底栏时铺满 Home 条，颜色由栏同步；没有栏时只留采样高度，避免整条盖住页面底色。
+      let height=0;
+      if(standalone&&keyboard<80){
+        height=window.tongyuHasBottomBar?Math.min(40,inset):12;
+      }
+      bottomTint.style.display=height>0?'block':'none';
+      bottomTint.style.height=height+'px';
+      bottomTint.style.zIndex=standalone?'100000':'0';
       if(!bottomTint.style.backgroundColor)bottomTint.style.backgroundColor='#ffffff';
     }
+  }
+  let lockedBottomInset=0;
+  function readSafeBottom(){
+    if(!document.body)return 0;
+    let probe=document.getElementById('tongyu-safe-bottom-probe');
+    if(!probe){
+      probe=document.createElement('div');
+      probe.id='tongyu-safe-bottom-probe';
+      probe.setAttribute('aria-hidden','true');
+      probe.style.cssText='position:fixed;visibility:hidden;pointer-events:none;padding-bottom:env(safe-area-inset-bottom,0px)';
+      document.body.appendChild(probe);
+    }
+    return parseFloat(getComputedStyle(probe).paddingBottom)||0;
   }
   window.tongyuPlaceSafariTints=placeSafariTints;
   if(ios())placeSafariTints();
   window.addEventListener('flutter-first-frame',()=>{chromeReady=true;placeSafariTints();},{once:true});
   window.addEventListener('resize',placeSafariTints);
   window.addEventListener('orientationchange',placeSafariTints);
+  window.visualViewport?.addEventListener('resize',placeSafariTints);
   window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();installEvent=event;installChanged();});
   window.addEventListener('appinstalled',()=>{installEvent=null;installChanged();});
   const ready= async()=>{
