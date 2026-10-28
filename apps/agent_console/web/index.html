@@ -71,7 +71,10 @@
       /* 有真实 inset 时铺满 Home 条，颜色由贴底栏同步；否则至少 12px，避免采到透明锁死 */
       height: max(12px, env(safe-area-inset-bottom, 0px));
     }
-    html.tongyu-ios-standalone #safari-top-tint,
+    /* 主屏幕独立态下状态栏为透明浮层，无需置顶采样条，避免实色遮挡 Flutter 页头 */
+    html.tongyu-ios-standalone #safari-top-tint {
+      display: none !important;
+    }
     html.tongyu-ios-standalone #safari-bottom-tint {
       z-index: 100000;
     }

@@ -16,9 +16,9 @@
     const bottomTint=document.getElementById('safari-bottom-tint');
     const z=standalone&&!chromeReady?'100000':'0';
     if(topTint){
-      topTint.style.display=standalone?'block':'none';
-      topTint.style.height='12px';
-      topTint.style.zIndex=z;
+      topTint.style.display=standalone?'none':'none';
+      topTint.style.height='0px';
+      topTint.style.zIndex='0';
       if(!topTint.style.backgroundColor)topTint.style.backgroundColor='#ffffff';
     }
     if(bottomTint){
