@@ -3,6 +3,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../api/tongyu_api.dart';
 
+/// 安装包没有浏览器订阅，状态变化通知保留同一接口，界面代码无需分平台。
+final ValueNotifier<int> _pushRevision = ValueNotifier<int>(0);
+Listenable get pushStateListenable => _pushRevision;
+void notifyPushStateChanged() => _pushRevision.value++;
+
 final _conversationEvents = StreamController<String>.broadcast();
 Stream<String> notificationConversationEvents() {
   if (defaultTargetPlatform != TargetPlatform.android)

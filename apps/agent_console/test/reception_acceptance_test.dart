@@ -15,6 +15,8 @@ class _Picker implements AttachmentPicker {
   @override
   Future<PickedAttachment?> pickImage() async => null;
   @override
+  Future<PickedAttachment?> pickCamera() async => null;
+  @override
   Future<PickedAttachment?> pickFile() async => null;
 }
 
@@ -37,8 +39,7 @@ void main() {
             'status': 'OPEN',
             'assigneeId': 'a1',
             'assigneeName': '客服甲',
-            'assignmentExpiresAt':
-                accepted ? null : '2099-10-12T06:01:00Z',
+            'assignmentExpiresAt': accepted ? null : '2099-10-12T06:01:00Z',
             'acceptedAt': accepted ? '2026-10-12T06:00:00Z' : null
           };
       final api = TongYuApi(
@@ -212,7 +213,8 @@ void main() {
       // 有历史消息时错误也要出现在横幅，不能只埋在空会话占位文案里。
       expect(find.textContaining('开始接待'), findsWidgets);
       await tester.enterText(find.byType(TextField).last, '草稿应保留');
-      await tester.tap(width < 760 ? find.byTooltip('发送') : find.text('发送'));
+      await tester.pump();
+      await tester.tap(find.text('发送'));
       await tester.pumpAndSettle();
       expect(find.text('草稿应保留'), findsOneWidget);
       expect(tester.takeException(), isNull);

@@ -36,20 +36,73 @@ void main() {
   testWidgets('录音入口明确显示权限失败，取消不发送', (tester) async {
     var sent = false;
     await tester.pumpWidget(MaterialApp(
-        home: Scaffold(body: VoiceRecorderButton(onRecorded: (_) async {
-      sent = true;
-    }))));
+        home: Scaffold(
+            body: VoiceRecorderButton(
+                recorderFactory: () => _DeniedRecorder(),
+                onRecorded: (_) async {
+                  sent = true;
+                }))));
     await tester.tap(find.byTooltip('录制语音'));
     await tester.pumpAndSettle();
     expect(find.text('开始录音'), findsOneWidget);
     await tester.tap(find.text('开始录音'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('当前客户端暂不支持录音'), findsOneWidget);
+    expect(find.textContaining('请允许使用麦克风后重试'), findsOneWidget);
     await tester.tap(find.text('取消录音'));
     await tester.pumpAndSettle();
     expect(sent, isFalse);
     expect(find.text('开始录音'), findsNothing);
   });
+
+  testWidgets('按住说话松开发送，上滑取消', (tester) async {
+    final recorder = _TestRecorder();
+    RecordedVoice? sent;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: VoiceHoldButton(
+            recorderFactory: () => recorder,
+            onRecorded: (voice) async {
+              sent = voice;
+            },
+            onError: (_) {},
+          ),
+        ),
+      ),
+    ));
+    final target = find.text('按住 说话');
+    final down = await tester.startGesture(tester.getCenter(target));
+    await tester.pump();
+    expect(find.text('手指上滑，取消发送'), findsOneWidget);
+    await down.up();
+    await tester.pumpAndSettle();
+    expect(sent, isNotNull);
+    expect(recorder.canceled, isFalse);
+
+    sent = null;
+    recorder.canceled = false;
+    final cancel = await tester.startGesture(tester.getCenter(target));
+    await tester.pump();
+    await cancel.moveBy(const Offset(0, -120));
+    await tester.pump();
+    expect(find.text('松开手指，取消发送'), findsOneWidget);
+    await cancel.up();
+    await tester.pumpAndSettle();
+    expect(sent, isNull);
+    expect(recorder.canceled, isTrue);
+  });
+}
+
+class _DeniedRecorder extends VoiceRecorder {
+  @override
+  Future<void> start() async => throw StateError('请允许使用麦克风后重试');
+
+  @override
+  Future<RecordedVoice> stop() async =>
+      throw StateError('没有正在录制的语音');
+
+  @override
+  void cancel() {}
 }
 
 class _TestRecorder extends VoiceRecorder {

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:tongyu_agent_console/src/util/document_picker_stub.dart'
     if (dart.library.html) 'package:tongyu_agent_console/src/util/document_picker_web.dart'
+    if (dart.library.io) 'package:tongyu_agent_console/src/util/document_picker_io.dart'
     as documents;
 
 /// A file the agent chose, already read into memory.
@@ -36,6 +37,9 @@ abstract class AttachmentPicker {
   /// Opens the image library. Returns null when the agent cancels.
   Future<PickedAttachment?> pickImage();
 
+  /// Opens the camera. Returns null when the agent cancels.
+  Future<PickedAttachment?> pickCamera();
+
   /// Opens the file browser. Returns null when the agent cancels.
   Future<PickedAttachment?> pickFile();
 
@@ -45,11 +49,8 @@ abstract class AttachmentPicker {
 
 /// The default picker, built on `image_picker`.
 ///
-/// `image_picker` covers photos and videos on every platform Flutter targets,
-/// including the desktop builds through their file dialogs, which is exactly
-/// what a support agent needs in practice: screenshots, photos of a fault, a
-/// receipt. Sending an arbitrary document is served by the API and will be
-/// wired to a platform file chooser when the console ships that build.
+/// `image_picker` covers the album and camera. Documents go through the
+/// platform file chooser, including the browser file input.
 class ImageAttachmentPicker implements AttachmentPicker {
   ImageAttachmentPicker({ImagePicker? picker})
       : _picker = picker ?? ImagePicker();
@@ -57,12 +58,17 @@ class ImageAttachmentPicker implements AttachmentPicker {
   final ImagePicker _picker;
 
   @override
-  bool get supportsArbitraryFiles => kIsWeb;
+  bool get supportsArbitraryFiles => true;
 
   @override
-  Future<PickedAttachment?> pickImage() async {
+  Future<PickedAttachment?> pickImage() => _pick(ImageSource.gallery);
+
+  @override
+  Future<PickedAttachment?> pickCamera() => _pick(ImageSource.camera);
+
+  Future<PickedAttachment?> _pick(ImageSource source) async {
     final file = await _picker.pickImage(
-      source: ImageSource.gallery,
+      source: source,
       // Screenshots of a phone screen are large; the server caps uploads, and
       // downscaling on the client keeps a shift's worth of traffic reasonable.
       maxWidth: 2400,
@@ -77,14 +83,8 @@ class ImageAttachmentPicker implements AttachmentPicker {
 
   @override
   Future<PickedAttachment?> pickFile() async {
-    if (kIsWeb) {
-      final file = await documents.pickDocument();
-      return file == null ? null : _read(file);
-    }
-    // `image_picker` has no document mode on the mobile platforms; falling back
-    // to the media library is still useful (a saved PDF appears there on
-    // Android), and the composer keeps its text input available either way.
-    return pickImage();
+    final file = await documents.pickDocument();
+    return file == null ? null : _read(file);
   }
 
   Future<PickedAttachment> _read(XFile file) async {
@@ -109,6 +109,9 @@ class FakeAttachmentPicker implements AttachmentPicker {
 
   @override
   Future<PickedAttachment?> pickImage() async => image;
+
+  @override
+  Future<PickedAttachment?> pickCamera() async => image;
 
   @override
   Future<PickedAttachment?> pickFile() async => image;

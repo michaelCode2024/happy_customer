@@ -1,7 +1,14 @@
 // ignore_for_file: avoid_web_libraries_in_flutter
 import 'dart:html' as html;
 import 'dart:js_util' as js;
+import 'package:flutter/foundation.dart';
 import '../api/tongyu_api.dart';
+
+/// 推送订阅状态变化时自增，供顶部横幅等界面同步刷新。
+/// 卡片开启成功后靠它让横幅立即收起，不用等下次切回页面。
+final ValueNotifier<int> _pushRevision = ValueNotifier<int>(0);
+Listenable get pushStateListenable => _pushRevision;
+void notifyPushStateChanged() => _pushRevision.value++;
 
 Stream<String> notificationConversationEvents() =>
     html.window.navigator.serviceWorker?.onMessage

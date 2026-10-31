@@ -22,9 +22,7 @@ class VoiceRecorderButton extends StatelessWidget {
       tooltip: '录制语音',
       icon: Icon(Icons.mic_none_outlined,
           size: iconSize,
-          color: enabled
-              ? (color ?? scheme.onSurfaceVariant)
-              : scheme.outline),
+          color: enabled ? (color ?? scheme.onSurfaceVariant) : scheme.outline),
       onPressed: !enabled
           ? null
           : () => showDialog<void>(
@@ -167,4 +165,194 @@ class _RecordingDialogState extends State<_RecordingDialog> {
                       : '添加语音')),
         ],
       ));
+}
+
+/// 按住说话。松开发送，上滑取消。录音实现由各端的 [VoiceRecorder] 提供。
+class VoiceHoldButton extends StatefulWidget {
+  const VoiceHoldButton({
+    super.key,
+    required this.onRecorded,
+    required this.onError,
+    this.enabled = true,
+    this.recorderFactory,
+  });
+
+  final Future<void> Function(RecordedVoice voice) onRecorded;
+  final ValueChanged<String> onError;
+  final bool enabled;
+  final VoiceRecorder Function()? recorderFactory;
+
+  @override
+  State<VoiceHoldButton> createState() => _VoiceHoldButtonState();
+}
+
+class _VoiceHoldButtonState extends State<VoiceHoldButton> {
+  VoiceRecorder? _recorder;
+  OverlayEntry? _overlay;
+  Timer? _timer;
+  bool _fingerDown = false;
+  bool _recording = false;
+  bool _canceling = false;
+  double? _originY;
+  int _seconds = 0;
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _overlay?.remove();
+    _overlay = null;
+    _recorder?.cancel();
+    super.dispose();
+  }
+
+  void _showOverlay() {
+    _overlay?.markNeedsBuild();
+    if (_overlay != null) return;
+    _overlay = OverlayEntry(builder: (context) {
+      final canceling = _canceling;
+      final scheme = Theme.of(context).colorScheme;
+      return IgnorePointer(
+        child: Center(
+          child: Material(
+            color: canceling ? scheme.error : scheme.inverseSurface,
+            borderRadius: BorderRadius.circular(12),
+            child: SizedBox(
+              width: 168,
+              height: 168,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.graphic_eq,
+                      color: scheme.onInverseSurface, size: 48),
+                  const SizedBox(height: 14),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Text(
+                      canceling ? '松开手指，取消发送' : '手指上滑，取消发送',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          color: scheme.onInverseSurface, fontSize: 14),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    });
+    Overlay.of(context).insert(_overlay!);
+  }
+
+  void _hideOverlay() {
+    _overlay?.remove();
+    _overlay = null;
+  }
+
+  void _down(PointerDownEvent event) {
+    if (!widget.enabled || _fingerDown) return;
+    _fingerDown = true;
+    _originY = event.position.dy;
+    _canceling = false;
+    _seconds = 0;
+    final recorder = widget.recorderFactory?.call() ?? VoiceRecorder();
+    _recorder = recorder;
+    setState(() {});
+    _showOverlay();
+    unawaited(_begin(recorder));
+  }
+
+  Future<void> _begin(VoiceRecorder recorder) async {
+    try {
+      await recorder.start();
+      if (!mounted || !_fingerDown || !identical(recorder, _recorder)) {
+        recorder.cancel();
+        return;
+      }
+      setState(() => _recording = true);
+      _timer?.cancel();
+      _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted) return;
+        _seconds++;
+        if (_seconds >= 120) {
+          unawaited(_finish(send: !_canceling));
+        }
+      });
+    } catch (error) {
+      if (!identical(recorder, _recorder) && _recorder != null) return;
+      _fingerDown = false;
+      _recording = false;
+      _recorder = null;
+      _hideOverlay();
+      if (mounted) setState(() {});
+      widget.onError(error is StateError ? error.message : '$error');
+    }
+  }
+
+  void _move(PointerMoveEvent event) {
+    if (!_fingerDown || _originY == null) return;
+    final canceling = _originY! - event.position.dy > 80;
+    if (canceling == _canceling) return;
+    setState(() => _canceling = canceling);
+    _overlay?.markNeedsBuild();
+  }
+
+  Future<void> _finish({required bool send}) async {
+    if (!_fingerDown) return;
+    _fingerDown = false;
+    _timer?.cancel();
+    _timer = null;
+    final recorder = _recorder;
+    final wasRecording = _recording;
+    _recorder = null;
+    _recording = false;
+    _canceling = false;
+    _hideOverlay();
+    if (mounted) setState(() {});
+    if (recorder == null) return;
+    if (!send || !wasRecording) {
+      recorder.cancel();
+      return;
+    }
+    try {
+      final voice = await recorder.stop();
+      await widget.onRecorded(voice);
+    } catch (error) {
+      if (mounted) {
+        widget.onError(error is StateError ? error.message : '$error');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Listener(
+      behavior: HitTestBehavior.opaque,
+      onPointerDown: widget.enabled ? _down : null,
+      onPointerMove: _move,
+      onPointerUp: (_) => unawaited(_finish(send: !_canceling)),
+      onPointerCancel: (_) => unawaited(_finish(send: false)),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 80),
+        height: 44,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          // 与输入框同一套主题皮肤，仅按下时加深一档。
+          color: _fingerDown ? scheme.surfaceContainerHighest : scheme.surface,
+          borderRadius: BorderRadius.circular(9),
+          border:
+              Border.all(color: scheme.outlineVariant.withValues(alpha: .6)),
+        ),
+        child: Text(
+          '按住 说话',
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            color: widget.enabled ? scheme.onSurface : scheme.outline,
+          ),
+        ),
+      ),
+    );
+  }
 }

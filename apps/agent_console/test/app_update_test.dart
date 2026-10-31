@@ -1,5 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tongyu_agent_console/src/util/apk_install_api.dart';
 import 'package:tongyu_agent_console/src/util/app_update.dart';
+
+const _sha = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
 
 void main() {
   test('buildNumber 更大时判定为有新版本', () {
@@ -66,5 +69,72 @@ void main() {
     expect(info.minBuildNumber, 40);
     expect(info.notes, ['修复消息提醒', '安卓检查更新']);
     expect(info.isValid, isTrue);
+  });
+
+  test('只接受本站 downloads 下的 apk', () {
+    expect(
+      allowedAndroidApkUri(
+        'https://chat.lookfunny.xyz',
+        '/downloads/tongyu-android.apk',
+      )?.path,
+      '/downloads/tongyu-android.apk',
+    );
+    expect(
+      allowedAndroidApkUri(
+        'https://chat.lookfunny.xyz',
+        'https://evil.example/downloads/a.apk',
+      ),
+      isNull,
+    );
+  });
+
+  test('已下载记录必须版本、校验和、文件大小都一致', () {
+    expect(
+      downloadedApkRecordMatches(
+        storedSha: _sha,
+        storedBuild: 2026103103,
+        storedBytes: 100,
+        fileBytes: 100,
+        remoteSha: _sha,
+        remoteBuild: 2026103103,
+      ),
+      isTrue,
+    );
+    expect(
+      downloadedApkRecordMatches(
+        storedSha: _sha,
+        storedBuild: 2026103102,
+        storedBytes: 100,
+        fileBytes: 100,
+        remoteSha: _sha,
+        remoteBuild: 2026103103,
+      ),
+      isFalse,
+    );
+    expect(
+      downloadedApkRecordMatches(
+        storedSha: _sha,
+        storedBuild: 2026103103,
+        storedBytes: 100,
+        fileBytes: 0,
+        remoteSha: _sha,
+        remoteBuild: 2026103103,
+      ),
+      isFalse,
+    );
+    expect(sha256Matches(_sha, '$_sha '), isTrue);
+    expect(sha256Matches(_sha, ''), isFalse);
+  });
+
+  test('下载进度按字节换算', () {
+    expect(downloadFraction(0, 0), isNull);
+    expect(downloadFraction(50, 100), 0.5);
+    expect(formatByteSize(0), '0 B');
+    expect(formatByteSize(1536), '1.5 KB');
+  });
+
+  test('流式 sha256 与整段结果一致', () {
+    final rolling = RollingSha256()..add('abc'.codeUnits);
+    expect(rolling.close(), _sha);
   });
 }

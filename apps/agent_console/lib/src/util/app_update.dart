@@ -1,11 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 
+import 'package:tongyu_agent_console/src/util/apk_install.dart';
+import 'package:tongyu_agent_console/src/util/apk_install_api.dart';
 import 'package:tongyu_agent_console/src/util/app_platform.dart';
 
 /// 与官网 `/downloads/release.json` 对齐的安卓发行信息。
@@ -80,6 +82,69 @@ class AppUpdateCheckResult {
 }
 
 const _skipBuildKey = 'tongyu.android.skipBuild';
+const _apkShaKey = 'tongyu.android.apkSha';
+const _apkBuildKey = 'tongyu.android.apkBuild';
+const _apkBytesKey = 'tongyu.android.apkBytes';
+
+/// 已下载的安装包必须对得上当前发行清单，并且文件还在、大小没变。
+bool downloadedApkRecordMatches({
+  required String storedSha,
+  required int storedBuild,
+  required int storedBytes,
+  required int fileBytes,
+  required String remoteSha,
+  required int remoteBuild,
+}) {
+  if (remoteBuild <= 0 || storedBuild != remoteBuild) return false;
+  if (fileBytes <= 0 || storedBytes != fileBytes) return false;
+  return sha256Matches(storedSha, remoteSha);
+}
+
+Future<void> rememberDownloadedApk({
+  required String sha256,
+  required int buildNumber,
+  required int bytes,
+}) async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setString(_apkShaKey, sha256);
+  await prefs.setInt(_apkBuildKey, buildNumber);
+  await prefs.setInt(_apkBytesKey, bytes);
+}
+
+Future<void> forgetDownloadedApk() async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.remove(_apkShaKey);
+  await prefs.remove(_apkBuildKey);
+  await prefs.remove(_apkBytesKey);
+}
+
+/// 对得上当前版本时返回文件字节数；对不上就清掉，避免拿旧包去装。
+Future<int?> readyDownloadedApkBytes(AndroidReleaseInfo remote) async {
+  final fileBytes = await cachedApkBytes();
+  final prefs = await SharedPreferences.getInstance();
+  final storedSha = prefs.getString(_apkShaKey) ?? '';
+  final storedBuild = prefs.getInt(_apkBuildKey) ?? 0;
+  final storedBytes = prefs.getInt(_apkBytesKey) ?? 0;
+  final matches = downloadedApkRecordMatches(
+    storedSha: storedSha,
+    storedBuild: storedBuild,
+    storedBytes: storedBytes,
+    fileBytes: fileBytes,
+    remoteSha: remote.sha256,
+    remoteBuild: remote.buildNumber,
+  );
+  if (matches) return fileBytes;
+  if (fileBytes > 0 || storedSha.isNotEmpty) {
+    await forgetDownloadedApk();
+    await discardCachedApk();
+  }
+  return null;
+}
+
+Future<void> clearDownloadedApk() async {
+  await forgetDownloadedApk();
+  await discardCachedApk();
+}
 
 int _asInt(dynamic value) {
   if (value is int) return value;
@@ -140,10 +205,11 @@ Future<AppUpdateCheckResult> checkAndroidAppUpdate(String serverBase) async {
     );
   }
   try {
-    final manifest = Uri.parse(serverBase.trim()).resolve('/downloads/release.json');
-    final response = await http
-        .get(manifest, headers: const {'Cache-Control': 'no-cache'})
-        .timeout(const Duration(seconds: 12));
+    final manifest =
+        Uri.parse(serverBase.trim()).resolve('/downloads/release.json');
+    final response = await http.get(manifest, headers: const {
+      'Cache-Control': 'no-cache'
+    }).timeout(const Duration(seconds: 12));
     if (response.statusCode < 200 || response.statusCode >= 300) {
       return AppUpdateCheckResult(
         localVersion: localVersion,
@@ -218,21 +284,18 @@ Future<void> skipAndroidUpdate(AndroidReleaseInfo remote) async {
   await prefs.setInt(_skipBuildKey, key);
 }
 
-Future<bool> openAndroidReleaseDownload(
-  String serverBase,
-  AndroidReleaseInfo remote,
-) async {
-  final uri = resolveReleaseUri(serverBase, remote.url);
-  if (uri == null) return false;
-  // 仅允许本站 /downloads/*.apk，避免发行清单被改写后跳到陌生域名。
+/// 只接受本站 `/downloads/*.apk`，避免发行清单被改写后跳到陌生域名。
+Uri? allowedAndroidApkUri(String serverBase, String relativeOrAbsolute) {
+  final uri = resolveReleaseUri(serverBase, relativeOrAbsolute);
+  if (uri == null) return null;
   final base = Uri.tryParse(serverBase.trim());
   if (base == null ||
       uri.origin != base.origin ||
       !uri.path.startsWith('/downloads/') ||
       !uri.path.toLowerCase().endsWith('.apk')) {
-    return false;
+    return null;
   }
-  return launchUrl(uri, mode: LaunchMode.externalApplication);
+  return uri;
 }
 
 /// 登录后静默检查；有更新再弹窗。设置页可强制弹出结果。
@@ -260,6 +323,8 @@ Future<void> promptAndroidAppUpdateIfNeeded(
     return;
   }
   if (!result.updateAvailable || result.remote == null) {
+    await clearDownloadedApk();
+    if (!context.mounted) return;
     if (manual) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -271,6 +336,8 @@ Future<void> promptAndroidAppUpdateIfNeeded(
     }
     return;
   }
+  final readyBytes = await readyDownloadedApkBytes(result.remote!);
+  if (!context.mounted) return;
   await showAndroidUpdateDialog(
     context,
     serverBase: serverBase,
@@ -278,6 +345,8 @@ Future<void> promptAndroidAppUpdateIfNeeded(
     localBuild: result.localBuildNumber,
     remote: result.remote!,
     force: result.forceUpdate,
+    alreadyDownloaded: readyBytes != null,
+    downloadedBytes: readyBytes ?? 0,
   );
 }
 
@@ -288,25 +357,237 @@ Future<void> showAndroidUpdateDialog(
   required int localBuild,
   required AndroidReleaseInfo remote,
   required bool force,
-}) async {
-  await showDialog<void>(
+  bool alreadyDownloaded = false,
+  int downloadedBytes = 0,
+}) {
+  return showDialog<void>(
     context: context,
     barrierDismissible: !force,
-    builder: (ctx) => PopScope(
-      canPop: !force,
+    builder: (ctx) => _AndroidUpdateDialog(
+      serverBase: serverBase,
+      localVersion: localVersion,
+      localBuild: localBuild,
+      remote: remote,
+      force: force,
+      alreadyDownloaded: alreadyDownloaded,
+      downloadedBytes: downloadedBytes,
+    ),
+  );
+}
+
+enum _UpdatePhase { prompt, downloading, permission, failed, opened }
+
+class _AndroidUpdateDialog extends StatefulWidget {
+  const _AndroidUpdateDialog({
+    required this.serverBase,
+    required this.localVersion,
+    required this.localBuild,
+    required this.remote,
+    required this.force,
+    required this.alreadyDownloaded,
+    required this.downloadedBytes,
+  });
+
+  final String serverBase;
+  final String localVersion;
+  final int localBuild;
+  final AndroidReleaseInfo remote;
+  final bool force;
+  final bool alreadyDownloaded;
+  final int downloadedBytes;
+
+  @override
+  State<_AndroidUpdateDialog> createState() => _AndroidUpdateDialogState();
+}
+
+class _AndroidUpdateDialogState extends State<_AndroidUpdateDialog>
+    with WidgetsBindingObserver {
+  _UpdatePhase _phase = _UpdatePhase.prompt;
+  int _received = 0;
+  int _total = 0;
+  String? _error;
+  int _token = 0;
+  bool _awaitingPermission = false;
+  bool _fileReady = false;
+  int _readyBytes = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _fileReady = widget.alreadyDownloaded;
+    _readyBytes = widget.downloadedBytes;
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    _token++;
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || !_awaitingPermission) return;
+    _awaitingPermission = false;
+    if (_fileReady) {
+      unawaited(_install());
+    } else {
+      unawaited(_startDownload());
+    }
+  }
+
+  bool get _canLeave => !widget.force && _phase != _UpdatePhase.downloading;
+
+  Future<void> _startDownload() async {
+    if (_phase == _UpdatePhase.downloading) return;
+    final uri = allowedAndroidApkUri(widget.serverBase, widget.remote.url);
+    if (uri == null) {
+      setState(() {
+        _phase = _UpdatePhase.failed;
+        _error = '安装包地址无效';
+      });
+      return;
+    }
+    final allowed = await canRequestPackageInstall();
+    if (!mounted) return;
+    if (!allowed) {
+      setState(() {
+        _phase = _UpdatePhase.permission;
+        _error = null;
+      });
+      return;
+    }
+    final token = ++_token;
+    _fileReady = false;
+    await forgetDownloadedApk();
+    if (!mounted || token != _token) return;
+    setState(() {
+      _phase = _UpdatePhase.downloading;
+      _received = 0;
+      _total = 0;
+      _error = null;
+    });
+    try {
+      final downloaded = await downloadReleaseApk(
+        uri: uri,
+        expectedSha256: widget.remote.sha256,
+        onProgress: (received, total) {
+          if (!mounted || token != _token) return;
+          setState(() {
+            _received = received;
+            _total = total;
+          });
+        },
+        isCancelled: () => token != _token,
+      );
+      if (!mounted || token != _token) return;
+      await rememberDownloadedApk(
+        sha256: downloaded.sha256,
+        buildNumber: widget.remote.buildNumber,
+        bytes: downloaded.bytes,
+      );
+      _fileReady = true;
+      _readyBytes = downloaded.bytes;
+      await _install();
+    } on ApkDownloadCancelled {
+      if (!mounted || token != _token) return;
+      setState(() => _phase = _UpdatePhase.prompt);
+    } on ApkDownloadException catch (error) {
+      if (!mounted || token != _token) return;
+      setState(() {
+        _phase = _UpdatePhase.failed;
+        _error = error.message;
+      });
+    }
+  }
+
+  void _cancelDownload() {
+    _token++;
+    setState(() {
+      _phase = _UpdatePhase.prompt;
+      _received = 0;
+      _total = 0;
+    });
+  }
+
+  Future<void> _install() async {
+    try {
+      final status = await installLocalApk();
+      if (!mounted) return;
+      switch (status) {
+        case 'ok':
+          setState(() {
+            _phase = _UpdatePhase.opened;
+            _error = null;
+          });
+        case 'permission':
+          setState(() => _phase = _UpdatePhase.permission);
+        case 'missing':
+        case 'invalid':
+          _fileReady = false;
+          await forgetDownloadedApk();
+          await discardCachedApk();
+          if (!mounted) return;
+          setState(() {
+            _phase = _UpdatePhase.failed;
+            _error = '安装包已失效，请重新下载';
+          });
+        default:
+          setState(() {
+            _phase = _UpdatePhase.failed;
+            _error = '无法打开安装界面，请重试';
+          });
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _phase = _UpdatePhase.failed;
+        _error = '无法打开安装界面，请重试';
+      });
+    }
+  }
+
+  Future<void> _openPermission() async {
+    _awaitingPermission = true;
+    try {
+      await openInstallPermissionSettings();
+    } catch (_) {
+      if (!mounted) return;
+      _awaitingPermission = false;
+      setState(() {
+        _phase = _UpdatePhase.failed;
+        _error = '无法打开系统设置，请在设置中允许通语安装应用';
+      });
+    }
+  }
+
+  String _progressLabel() {
+    final got = formatByteSize(_received);
+    if (_total <= 0) return '已下载 $got';
+    final percent = ((_received * 100) / _total).floor().clamp(0, 100);
+    return '$percent%  ·  $got / ${formatByteSize(_total)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final remote = widget.remote;
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    return PopScope(
+      canPop: _canLeave,
       child: AlertDialog(
         title: Row(
           children: [
             Icon(
-              force
+              widget.force
                   ? Icons.system_update_alt_rounded
                   : Icons.system_update_rounded,
-              color: force
+              color: widget.force
                   ? const Color(0xFFE53935)
                   : const Color(0xFF3263FF),
             ),
             const SizedBox(width: 8),
-            Text(force ? '需要更新后继续使用' : '发现新版本'),
+            Text(widget.force ? '需要更新后继续使用' : '发现新版本'),
           ],
         ),
         content: SizedBox(
@@ -316,7 +597,7 @@ Future<void> showAndroidUpdateDialog(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '当前 $localVersion（$localBuild） → 最新 ${remote.version}'
+                '当前 ${widget.localVersion}（${widget.localBuild}） → 最新 ${remote.version}'
                 '${remote.buildNumber > 0 ? '（${remote.buildNumber}）' : ''}',
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
@@ -324,16 +605,15 @@ Future<void> showAndroidUpdateDialog(
                 const SizedBox(height: 6),
                 Text(
                   '发布于 ${remote.updatedAt}',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Theme.of(ctx).colorScheme.onSurfaceVariant,
-                  ),
+                  style: TextStyle(fontSize: 12, color: muted),
                 ),
               ],
               if (remote.notes.isNotEmpty) ...[
                 const SizedBox(height: 12),
-                const Text('更新说明',
-                    style: TextStyle(fontWeight: FontWeight.w600)),
+                const Text(
+                  '更新说明',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
                 const SizedBox(height: 6),
                 for (final note in remote.notes)
                   Padding(
@@ -350,13 +630,70 @@ Future<void> showAndroidUpdateDialog(
                 const SizedBox(height: 10),
                 const Text('建议更新到最新安装包，以获得修复与新能力。'),
               ],
-              if (force) ...[
+              if (_phase == _UpdatePhase.downloading) ...[
+                const SizedBox(height: 16),
+                LinearProgressIndicator(
+                  value: downloadFraction(_received, _total),
+                  minHeight: 8,
+                  borderRadius: const BorderRadius.all(Radius.circular(8)),
+                ),
+                const SizedBox(height: 8),
+                Text(_progressLabel(),
+                    style: TextStyle(fontSize: 13, color: muted)),
+                const SizedBox(height: 4),
+                Text(
+                  '下载完成后将打开系统安装界面',
+                  style: TextStyle(fontSize: 12, color: muted),
+                ),
+              ],
+              if (_fileReady &&
+                  (_phase == _UpdatePhase.prompt ||
+                      _phase == _UpdatePhase.failed ||
+                      _phase == _UpdatePhase.opened)) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _readyBytes > 0
+                      ? '安装包已下载（${formatByteSize(_readyBytes)}），可直接安装。'
+                      : '安装包已下载，可直接安装。',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ],
+              if (_phase == _UpdatePhase.permission) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _fileReady
+                      ? '请允许通语安装应用。允许后会打开安装界面。'
+                      : '请允许通语安装应用。允许后会自动开始下载。',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+              ],
+              if (_phase == _UpdatePhase.opened) ...[
+                const SizedBox(height: 12),
+                Text(
+                  '请在系统安装界面完成安装。装完后重新打开通语。',
+                  style: TextStyle(fontSize: 13, color: muted),
+                ),
+              ],
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _error!,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+              ],
+              if (widget.force && _phase == _UpdatePhase.prompt) ...[
                 const SizedBox(height: 10),
                 Text(
                   '此版本为必更版本，更新完成后重新打开应用即可继续接待。',
                   style: TextStyle(
                     fontSize: 12,
-                    color: Theme.of(ctx).colorScheme.error,
+                    color: Theme.of(context).colorScheme.error,
                   ),
                 ),
               ],
@@ -364,34 +701,48 @@ Future<void> showAndroidUpdateDialog(
           ),
         ),
         actions: [
-          if (!force)
+          if (!widget.force && _phase != _UpdatePhase.downloading)
             TextButton(
               onPressed: () async {
                 await skipAndroidUpdate(remote);
-                if (ctx.mounted) Navigator.pop(ctx);
+                if (context.mounted) Navigator.pop(context);
               },
               child: const Text('稍后再说'),
             ),
-          FilledButton.icon(
-            onPressed: () async {
-              final ok =
-                  await openAndroidReleaseDownload(serverBase, remote);
-              if (!ctx.mounted) return;
-              if (!ok) {
-                ScaffoldMessenger.of(ctx).showSnackBar(
-                  const SnackBar(content: Text('无法打开下载地址，请稍后在下载页重试')),
-                );
-                return;
-              }
-              if (!force) Navigator.pop(ctx);
-            },
-            icon: const Icon(Icons.download_rounded, size: 18),
-            label: const Text('立即更新'),
-          ),
+          if (_phase == _UpdatePhase.downloading)
+            TextButton(
+              onPressed: _cancelDownload,
+              child: const Text('取消'),
+            ),
+          if (_phase == _UpdatePhase.prompt || _phase == _UpdatePhase.failed)
+            FilledButton.icon(
+              onPressed: _fileReady ? _install : _startDownload,
+              icon: Icon(
+                _fileReady
+                    ? Icons.install_mobile_rounded
+                    : Icons.download_rounded,
+                size: 18,
+              ),
+              label: Text(
+                _fileReady
+                    ? '立即安装'
+                    : (_phase == _UpdatePhase.failed ? '重试' : '立即更新'),
+              ),
+            ),
+          if (_phase == _UpdatePhase.permission)
+            FilledButton(
+              onPressed: _openPermission,
+              child: const Text('去允许'),
+            ),
+          if (_phase == _UpdatePhase.opened)
+            FilledButton(
+              onPressed: _install,
+              child: const Text('继续安装'),
+            ),
         ],
       ),
-    ),
-  );
+    );
+  }
 }
 
 /// 设置页展示的本机版本文案。

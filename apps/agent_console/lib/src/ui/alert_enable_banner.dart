@@ -43,6 +43,8 @@ class _AlertEnableBannerState extends State<AlertEnableBanner>
     WidgetsBinding.instance.addObserver(this);
     messageSoundListenable.addListener(_rebuild);
     deskAlertsListenable.addListener(_rebuild);
+    // 引导卡开启推送后立即重新核对，横幅不能还挂着「再允许一次」。
+    pushStateListenable.addListener(_onPushState);
     watchDeskAlerts();
     adoptGrantedDeskAlerts();
     unawaited(_refresh());
@@ -53,7 +55,12 @@ class _AlertEnableBannerState extends State<AlertEnableBanner>
     WidgetsBinding.instance.removeObserver(this);
     messageSoundListenable.removeListener(_rebuild);
     deskAlertsListenable.removeListener(_rebuild);
+    pushStateListenable.removeListener(_onPushState);
     super.dispose();
+  }
+
+  void _onPushState() {
+    if (mounted) unawaited(_refresh());
   }
 
   @override

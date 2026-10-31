@@ -14,6 +14,7 @@ import 'package:tongyu_agent_console/src/state/offline_store.dart';
 class TestPicker implements AttachmentPicker {
   bool get supportsArbitraryFiles => false;
   Future<PickedAttachment?> pickImage() async => null;
+  Future<PickedAttachment?> pickCamera() async => null;
   Future<PickedAttachment?> pickFile() async => null;
 }
 
@@ -21,29 +22,48 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
   test('隔离升级移除当前账号旧快照，不删除其他账号', () async {
-    final prefs=await SharedPreferences.getInstance();
-    const current='tongyu.offline.v1.https%3A%2F%2Fone.example.t.a.';
-    const other='tongyu.offline.v1.https%3A%2F%2Fone.example.t.b.';
-    await prefs.setString(current+'old','old customer message');
-    await prefs.setString(other+'old','other account');
-    final store=OfflineStore('https://one.example','t','a');await store.flush();
-    expect(prefs.getString(current+'old'),isNull);
-    expect(prefs.getString(other+'old'),'other account');
+    final prefs = await SharedPreferences.getInstance();
+    const current = 'tongyu.offline.v1.https%3A%2F%2Fone.example.t.a.';
+    const other = 'tongyu.offline.v1.https%3A%2F%2Fone.example.t.b.';
+    await prefs.setString(current + 'old', 'old customer message');
+    await prefs.setString(other + 'old', 'other account');
+    final store = OfflineStore('https://one.example', 't', 'a');
+    await store.flush();
+    expect(prefs.getString(current + 'old'), isNull);
+    expect(prefs.getString(other + 'old'), 'other account');
   });
   test('会话权限撤销后关闭已选会话并清空消息和缓存', () async {
-    bool denied=false;
-    final api=TongYuApi(server:'https://one.example',client:MockClient((r) async {
-      if(denied) return http.Response('{"code":"CONVERSATION_NOT_FOUND","message":"not allowed"}',404);
-      if(r.url.path.endsWith('/c1'))return http.Response('{"conversation":{"id":"c1","status":"OPEN","assigneeId":"a"}}',200);
-      if(r.url.path.endsWith('/messages'))return http.Response('{"items":[{"id":"m1","sequence":1,"content":"old private content","senderType":"VISITOR"}],"lastSequence":1}',200);
-      return http.Response('{"items":[]}',200);
-    }))..token='local';
-    api.configureOffline(tenant:'t',agent:'a');
-    final wb=WorkbenchController(api:api,selfId:'a');await wb.select('c1');
-    expect(wb.messages,isNotEmpty);denied=true;await wb.reloadSelected();
-    expect(wb.selectedId,isNull);expect(wb.messages,isEmpty);
-    expect(await api.offlineStore!.read('/api/v1/console/conversations/c1'),isNull);
-    wb.dispose();api.close();
+    bool denied = false;
+    final api = TongYuApi(
+        server: 'https://one.example',
+        client: MockClient((r) async {
+          if (denied)
+            return http.Response(
+                '{"code":"CONVERSATION_NOT_FOUND","message":"not allowed"}',
+                404);
+          if (r.url.path.endsWith('/c1'))
+            return http.Response(
+                '{"conversation":{"id":"c1","status":"OPEN","assigneeId":"a"}}',
+                200);
+          if (r.url.path.endsWith('/messages'))
+            return http.Response(
+                '{"items":[{"id":"m1","sequence":1,"content":"old private content","senderType":"VISITOR"}],"lastSequence":1}',
+                200);
+          return http.Response('{"items":[]}', 200);
+        }))
+      ..token = 'local';
+    api.configureOffline(tenant: 't', agent: 'a');
+    final wb = WorkbenchController(api: api, selfId: 'a');
+    await wb.select('c1');
+    expect(wb.messages, isNotEmpty);
+    denied = true;
+    await wb.reloadSelected();
+    expect(wb.selectedId, isNull);
+    expect(wb.messages, isEmpty);
+    expect(await api.offlineStore!.read('/api/v1/console/conversations/c1'),
+        isNull);
+    wb.dispose();
+    api.close();
   });
 
   testWidgets('已保存的离线草稿进入会话时显示在真实输入框', (tester) async {

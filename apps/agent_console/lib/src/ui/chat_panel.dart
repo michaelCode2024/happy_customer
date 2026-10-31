@@ -94,6 +94,29 @@ class _ChatPanelState extends State<ChatPanel> {
     });
   }
 
+  /// 松手即发送。上传失败留在输入区，不把半截语音塞进会话。
+  Future<void> _sendRecorded(RecordedVoice voice) async {
+    if (_sending || _uploading) return;
+    setState(() {
+      _uploading = true;
+      _uploadError = null;
+    });
+    try {
+      await _attachVoice(voice);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _uploading = false;
+          _uploadError = error is StateError ? error.message : '$error';
+        });
+      }
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _uploading = false);
+    await _send();
+  }
+
   /// The conversation whose draft is currently in the composer, and whether the
   /// server's copy has been read yet. Until it has, an empty composer means "not
   /// loaded" rather than "nothing written", so a save would erase a draft the
@@ -344,7 +367,7 @@ class _ChatPanelState extends State<ChatPanel> {
     });
   }
 
-  Future<void> _pickImage({bool document = false}) async {
+  Future<void> _pickImage({bool document = false, bool camera = false}) async {
     final conversationId = widget.workbench.selectedId;
     if (conversationId == null || _uploading) return;
     setState(() {
@@ -354,7 +377,9 @@ class _ChatPanelState extends State<ChatPanel> {
     try {
       final picked = document
           ? await widget.picker.pickFile()
-          : await widget.picker.pickImage();
+          : camera
+              ? await widget.picker.pickCamera()
+              : await widget.picker.pickImage();
       if (picked == null) {
         return;
       }
@@ -940,7 +965,12 @@ class _ChatPanelState extends State<ChatPanel> {
                 _noteMode = value;
               }),
               onPickImage: () => _pickImage(),
+              onPickCamera: () => _pickImage(camera: true),
               onPickFile: () => _pickImage(document: true),
+              onHoldVoice: _sendRecorded,
+              onVoiceError: (message) {
+                if (mounted) setState(() => _uploadError = message);
+              },
               voiceControl: VoiceRecorderButton(
                   key: ValueKey(conversation.id),
                   color: RelayTheme.magenta,
@@ -3263,7 +3293,10 @@ class _Composer extends StatefulWidget {
     required this.onChanged,
     required this.onToggleNote,
     required this.onPickImage,
+    required this.onPickCamera,
     required this.onPickFile,
+    required this.onHoldVoice,
+    required this.onVoiceError,
     required this.voiceControl,
     required this.onClearQuote,
     required this.onRemovePending,
@@ -3297,7 +3330,10 @@ class _Composer extends StatefulWidget {
   final ValueChanged<String> onChanged;
   final ValueChanged<bool> onToggleNote;
   final Future<void> Function() onPickImage;
+  final Future<void> Function() onPickCamera;
   final Future<void> Function() onPickFile;
+  final Future<void> Function(RecordedVoice voice) onHoldVoice;
+  final ValueChanged<String> onVoiceError;
   final Widget voiceControl;
   final VoidCallback onClearQuote;
   final ValueChanged<String> onRemovePending;
@@ -3689,6 +3725,7 @@ class _MobileComposer extends StatefulWidget {
 class _MobileComposerState extends State<_MobileComposer> {
   bool _tools = false;
   bool _emojiOpen = false;
+  bool _voiceMode = false;
   @override
   void initState() {
     super.initState();
@@ -3705,8 +3742,14 @@ class _MobileComposerState extends State<_MobileComposer> {
   }
 
   void _focus() {
-    if (mounted && widget.composer.focusNode.hasFocus && _tools)
-      setState(() => _tools = false);
+    if (!mounted || !widget.composer.focusNode.hasFocus) return;
+    if (_tools || _voiceMode || _emojiOpen) {
+      setState(() {
+        _tools = false;
+        _voiceMode = false;
+        _emojiOpen = false;
+      });
+    }
   }
 
   @override
@@ -3733,311 +3776,379 @@ class _MobileComposerState extends State<_MobileComposer> {
     final c = widget.composer;
     final s = Theme.of(context).colorScheme;
     final dark = s.brightness == Brightness.dark;
+    // 皮肤仍用项目主色，只有「一栏三件套 + 「+」⇄发送」的格局对齐微信。
     final background = dark ? s.surface : const Color(0xFFF7F9FF);
-    // 工具格用主题辅色软底 + 彩色图标，避免一整排灰标显得发素。
+    final iconColor =
+        _tools ? RelayTheme.blue : RelayTheme.blue.withValues(alpha: .85);
     Widget tool(
       IconData icon,
       String label,
       VoidCallback? action, {
       required Color accent,
       required Color soft,
-    }) =>
-        SizedBox(
-            width: 66,
-            child: TextButton(
-                onPressed: action,
-                style: TextButton.styleFrom(padding: EdgeInsets.zero),
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                          color: action == null
-                              ? s.surfaceContainerHighest.withOpacity(.45)
-                              : soft,
-                          borderRadius: BorderRadius.circular(12)),
-                      child: Icon(icon,
-                          size: 23,
-                          color: action == null ? s.outline : accent)),
-                  const SizedBox(height: 5),
-                  Text(label,
-                      style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: action == null ? s.outline : accent))
-                ])));
+    }) {
+      return TextButton(
+        onPressed: action,
+        style: TextButton.styleFrom(padding: EdgeInsets.zero),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: action == null
+                    ? s.surfaceContainerHighest.withValues(alpha: .45)
+                    : soft,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                icon,
+                size: 23,
+                color: action == null ? s.outline : accent,
+              ),
+            ),
+            const SizedBox(height: 5),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: action == null ? s.outline : accent,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     final bottomInset = MediaQuery.paddingOf(context).bottom;
+    final voiceEnabled =
+        !c.sending && !c.uploading && !c.noteMode && !c.lockPublicReply;
     return BrowserBottomChrome(
-        color: background,
-        child: Container(
-            key: const ValueKey('mobile-composer'),
-            padding: EdgeInsets.fromLTRB(10, 9, 10, 10 + bottomInset),
-            decoration: BoxDecoration(
-                color: background,
-                border: Border(
-                    top: BorderSide(color: s.outlineVariant.withOpacity(.55)))),
-            child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (c.statusHint != null)
-                    Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Text(c.statusHint!,
-                            style: TextStyle(
-                                fontSize: 12, color: s.onSurfaceVariant))),
-                  if (c.uploadError != null)
-                    Text(c.uploadError!,
-                        style: TextStyle(color: s.error, fontSize: 12)),
-                  if (c.noteMode)
-                    Row(children: [
-                      Expanded(
-                          child: Text('内部备注 · 仅团队可见',
-                              style: TextStyle(
-                                  fontSize: 12, color: RelayTheme.violet))),
-                      TextButton(
-                          onPressed: () => c.onToggleNote(false),
-                          child: const Text('取消'))
-                    ]),
-                  if (c.quote != null)
-                    Row(children: [
-                      const Icon(Icons.reply, size: 16),
-                      const SizedBox(width: 6),
-                      Expanded(
-                          child: Text(
-                              '回复 ${c.quote!.senderName}：${c.quote!.content}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 12))),
-                      IconButton(
-                          tooltip: '取消引用',
-                          onPressed: c.onClearQuote,
-                          icon: const Icon(Icons.close, size: 16))
-                    ]),
-                  if (c.pending.isNotEmpty)
-                    Wrap(spacing: 6, children: [
-                      for (final a in c.pending)
-                        InputChip(
-                            label: Text(a.fileName),
-                            onDeleted: () => c.onRemovePending(a.id))
-                    ]),
-                  Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                    SizedBox(
-                        width: 30,
-                        height: 44,
-                        child: IconButton(
-                            padding: EdgeInsets.zero,
-                            tooltip: _tools ? '收起工具' : '展开工具',
-                            onPressed: () {
-                              c.focusNode.unfocus();
-                              setState(() {
-                                _tools = !_tools;
-                                if (_tools) _emojiOpen = false;
-                              });
-                            },
-                            icon: Icon(
-                                _tools
-                                    ? Icons.cancel_outlined
-                                    : Icons.add_circle_outline,
-                                size: 26,
-                                color: _tools
-                                    ? RelayTheme.blue
-                                    : RelayTheme.blue.withOpacity(.85)))),
-                    const SizedBox(width: 6),
-                    Expanded(
-                        child: Container(
-                            decoration: BoxDecoration(
-                                // 回复/备注共用白底，避免切换时输入框颜色跳变。
-                                color: s.surface,
-                                border: Border.all(
-                                    color: s.outlineVariant.withOpacity(.6)),
-                                borderRadius: BorderRadius.circular(9)),
-                            child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  Expanded(
-                                      child: TextField(
-                                          controller: c.controller,
-                                          focusNode: c.focusNode,
-                                          minLines: 2,
-                                          maxLines: 5,
-                                          onChanged: c.onChanged,
-                                          textInputAction:
-                                              TextInputAction.newline,
-                                          keyboardType: TextInputType.multiline,
-                                          style: withWebEmojiFallback(
-                                              const TextStyle(
-                                                  fontSize: 15, height: 1.6)),
-                                          decoration: InputDecoration(
-                                              hintText: c.noteMode
-                                                  ? '添加内部备注…'
-                                                  : c.lockPublicReply
-                                                      ? '请先完成接待或转派'
-                                                      : c.visitorTyping
-                                                          ? '对方正在输入…'
-                                                          : '输入消息…',
-                                              isDense: true,
-                                              filled: false,
-                                              border: InputBorder.none,
-                                              enabledBorder: InputBorder.none,
-                                              focusedBorder: InputBorder.none,
-                                              contentPadding:
-                                                  const EdgeInsets.fromLTRB(
-                                                      11, 9, 0, 9)))),
-                                  IconButton(
-                                      tooltip: '表情',
-                                      padding: EdgeInsets.zero,
-                                      constraints:
-                                          const BoxConstraints(minWidth: 36),
-                                      onPressed: () => setState(() {
-                                            _emojiOpen = !_emojiOpen;
-                                            if (_emojiOpen) _tools = false;
-                                          }),
-                                      icon: const Icon(
-                                          Icons
-                                              .sentiment_satisfied_alt_outlined,
-                                          size: 22,
-                                          color: RelayTheme.amber)),
-                                ]))),
-                    const SizedBox(width: 6),
-                    ValueListenableBuilder<TextEditingValue>(
-                        valueListenable: c.controller,
-                        builder: (context, value, _) {
-                          final busy = c.sending || c.uploading;
-                          final canSend = !busy &&
-                              !c.lockPublicReply &&
-                              (value.text.trim().isNotEmpty ||
-                                  c.pending.isNotEmpty);
-                          // 可发送/发送中：蓝渐变 + 白箭头；禁用：浅灰底灰箭头。
-                          final active = canSend || busy;
-                          return SizedBox(
-                              width: 44,
-                              height: 44,
-                              child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    gradient: active
-                                        ? RelayTheme.actionGradient
-                                        : null,
-                                    color: active
-                                        ? null
-                                        : s.surfaceContainerHighest,
-                                    borderRadius: BorderRadius.circular(9),
-                                  ),
-                                  child: IconButton(
-                                      tooltip: c.noteMode ? '保存备注' : '发送',
-                                      style: IconButton.styleFrom(
-                                        backgroundColor: Colors.transparent,
-                                        foregroundColor: active
-                                            ? Colors.white
-                                            : s.onSurfaceVariant,
-                                        disabledBackgroundColor:
-                                            Colors.transparent,
-                                        disabledForegroundColor: active
-                                            ? Colors.white
-                                            : s.onSurfaceVariant,
-                                        shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(9)),
-                                      ),
-                                      onPressed: canSend ? c.onSend : null,
-                                      icon: busy
-                                          ? const SizedBox(
-                                              width: 18,
-                                              height: 18,
-                                              child: CircularProgressIndicator(
-                                                  strokeWidth: 2,
-                                                  color: Colors.white))
-                                          : Icon(
-                                              c.noteMode
-                                                  ? Icons.check
-                                                  : Icons.arrow_upward,
-                                              size: 22,
-                                              color: active
-                                                  ? Colors.white
-                                                  : s.onSurfaceVariant,
-                                            ))));
-                        }),
-                  ]),
-                  if (_emojiOpen)
-                    Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: ComposerEmojiPanel(onPick: _insert)),
-                  if (_tools)
-                    Padding(
-                        padding: const EdgeInsets.only(top: 18, bottom: 6),
-                        child: Wrap(spacing: 10, runSpacing: 16, children: [
-                          tool(
-                              Icons.image_outlined,
-                              '图片',
-                              c.uploading || c.lockPublicReply
-                                  ? null
-                                  : () {
-                                      c.onPickImage();
-                                    },
-                              accent: RelayTheme.teal,
-                              soft: RelayTheme.tealSoft),
-                          if (c.supportsFiles)
-                            tool(
-                                Icons.insert_drive_file_outlined,
-                                '文件',
-                                c.uploading || c.lockPublicReply
-                                    ? null
-                                    : () {
-                                        c.onPickFile();
-                                      },
-                                accent: RelayTheme.blue,
-                                soft: RelayTheme.blueSoft),
-                          SizedBox(
-                              width: 66,
-                              child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Container(
-                                        width: 48,
-                                        height: 48,
-                                        decoration: BoxDecoration(
-                                            color: RelayTheme.magentaSoft,
-                                            borderRadius:
-                                                BorderRadius.circular(12)),
-                                        child: IconTheme(
-                                            data: const IconThemeData(
-                                                color: RelayTheme.magenta,
-                                                size: 23),
-                                            child: c.voiceControl)),
-                                    const SizedBox(height: 5),
-                                    const Text('语音',
-                                        style: TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w600,
-                                            color: RelayTheme.magenta))
-                                  ])),
-                          if (c.canned.isNotEmpty)
-                            tool(Icons.bolt_outlined, '常用回复', () {
-                              MobileCannedBottomSheet.show(
-                                context: context,
-                                canned: c.canned,
-                                onSelect: (selected) {
-                                  c.controller.text = selected;
-                                  c.controller.selection =
-                                      TextSelection.collapsed(
-                                          offset: selected.length);
-                                  c.onChanged(selected);
-                                  setState(() => _tools = false);
-                                  c.focusNode.requestFocus();
-                                },
-                              );
-                            },
-                                accent: RelayTheme.amber,
-                                soft: RelayTheme.amberSoft),
-                          tool(Icons.edit_note_outlined, '内部备注', () {
-                            c.onToggleNote(true);
-                            setState(() => _tools = false);
+      color: background,
+      child: Container(
+        key: const ValueKey('mobile-composer'),
+        padding: EdgeInsets.fromLTRB(8, 8, 8, 8 + bottomInset),
+        decoration: BoxDecoration(
+          color: background,
+          border: Border(
+              top: BorderSide(color: s.outlineVariant.withValues(alpha: .55))),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (c.statusHint != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8, left: 4, right: 4),
+                child: Text(
+                  c.statusHint!,
+                  style: TextStyle(fontSize: 12, color: s.onSurfaceVariant),
+                ),
+              ),
+            if (c.uploadError != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6, left: 4),
+                child: Text(c.uploadError!,
+                    style: TextStyle(color: s.error, fontSize: 12)),
+              ),
+            if (c.noteMode)
+              Row(children: [
+                const Expanded(
+                  child: Text(
+                    '内部备注 · 仅团队可见',
+                    style: TextStyle(fontSize: 12, color: RelayTheme.violet),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => c.onToggleNote(false),
+                  child: const Text('取消'),
+                ),
+              ]),
+            if (c.quote != null)
+              Row(children: [
+                const Icon(Icons.reply, size: 16),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '回复 ${c.quote!.senderName}：${c.quote!.content}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+                IconButton(
+                  tooltip: '取消引用',
+                  onPressed: c.onClearQuote,
+                  icon: const Icon(Icons.close, size: 16),
+                ),
+              ]),
+            if (c.pending.isNotEmpty)
+              Wrap(spacing: 6, children: [
+                for (final a in c.pending)
+                  InputChip(
+                    label: Text(a.fileName),
+                    onDeleted: () => c.onRemovePending(a.id),
+                  ),
+              ]),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                IconButton(
+                  style: IconButton.styleFrom(
+                    minimumSize: const Size(44, 44),
+                    fixedSize: const Size(44, 44),
+                    // 主题整体是 compact（-8 高），这里要精确 44 才能和访客端对齐。
+                    visualDensity: VisualDensity.standard,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    padding: EdgeInsets.zero,
+                  ),
+                  tooltip: _voiceMode ? '键盘' : '语音',
+                  onPressed: voiceEnabled
+                      ? () {
+                          final next = !_voiceMode;
+                          if (next) {
+                            c.focusNode.unfocus();
+                            setState(() {
+                              _voiceMode = true;
+                              _tools = false;
+                              _emojiOpen = false;
+                            });
+                          } else {
+                            setState(() => _voiceMode = false);
                             c.focusNode.requestFocus();
-                          },
-                              accent: RelayTheme.violet,
-                              soft: RelayTheme.violetSoft),
-                        ])),
-                ])));
+                          }
+                        }
+                      : null,
+                  icon: Icon(
+                    _voiceMode
+                        ? Icons.keyboard_outlined
+                        : Icons.mic_none_outlined,
+                    size: 24,
+                    color: voiceEnabled ? RelayTheme.magenta : s.outline,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _voiceMode
+                      ? VoiceHoldButton(
+                          enabled: voiceEnabled,
+                          onRecorded: c.onHoldVoice,
+                          onError: c.onVoiceError,
+                        )
+                      : Container(
+                          constraints: const BoxConstraints(minHeight: 44),
+                          decoration: BoxDecoration(
+                            color: s.surface,
+                            borderRadius: BorderRadius.circular(9),
+                            border: Border.all(
+                                color: s.outlineVariant.withValues(alpha: .6)),
+                          ),
+                          child: TextField(
+                            controller: c.controller,
+                            focusNode: c.focusNode,
+                            minLines: 1,
+                            maxLines: 5,
+                            onChanged: c.onChanged,
+                            textInputAction: TextInputAction.newline,
+                            keyboardType: TextInputType.multiline,
+                            style: withWebEmojiFallback(
+                                const TextStyle(fontSize: 15, height: 1.6)),
+                            decoration: InputDecoration(
+                              hintText: c.noteMode
+                                  ? '添加内部备注…'
+                                  : c.lockPublicReply
+                                      ? '请先完成接待或转派'
+                                      : c.visitorTyping
+                                          ? '对方正在输入…'
+                                          : '输入消息…',
+                              isDense: true,
+                              filled: false,
+                              border: InputBorder.none,
+                              enabledBorder: InputBorder.none,
+                              focusedBorder: InputBorder.none,
+                              contentPadding:
+                                  const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                            ),
+                          ),
+                        ),
+                ),
+                const SizedBox(width: 8),
+                ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: c.controller,
+                  builder: (context, value, _) {
+                    final busy = c.sending || c.uploading;
+                    final hasPayload =
+                        value.text.trim().isNotEmpty || c.pending.isNotEmpty;
+                    // 与访客端一致：语音模式下右侧固定为「+」，不出发送。
+                    final showSend = !_voiceMode && (hasPayload || busy);
+                    if (!showSend) {
+                      return IconButton(
+                        style: IconButton.styleFrom(
+                          minimumSize: const Size(44, 44),
+                          fixedSize: const Size(44, 44),
+                          visualDensity: VisualDensity.standard,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          padding: EdgeInsets.zero,
+                        ),
+                        tooltip: _tools ? '收起工具' : '展开工具',
+                        onPressed: () {
+                          c.focusNode.unfocus();
+                          setState(() {
+                            _tools = !_tools;
+                            if (_tools) _emojiOpen = false;
+                          });
+                        },
+                        icon: Icon(
+                          _tools ? Icons.close : Icons.add_circle_outline,
+                          size: 24,
+                          color: iconColor,
+                        ),
+                      );
+                    }
+                    final canSend = !busy && !c.lockPublicReply && hasPayload;
+                    return Tooltip(
+                      message: c.noteMode ? '保存备注' : '发送',
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          // 借微信「+」的位置，主色仍是项目蓝渐变。
+                          gradient: canSend || busy
+                              ? RelayTheme.actionGradient
+                              : null,
+                          color: canSend || busy
+                              ? null
+                              : s.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: FilledButton(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: Colors.transparent,
+                            foregroundColor: Colors.white,
+                            disabledBackgroundColor: Colors.transparent,
+                            disabledForegroundColor:
+                                busy ? Colors.white : s.onSurfaceVariant,
+                            shadowColor: Colors.transparent,
+                            minimumSize: const Size(58, 44),
+                            visualDensity: VisualDensity.standard,
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          onPressed: canSend ? c.onSend : null,
+                          child: busy
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : Text(c.noteMode ? '保存' : '发送',
+                                  style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600)),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+            if (_emojiOpen)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: ComposerEmojiPanel(onPick: _insert),
+              ),
+            if (_tools)
+              Padding(
+                padding: const EdgeInsets.only(top: 16, bottom: 4),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    const gap = 12.0;
+                    final width = (constraints.maxWidth - gap * 3) / 4;
+                    final blocked = c.uploading || c.lockPublicReply;
+                    final tiles = <Widget>[
+                      tool(
+                        Icons.sentiment_satisfied_alt_outlined,
+                        '表情',
+                        () {
+                          c.focusNode.unfocus();
+                          setState(() {
+                            _emojiOpen = !_emojiOpen;
+                            if (_emojiOpen) {
+                              _tools = false;
+                              _voiceMode = false;
+                            }
+                          });
+                        },
+                        accent: RelayTheme.amber,
+                        soft: RelayTheme.amberSoft,
+                      ),
+                      tool(Icons.photo_outlined, '相册',
+                          blocked ? null : c.onPickImage,
+                          accent: RelayTheme.teal, soft: RelayTheme.tealSoft),
+                      tool(Icons.photo_camera_outlined, '拍摄',
+                          blocked ? null : c.onPickCamera,
+                          accent: RelayTheme.violet,
+                          soft: RelayTheme.violetSoft),
+                      if (c.supportsFiles)
+                        tool(Icons.folder_outlined, '文件',
+                            blocked ? null : c.onPickFile,
+                            accent: RelayTheme.blue, soft: RelayTheme.blueSoft),
+                      if (c.canned.isNotEmpty)
+                        tool(Icons.chat_bubble_outline, '常用回复', () {
+                          MobileCannedBottomSheet.show(
+                            context: context,
+                            canned: c.canned,
+                            onSelect: (selected) {
+                              c.controller.text = selected;
+                              c.controller.selection = TextSelection.collapsed(
+                                  offset: selected.length);
+                              c.onChanged(selected);
+                              setState(() {
+                                _tools = false;
+                                _voiceMode = false;
+                              });
+                              c.focusNode.requestFocus();
+                            },
+                          );
+                        },
+                            accent: RelayTheme.magenta,
+                            soft: RelayTheme.magentaSoft),
+                      tool(
+                        Icons.edit_outlined,
+                        '内部备注',
+                        () {
+                          c.onToggleNote(true);
+                          setState(() {
+                            _tools = false;
+                            _voiceMode = false;
+                          });
+                          c.focusNode.requestFocus();
+                        },
+                        accent: RelayTheme.blueDeep,
+                        soft: RelayTheme.blueSoft,
+                      ),
+                    ];
+                    return Wrap(
+                      spacing: gap,
+                      runSpacing: 16,
+                      children: [
+                        for (final tile in tiles)
+                          SizedBox(width: width, child: tile),
+                      ],
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'alert_enable_banner.dart';
+import 'alert_enable_card.dart';
 import 'pwa_panel.dart';
 import 'package:tongyu_agent_console/src/util/host_session.dart';
 import '../util/message_alert_stub.dart'
@@ -794,6 +795,8 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
               child: _bodyFor(useRail ? width - 78 : width),
             );
             final body = Column(children: [
+              // 居中引导卡只在浏览器、且确实缺权限或推送时弹一次；横幅继续做持续提醒。
+              if (!isHostedConsole) AlertEnableCardHost(api: widget.session.api),
               if (!isHostedConsole) AlertEnableBanner(api: widget.session.api),
               if (!isHostedConsole)
                 PwaPanel(

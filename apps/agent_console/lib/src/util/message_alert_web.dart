@@ -227,6 +227,27 @@ bool get notificationPermissionMissing {
   return html.Notification.permission != 'granted';
 }
 
+/// 浏览器通知权限：granted / denied / default / unsupported。
+/// denied 之后 JS 无法再弹授权框，只能引导用户去站点或系统设置里改。
+String get notificationPermission {
+  if (!html.Notification.supported) return 'unsupported';
+  return html.Notification.permission ?? 'default';
+}
+
+/// 主动请求通知权限。必须由点击事件触发，否则 Safari 会丢弃手势授权。
+Future<String> requestNotificationPermission() async {
+  if (!html.Notification.supported) return 'unsupported';
+  final current = html.Notification.permission ?? 'default';
+  if (current != 'default') return current;
+  try {
+    return await html.Notification.requestPermission().timeout(
+        const Duration(seconds: 8),
+        onTimeout: () => html.Notification.permission ?? 'default');
+  } catch (_) {
+    return html.Notification.permission ?? 'default';
+  }
+}
+
 void _publishDeskAlerts() {
   final next = _deskGrantedNow();
   if (_deskAlerts.value != next) _deskAlerts.value = next;
@@ -389,6 +410,7 @@ class _AlertSettingsState extends State<_AlertSettings> {
                       _publishDeskAlerts();
                     }
                     setState(() => _status = message);
+                    notifyPushStateChanged();
                     return;
                   }
                   if (!html.Notification.supported) {
@@ -411,6 +433,7 @@ class _AlertSettingsState extends State<_AlertSettings> {
                   final message = await enableBackgroundPush(api);
                   if (!mounted) return;
                   setState(() => _status = message);
+                  notifyPushStateChanged();
                 }),
           ]));
 }

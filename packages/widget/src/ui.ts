@@ -437,22 +437,19 @@ export class WidgetView {
           <span class="rd-reply-body"><strong></strong><small></small></span>
           <button type="button" class="rd-icon rd-reply-close" title="取消引用">${ICONS.close}</button>
         </div>
-        <div class="rd-composer-toolbar" aria-label="消息工具">
-          <button type="button" class="rd-icon rd-emoji-toggle" title="表情" aria-label="表情" aria-expanded="false">${ICONS.smile}</button>
-          <button type="button" class="rd-icon rd-more-toggle" title="图片和文件" aria-label="图片和文件" aria-expanded="false">${ICONS.plus}</button>
-          <button type="button" class="rd-icon rd-mic" title="语音" aria-label="语音" aria-pressed="false" hidden>${ICONS.mic}</button>
-        </div>
         <div class="rd-composer-row">
+          <button type="button" class="rd-icon rd-mic" title="语音" aria-label="语音" aria-pressed="false" hidden>${ICONS.mic}</button>
           <textarea class="rd-input" rows="1" placeholder="${escapeAttr(this.#options.placeholder)}" maxlength="4000"></textarea>
           <button type="button" class="rd-hold" hidden aria-live="polite" aria-label="按住说话">按住 说话</button>
-          <button type="submit" class="rd-send" title="发送" aria-label="发送消息" ${this.#options.theme === 'dark' ? 'hidden' : ''} disabled>发送</button>
+          <button type="submit" class="rd-send" title="发送" aria-label="发送消息" hidden disabled>发送</button>
+          <button type="button" class="rd-icon rd-more-toggle" title="图片和文件" aria-label="图片和文件" aria-expanded="false">${ICONS.plus}</button>
         </div>
         <div class="rd-tools" hidden>
+          <button type="button" class="rd-tool rd-emoji-toggle"><span>${ICONS.smile}</span>表情</button>
           <button type="button" class="rd-tool" data-picker="image"><span>${ICONS.image}</span>图片</button>
           <button type="button" class="rd-tool" data-picker="camera"><span>${ICONS.camera}</span>拍照</button>
           <button type="button" class="rd-tool" data-picker="file"><span>${ICONS.clip}</span>文件</button>
           <button type="button" class="rd-tool rd-history"><span>${ICONS.search}</span>聊天记录</button>
-          <p class="rd-tools-hint">图片和文件选择后发送，请勿上传密码等敏感信息</p>
         </div>
         <div class="rd-emojis" aria-label="选择表情" hidden><div class="rd-emoji-tabs" role="tablist" aria-label="表情分类"><button type="button" role="tab" aria-selected="true" data-emoji-category="0">笑脸</button><button type="button" role="tab" aria-selected="false" data-emoji-category="1">心情</button><button type="button" role="tab" aria-selected="false" data-emoji-category="2">手势</button><button type="button" role="tab" aria-selected="false" data-emoji-category="3">日常</button></div><div class="rd-emoji-grid" data-emoji-group="0"><button type="button" class="rd-emoji" aria-label="😀">😀</button><button type="button" class="rd-emoji" aria-label="😃">😃</button><button type="button" class="rd-emoji" aria-label="😄">😄</button><button type="button" class="rd-emoji" aria-label="😁">😁</button><button type="button" class="rd-emoji" aria-label="😆">😆</button><button type="button" class="rd-emoji" aria-label="😅">😅</button><button type="button" class="rd-emoji" aria-label="😂">😂</button><button type="button" class="rd-emoji" aria-label="🤣">🤣</button><button type="button" class="rd-emoji" aria-label="😊">😊</button><button type="button" class="rd-emoji" aria-label="🙂">🙂</button><button type="button" class="rd-emoji" aria-label="🙃">🙃</button><button type="button" class="rd-emoji" aria-label="😉">😉</button><button type="button" class="rd-emoji" aria-label="😌">😌</button><button type="button" class="rd-emoji" aria-label="😍">😍</button><button type="button" class="rd-emoji" aria-label="🥰">🥰</button><button type="button" class="rd-emoji" aria-label="😘">😘</button><button type="button" class="rd-emoji" aria-label="😋">😋</button><button type="button" class="rd-emoji" aria-label="😛">😛</button><button type="button" class="rd-emoji" aria-label="😜">😜</button><button type="button" class="rd-emoji" aria-label="🤪">🤪</button><button type="button" class="rd-emoji" aria-label="🤔">🤔</button><button type="button" class="rd-emoji" aria-label="🤭">🤭</button><button type="button" class="rd-emoji" aria-label="🤫">🤫</button><button type="button" class="rd-emoji" aria-label="🫡">🫡</button></div><div class="rd-emoji-grid" data-emoji-group="1" hidden><button type="button" class="rd-emoji" aria-label="😎">😎</button><button type="button" class="rd-emoji" aria-label="🤩">🤩</button><button type="button" class="rd-emoji" aria-label="🥳">🥳</button><button type="button" class="rd-emoji" aria-label="😏">😏</button><button type="button" class="rd-emoji" aria-label="😒">😒</button><button type="button" class="rd-emoji" aria-label="😔">😔</button><button type="button" class="rd-emoji" aria-label="😢">😢</button><button type="button" class="rd-emoji" aria-label="😭">😭</button><button type="button" class="rd-emoji" aria-label="😤">😤</button><button type="button" class="rd-emoji" aria-label="😠">😠</button><button type="button" class="rd-emoji" aria-label="😡">😡</button><button type="button" class="rd-emoji" aria-label="🤯">🤯</button><button type="button" class="rd-emoji" aria-label="😳">😳</button><button type="button" class="rd-emoji" aria-label="🥺">🥺</button><button type="button" class="rd-emoji" aria-label="😱">😱</button><button type="button" class="rd-emoji" aria-label="😨">😨</button><button type="button" class="rd-emoji" aria-label="😰">😰</button><button type="button" class="rd-emoji" aria-label="😥">😥</button><button type="button" class="rd-emoji" aria-label="😓">😓</button><button type="button" class="rd-emoji" aria-label="🤗">🤗</button><button type="button" class="rd-emoji" aria-label="🥱">🥱</button><button type="button" class="rd-emoji" aria-label="😴">😴</button><button type="button" class="rd-emoji" aria-label="😷">😷</button><button type="button" class="rd-emoji" aria-label="🤒">🤒</button></div><div class="rd-emoji-grid" data-emoji-group="2" hidden><button type="button" class="rd-emoji" aria-label="👍">👍</button><button type="button" class="rd-emoji" aria-label="👎">👎</button><button type="button" class="rd-emoji" aria-label="👏">👏</button><button type="button" class="rd-emoji" aria-label="🙌">🙌</button><button type="button" class="rd-emoji" aria-label="👐">👐</button><button type="button" class="rd-emoji" aria-label="🤝">🤝</button><button type="button" class="rd-emoji" aria-label="🙏">🙏</button><button type="button" class="rd-emoji" aria-label="💪">💪</button><button type="button" class="rd-emoji" aria-label="👌">👌</button><button type="button" class="rd-emoji" aria-label="✌️">✌️</button><button type="button" class="rd-emoji" aria-label="🤞">🤞</button><button type="button" class="rd-emoji" aria-label="🤟">🤟</button><button type="button" class="rd-emoji" aria-label="🤘">🤘</button><button type="button" class="rd-emoji" aria-label="🤙">🤙</button><button type="button" class="rd-emoji" aria-label="👋">👋</button><button type="button" class="rd-emoji" aria-label="🤚">🤚</button><button type="button" class="rd-emoji" aria-label="✋">✋</button><button type="button" class="rd-emoji" aria-label="🖐️">🖐️</button><button type="button" class="rd-emoji" aria-label="👊">👊</button><button type="button" class="rd-emoji" aria-label="✊">✊</button><button type="button" class="rd-emoji" aria-label="🤛">🤛</button><button type="button" class="rd-emoji" aria-label="🤜">🤜</button><button type="button" class="rd-emoji" aria-label="🙋">🙋</button><button type="button" class="rd-emoji" aria-label="🫶">🫶</button></div><div class="rd-emoji-grid" data-emoji-group="3" hidden><button type="button" class="rd-emoji" aria-label="❤️">❤️</button><button type="button" class="rd-emoji" aria-label="🧡">🧡</button><button type="button" class="rd-emoji" aria-label="💛">💛</button><button type="button" class="rd-emoji" aria-label="💚">💚</button><button type="button" class="rd-emoji" aria-label="💙">💙</button><button type="button" class="rd-emoji" aria-label="💜">💜</button><button type="button" class="rd-emoji" aria-label="🖤">🖤</button><button type="button" class="rd-emoji" aria-label="🤍">🤍</button><button type="button" class="rd-emoji" aria-label="💕">💕</button><button type="button" class="rd-emoji" aria-label="💖">💖</button><button type="button" class="rd-emoji" aria-label="💯">💯</button><button type="button" class="rd-emoji" aria-label="✅">✅</button><button type="button" class="rd-emoji" aria-label="🎉">🎉</button><button type="button" class="rd-emoji" aria-label="🎊">🎊</button><button type="button" class="rd-emoji" aria-label="🎁">🎁</button><button type="button" class="rd-emoji" aria-label="🌹">🌹</button><button type="button" class="rd-emoji" aria-label="🌸">🌸</button><button type="button" class="rd-emoji" aria-label="☀️">☀️</button><button type="button" class="rd-emoji" aria-label="🌈">🌈</button><button type="button" class="rd-emoji" aria-label="⭐">⭐</button><button type="button" class="rd-emoji" aria-label="🔥">🔥</button><button type="button" class="rd-emoji" aria-label="☕">☕</button><button type="button" class="rd-emoji" aria-label="🍰">🍰</button><button type="button" class="rd-emoji" aria-label="🎈">🎈</button></div></div>
         <div class="rd-upload-status" role="status" hidden></div>
@@ -533,7 +530,6 @@ export class WidgetView {
       this.#toolsNode!.hidden = true;
       this.#emojiNode!.hidden = true;
       more.setAttribute('aria-expanded', 'false');
-      emojiToggle.setAttribute('aria-expanded', 'false');
     };
     // 点消息区空白（或气泡外区域）收起「+」工具栏 / 表情面板，对齐常见 IM 交互。
     const thread = panel.querySelector('.rd-thread') as HTMLDivElement;
@@ -558,13 +554,13 @@ export class WidgetView {
       this.#toolsNode!.hidden = !open;
       more.setAttribute('aria-expanded', String(open));
     });
+    // 表情入口在「+」面板里（对齐微信）；点开表情时收起工具格。
     emojiToggle.addEventListener('click', () => {
       if (this.#voiceMode) this.#setVoiceMode(false);
-      const open = this.#emojiNode!.hidden;
-      if (open) this.#input?.blur();
+      if (this.#input) this.#input.blur();
       closePanels();
-      this.#emojiNode!.hidden = !open;
-      emojiToggle.setAttribute('aria-expanded', String(open));
+      this.#toolsNode!.hidden = true;
+      this.#emojiNode!.hidden = false;
     });
     panel.querySelectorAll<HTMLButtonElement>('[data-picker]').forEach(button => button.addEventListener('click', () => {
       const picker = panel.querySelector<HTMLInputElement>(`input[data-kind="${button.dataset.picker}"]`);
@@ -784,16 +780,12 @@ export class WidgetView {
     const hasText = Boolean(this.#input?.value.trim());
     const send = this.#composer?.querySelector<HTMLButtonElement>('.rd-send');
     const more = this.#composer?.querySelector<HTMLButtonElement>('.rd-more-toggle');
-    if (this.#voiceMode) {
-      if (send) send.hidden = true;
-      if (more) more.hidden = false;
-      return;
-    }
+    // 微信逻辑：有文字时「+」换成「发送」；语音模式下「+」常驻。
     if (send) {
-      send.hidden = this.#options.theme === 'dark' && !hasText;
+      send.hidden = this.#voiceMode || !hasText;
       send.disabled = !hasText;
     }
-    if (more) more.hidden = this.#options.theme === 'dark' && hasText;
+    if (more) more.hidden = hasText && !this.#voiceMode;
   }
 
   #syncLauncher(snapshot: Snapshot): void {
@@ -2408,18 +2400,18 @@ ${this.#options.embedded ? `
 .rd-item-main small { color: ${light ? '#7a8091' : '#9aa0ad'}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 210px; }
 .rd-item-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: 11px; color: ${light ? '#939aab' : '#8b91a0'}; }
 .rd-dot { min-width: 18px; height: 18px; border-radius: 999px; background: #ff4d4f; color: #fff; font: 600 11px/18px system-ui; text-align: center; padding: 0 5px; }
-.rd-composer { display: flex; flex-direction: column; border-top: 1px solid ${light ? '#f3f4f6' : '#2b2f37'}; background: ${light ? '#ffffff' : '#1e1f24'}; }
+/* 单行输入栏格局对齐微信：左语音、中输入框、右「+」；有文字时「+」换成「发送」。配色仍走企业主色与主题。 */
+.rd-composer { display: flex; flex-direction: column; border-top: 1px solid ${light ? '#e9edf3' : '#303848'}; background: ${light ? '#ffffff' : '#1e1f24'}; }
 .rd-composer[hidden] { display: none; }
-.rd-composer-row { display: flex; align-items: flex-end; gap: 8px; padding: 12px 16px; }
-.rd-composer-row { align-items: center; gap: 6px; padding: 10px 12px; background: ${light ? '#f5f6f7' : '#1e1f24'}; }
-.rd-composer-row .rd-icon { flex: none; width: 34px; height: 40px; padding: 5px; background: transparent; color: ${light ? '#39433f' : '#d1d5db'}; }
-.rd-composer-row .rd-icon svg { width: 25px; height: 25px; }
+.rd-composer-row { display: flex; align-items: flex-end; gap: 8px; padding: 8px; background: ${light ? '#ffffff' : '#1e1f24'}; }
+.rd-composer-row .rd-icon { flex: none; width: 44px; height: 44px; padding: 0; border-radius: 8px; background: transparent; color: ${light ? '#646A73' : '#d1d5db'}; }
+.rd-composer-row .rd-icon svg { width: 24px; height: 24px; }
+.rd-composer-row .rd-icon:hover { background: ${light ? '#f0f3f8' : '#303848'}; color: ${light ? '#646A73' : '#d1d5db'}; }
 .rd-tools { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px 8px; padding: 22px 16px 16px; background: ${light ? '#f5f6f7' : '#1e1f24'}; border-top: 1px solid ${light ? '#e8ebed' : '#374151'}; }
 .rd-tool { display: flex; flex-direction: column; align-items: center; gap: 9px; border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; font-size: 12px; }
 .rd-tool span { display: grid; place-items: center; width: 54px; height: 54px; background: ${light ? '#ffffff' : '#2b3038'}; border-radius: 14px; border: 1px solid ${light ? '#eceeef' : '#374151'}; }
 .rd-tool svg { width: 26px; height: 26px; }
 .rd-tool:hover span { border-color: ${accent}; }
-.rd-tools-hint { grid-column: 1 / -1; margin: 0; font-size: 11px; text-align: center; color: ${light ? '#858d97' : '#a8aebb'}; line-height: 1.6; }
 .rd-upload-status { padding: 4px 16px 10px; font-size: 12px; color: ${accent}; }
 .rd-emojis { flex-shrink: 0; height: 202px; box-sizing: border-box; contain: layout paint; padding: 8px 12px; background: ${light ? '#f5f6f7' : '#1e1f24'}; }
 .rd-emoji-tabs { display:flex; gap:8px; margin-bottom:8px; }
@@ -2431,8 +2423,8 @@ ${this.#options.embedded ? `
 .rd-tools { flex-shrink:0; contain:layout paint; }
 .rd-emoji { border: 0; border-radius: 8px; background: transparent; padding: 6px 0; font-size: 24px; cursor: pointer; }
 .rd-emoji:hover { background: ${light ? '#e7ebed' : '#374151'}; }
-.rd-composer-row .rd-input { min-width: 0; border: 0; border-radius: 8px; background: ${light ? '#ffffff' : '#111827'}; padding: 10px; font-size: 15px; }
-.rd-composer-row .rd-send { width: 52px; font: 500 13px system-ui; border-radius: 8px; }
+.rd-composer-row .rd-input { flex: 1 1 0%; width: 0; min-width: 0; min-height: 44px; max-height: 120px; border: 1px solid ${light ? '#e9edf3' : '#303848'}; border-radius: 8px; background: ${light ? '#ffffff' : '#222733'}; padding: 10px 12px; font-size: 15px; line-height: 20px; }
+.rd-composer-row .rd-input:focus { border-color: ${accent}; }
 .rd-composer { padding-bottom: env(safe-area-inset-bottom, 0px); }
 .rd-panel.is-keyboard .rd-composer { padding-bottom: 0; }
 .rd-reply { display: flex; align-items: center; gap: 8px; padding: 8px 16px 0; font-size: 12px; color: ${light ? '#6b7280' : '#9ca3af'}; }
@@ -2447,21 +2439,21 @@ ${this.#options.embedded ? `
   overflow-x: hidden; overflow-y: hidden;
   /* 保留长草稿滚动，隐藏右侧滚动条，避免被误认为第二个输入光标。 */
   scrollbar-width: none;
-  flex: 1; resize: none; border: 1px solid ${light ? '#e5e7eb' : '#374151'}; border-radius: 14px; padding: 10px 14px;
-  font: inherit; line-height: 1.5; max-height: 120px; background: ${light ? '#f9fafb' : '#111827'}; color: inherit; outline: none; transition: background-color 0.12s, color 0.12s, border-color 0.12s;
+  flex: 1; resize: none; color: inherit; outline: none; font: inherit;
+  transition: background-color 0.12s, color 0.12s, border-color 0.12s;
+  /* 边框、聚焦主色等外观统一见 .rd-composer-row .rd-input。 */
 }
 .rd-input::-webkit-scrollbar { width: 0; height: 0; display: none; }
 .rd-input::-webkit-scrollbar-button { width: 0; height: 0; display: none; }
-.rd-input:focus { border-color: ${accent}; background: ${light ? '#ffffff' : '#111827'}; }
 .rd-send {
-  display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex: none;
-  border: 0; border-radius: 6px; background: var(--rd-accent, ${accent}); color: var(--rd-accent-ink, ${accentInk}); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 58px; width: 58px; height: 44px;
+  border: 0; border-radius: 8px; background: var(--rd-accent, ${accent}); color: var(--rd-accent-ink, ${accentInk}); font: 500 14px/1 var(--rd-font); cursor: pointer;
 }
 .rd-send:hover:not(:disabled) { filter: brightness(1.05); }
 .rd-send svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
 .rd-send:disabled { opacity: .4; cursor: not-allowed; }
 .rd-hold {
-  display: flex; align-items: center; justify-content: center; flex: 1 1 auto; min-width: 0; height: 42px; padding: 0;
+  display: flex; align-items: center; justify-content: center; flex: 1 1 0%; width: 0; min-width: 0; height: 44px; padding: 0;
   border: 1px solid ${light ? '#e5e6eb' : '#3a4150'}; border-radius: 8px;
   background: ${light ? '#ffffff' : '#2a3140'}; color: ${light ? '#1f2329' : '#eef2f1'};
   font: 500 16px/1 var(--rd-font); cursor: pointer; user-select: none; -webkit-user-select: none;
@@ -2566,14 +2558,8 @@ ${this.#options.launcher === 'bubble' ? '.rd-launcher-label { display: none; }' 
 .rd-image img { border-radius: 8px; min-width: 120px; min-height: 90px; }
 .rd-time { color: #8F959E; font-size: 11px; }
 .rd-day, .rd-time-separator { align-self: center; color: #8F959E; font-size: 12px; margin: 2px 0; }
-.rd-composer { border-color: #E5E8EF; }
-.rd-composer-row { padding: 10px 12px; gap: 6px; background: #fff; }
-.rd-composer-row .rd-icon { width: 30px; height: 36px; color: #646A73; }
-.rd-composer-row .rd-icon svg { width: 24px; height: 24px; }
-.rd-composer-row .rd-input { border: 1px solid #E5E8EF; border-radius: 20px; padding: 8px 12px; font-size: 14px; line-height: 20px; background: #fff; }
+/* composer 的格局统一在基础层定义，这里只补浅色主题的占位色。 */
 .rd-input::placeholder { color: #8F959E; }
-.rd-composer-row .rd-input:focus { border-color: ${accent}; }
-.rd-composer-row .rd-send { width: 60px; height: 36px; border-radius: 18px; font: 500 14px "Microsoft YaHei", sans-serif; }
 /* iPhone 嵌入：父页 viewport-fit=cover 时 iframe 能读到 safe-area；宿主不垫顶，顶栏必须自己让出，否则与状态栏重叠。 */
 .is-embedded .rd-header { position: relative; min-height: 56px; padding: calc(6px + env(safe-area-inset-top, 0px)) 12px 6px; }
 .is-embedded .rd-header-main { margin: 0 auto; max-width: calc(100% - 88px); text-align: center; }
@@ -2589,7 +2575,6 @@ ${this.#options.launcher === 'bubble' ? '.rd-launcher-label { display: none; }' 
   .rd-panel:not(.is-embedded) { bottom: 0; height: 100dvh; }
   .rd-panel:not(.is-embedded) .rd-header { min-height: 56px; }
   .rd-messages { padding: 12px; gap: 14px; }
-  .rd-composer-row { padding: 8px 10px; }
 }
 ` : ''}
 /* 与坐席工作台统一的外观；企业主色、嵌入模式和全部功能继续由配置驱动。 */
@@ -2606,18 +2591,8 @@ ${this.#options.launcher === 'bubble' ? '.rd-launcher-label { display: none; }' 
 .rd-bubble { background: ${light ? '#ffffff' : '#2a2f38'}; padding: 12px 15px; border-color: ${light ? '#e9edf3' : '#303848'}; box-shadow: none; border-radius: 2px 10px 10px 10px; }
 .rd-row.is-mine .rd-bubble { background: ${light ? accent + '12' : accent}; color: ${light ? '#202b3d' : '#fff'}; border-color: ${light ? accent + '20' : accent}; border-radius: 10px 2px 10px 10px; }
 .rd-avatar.sm { border-radius: 10px; }
-.rd-composer { border-color: ${light ? '#e9edf3' : '#303848'}; }
-.rd-composer-row .rd-input { border-radius: 8px; border-color: ${light ? '#e9edf3' : '#303848'}; background: ${light ? '#fff' : '#222733'}; }
-.rd-composer-row .rd-send { border-radius: 7px; font-size: 12px; }
 .is-embedded.rd-panel { border-radius: 0; }
-.rd-composer-toolbar { display:flex; align-items:center; gap:8px; padding:6px 12px 0; }
-.rd-composer-toolbar .rd-icon { width:32px; height:32px; padding:6px; color:${light ? '#646A73' : '#d1d5db'}; background:transparent; border-radius:6px; }
-.rd-composer-toolbar .rd-icon svg { width:20px; height:20px; }
-.rd-composer-toolbar .rd-icon:hover { background:${light ? '#f0f3f8' : '#303848'}; }
-.rd-composer-row { align-items:flex-end; gap:10px; padding:6px 12px 12px; min-width:0; }
-.rd-composer-row .rd-input { flex:1 1 0%; width:0; min-width:0; min-height:42px; padding:10px 12px; line-height:20px; border-radius:8px; }
-.rd-composer-row .rd-hold { flex:1 1 0%; width:0; min-width:0; height:42px; border-radius:8px; }
-.rd-composer-row .rd-send { flex:0 0 60px; width:60px; height:42px; border-radius:8px; font-size:14px; }
+/* composer（rd-composer / rd-composer-row / rd-input / rd-hold / rd-send）只在基础层定义，避免多处覆盖；配色仍由企业主色驱动。 */
 @media (max-width: 480px) { .rd-panel:not(.is-embedded) { width: 100vw; border-radius: 0; } .rd-header { padding: 14px 16px; } }
 `;
   }

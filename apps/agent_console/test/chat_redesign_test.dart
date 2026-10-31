@@ -17,6 +17,8 @@ class _Picker implements AttachmentPicker {
   @override
   Future<PickedAttachment?> pickImage() async => null;
   @override
+  Future<PickedAttachment?> pickCamera() async => null;
+  @override
   Future<PickedAttachment?> pickFile() async => null;
 }
 
@@ -154,10 +156,18 @@ void main() {
           ))));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      if(width>=760) expect(find.text('回复客户'), findsOneWidget);
+      if (width >= 760)
+        expect(find.text('回复客户'), findsOneWidget);
       else {
-        expect(tester.getSize(find.byKey(const ValueKey('mobile-composer'))).height,lessThan(160));
-        await tester.tap(find.byTooltip('展开工具')); await tester.pumpAndSettle();
+        expect(
+            tester
+                .getSize(find.byKey(const ValueKey('mobile-composer')))
+                .height,
+            lessThan(160));
+        await tester.tap(find.byTooltip('展开工具'));
+        await tester.pumpAndSettle();
+        expect(find.text('相册'), findsOneWidget);
+        expect(find.text('拍摄'), findsOneWidget);
       }
       final field = find.byType(TextField).first;
       await tester.tap(find.text('内部备注'));

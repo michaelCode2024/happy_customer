@@ -1058,7 +1058,7 @@ class _VersionCard extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             showAndroidCheck
-                ? '安卓安装包会对照服务器发行清单检查更新；有新版本时将提示下载安装。'
+                ? '安卓安装包会对照服务器发行清单检查更新；有新版本时在应用内下载，完成后打开系统安装。已下载但未安装时，下次进入会直接提示安装。'
                 : '网页 / 桌面安装版请点上方「系统更新」检查；有新版本时可立即应用。',
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
