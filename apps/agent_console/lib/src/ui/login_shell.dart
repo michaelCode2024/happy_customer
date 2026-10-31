@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:tongyu_agent_console/src/theme.dart';
 import 'package:tongyu_agent_console/src/ui/brand.dart';
+import 'package:tongyu_agent_console/src/ui/platform_support.dart';
 import 'package:tongyu_agent_console/src/util/browser_chrome.dart';
 import 'package:tongyu_agent_console/src/util/website.dart';
 
@@ -17,13 +18,15 @@ class LoginShell extends StatelessWidget {
       required this.child,
       this.badgeLabel,
       this.heroKind = LoginHeroKind.agent,
-      this.onSurfaceSwitch});
+      this.onSurfaceSwitch,
+      this.supportOrigin});
   final IconData icon;
   final String title, subtitle;
   final Widget child;
   final String? badgeLabel;
   final LoginHeroKind heroKind;
   final VoidCallback? onSurfaceSwitch;
+  final String Function()? supportOrigin;
 
   @override
   Widget build(BuildContext context) {
@@ -41,6 +44,7 @@ class LoginShell extends StatelessWidget {
             title: title,
             subtitle: subtitle,
             onSurfaceSwitch: onSurfaceSwitch,
+            supportOrigin: supportOrigin,
             child: child,
           );
         }
@@ -53,6 +57,7 @@ class LoginShell extends StatelessWidget {
               title: title,
               subtitle: subtitle,
               onSurfaceSwitch: onSurfaceSwitch,
+              supportOrigin: supportOrigin,
               child: child,
             ),
           ),
@@ -73,6 +78,7 @@ class _MobileLoginBody extends StatefulWidget {
     required this.subtitle,
     required this.onSurfaceSwitch,
     required this.child,
+    this.supportOrigin,
   });
 
   final ThemeData theme;
@@ -81,6 +87,7 @@ class _MobileLoginBody extends StatefulWidget {
   final String subtitle;
   final VoidCallback? onSurfaceSwitch;
   final Widget child;
+  final String Function()? supportOrigin;
 
   @override
   State<_MobileLoginBody> createState() => _MobileLoginBodyState();
@@ -143,15 +150,7 @@ class _MobileLoginBodyState extends State<_MobileLoginBody>
     if (next != _top) setState(() => _top = next);
   }
 
-  SystemUiOverlayStyle _overlay(Color color) {
-    final lightIcons = color.computeLuminance() < 0.45;
-    return SystemUiOverlayStyle(
-      statusBarColor: color,
-      statusBarIconBrightness: lightIcons ? Brightness.light : Brightness.dark,
-      statusBarBrightness: lightIcons ? Brightness.dark : Brightness.light,
-      systemStatusBarContrastEnforced: false,
-    );
-  }
+  SystemUiOverlayStyle _overlay(Color color) => BrowserChrome.overlayFor(color);
 
   @override
   Widget build(BuildContext context) {
@@ -416,8 +415,10 @@ class _MobileLoginBodyState extends State<_MobileLoginBody>
                                     Align(
                                       alignment: Alignment.centerLeft,
                                       child: TextButton.icon(
-                                        onPressed: () =>
-                                            _showLoginHelp(context, platform),
+                                        onPressed: () => _showLoginHelp(
+                                            context,
+                                            platform,
+                                            widget.supportOrigin?.call()),
                                         icon: const Icon(Icons.help_outline,
                                             size: 16),
                                         label: const Text('需要登录帮助？'),
@@ -522,6 +523,7 @@ class _DesktopLoginForm extends StatelessWidget {
     required this.subtitle,
     required this.onSurfaceSwitch,
     required this.child,
+    this.supportOrigin,
   });
 
   final ThemeData theme;
@@ -530,6 +532,7 @@ class _DesktopLoginForm extends StatelessWidget {
   final String subtitle;
   final VoidCallback? onSurfaceSwitch;
   final Widget child;
+  final String Function()? supportOrigin;
 
   @override
   Widget build(BuildContext context) {
@@ -642,7 +645,8 @@ class _DesktopLoginForm extends StatelessWidget {
                       ),
                       const SizedBox(height: 16),
                       TextButton.icon(
-                        onPressed: () => _showLoginHelp(context, platform),
+                        onPressed: () => _showLoginHelp(
+                            context, platform, supportOrigin?.call()),
                         icon: const Icon(Icons.help_outline, size: 16),
                         label: const Text('需要登录帮助？'),
                         style: TextButton.styleFrom(
@@ -689,17 +693,28 @@ class _DesktopLoginForm extends StatelessWidget {
   }
 }
 
-void _showLoginHelp(BuildContext context, bool platform) {
+void _showLoginHelp(BuildContext context, bool platform, String? origin) {
   showDialog<void>(
     context: context,
-    builder: (context) => AlertDialog(
+    builder: (dialogContext) => AlertDialog(
       title: const Text('登录帮助'),
       content: Text(platform
-          ? '此入口仅供平台管理员使用。企业客服请切换到客服工作台登录。忘记密码时，请联系平台负责人。'
-          : '企业标识由企业管理员提供。请使用管理员为你创建的用户名和密码登录。忘记密码或无法进入工作台时，请联系企业管理员。'),
+          ? '此入口仅供平台管理员使用。企业客服请切换到客服工作台登录。无法登录时，可联系通语技术支持。'
+          : '企业标识由企业管理员提供。请使用管理员为你创建的用户名和密码登录。账号停用或重置密码，请联系本企业客服主管。主管自己无法登录时，可联系通语技术支持。'),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context),
+          onPressed: () {
+            Navigator.pop(dialogContext);
+            openPlatformSupport(
+              context,
+              origin: origin,
+              subject: '工作台登录求助',
+            );
+          },
+          child: const Text('联系通语技术支持'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
           child: const Text('知道了'),
         ),
       ],

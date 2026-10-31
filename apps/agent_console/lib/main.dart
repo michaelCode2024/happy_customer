@@ -20,6 +20,7 @@ import 'package:tongyu_agent_console/src/state/session_controller.dart';
 import 'package:flutter/foundation.dart';
 import 'package:tongyu_agent_console/src/theme.dart';
 import 'package:tongyu_agent_console/src/ui/login_page.dart';
+import 'package:tongyu_agent_console/src/ui/must_change_password_page.dart';
 import 'package:tongyu_agent_console/src/ui/pwa_panel.dart';
 import 'package:tongyu_agent_console/src/ui/platform_login_page.dart';
 import 'package:tongyu_agent_console/src/ui/platform_page.dart';
@@ -33,6 +34,10 @@ void main() {
     // 手势条/导航键区域与白色底部导航栏一体：旧系统给实色白；
     // Android 15+ 强制全面屏会忽略实色并自动加半透明对比遮罩，这里关掉遮罩露出应用白底。
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.dark,
+      statusBarBrightness: Brightness.light,
+      systemStatusBarContrastEnforced: false,
       systemNavigationBarColor: Colors.white,
       systemNavigationBarDividerColor: Colors.white,
       systemNavigationBarIconBrightness: Brightness.dark,
@@ -122,7 +127,8 @@ class _TongYuConsoleAppState extends State<TongYuConsoleApp>
   }
 
   @override
-  Future<bool> didPushRouteInformation(RouteInformation routeInformation) async {
+  Future<bool> didPushRouteInformation(
+      RouteInformation routeInformation) async {
     // 网页引擎把后退到 flutter 历史当成「再推一个命名路由」。工作台不用地址路由，
     // 吃掉它，否则同一次手势会先退一层再推进来一页。
     if (!kIsWeb) return false;
@@ -162,7 +168,8 @@ class _TongYuConsoleAppState extends State<TongYuConsoleApp>
   }
 
   void _onSessionChanged() {
-    if (_session.phase == SessionPhase.loggedIn) {
+    final pendingPassword = _session.agent?.mustChangePassword == true;
+    if (_session.phase == SessionPhase.loggedIn && !pendingPassword) {
       _session.startPresenceHeartbeat();
     } else {
       _session.stopPresenceHeartbeat();
@@ -252,39 +259,24 @@ class _TongYuConsoleAppState extends State<TongYuConsoleApp>
                 builder: (context, bottomBar, _) {
                   final browserBottom =
                       isHostedConsole ? 0.0 : browserSafeBottom;
-                  final bottomInset = AppSafeArea.resolveBottom(
-                      MediaQuery.of(context), browserBottom);
-                  // 页面底色保持浅色；顶栏跟着登录头部/滚上来的卡片变，
-                  // 底部安全区跟着真正贴底的那条栏变（iOS Home 条不能和 tabbar 有色差）。
+                  // 顶栏跟着登录头部/滚上来的卡片变。底部不整页留白，
+                  // Home 条颜色只同步给真正贴底的那条栏。
                   syncBrowserTheme(
                     theme.colorScheme.surface.toARGB32(),
                     theme.brightness == Brightness.dark,
                     topRgb: top?.toARGB32(),
                     bottomRgb: bottomBar?.toARGB32(),
                   );
-                  return ColoredBox(
-                    // 有贴底栏时，栏外面那截 Home 条也用栏的颜色，避免露出脚手架浅底。
-                    color: bottomBar ?? theme.colorScheme.surface,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        AppSafeArea(
-                          browserBottom: browserBottom,
-                          child: wrapWithWebEmojiFallback(
-                              child ?? const SizedBox.shrink()),
-                        ),
-                        // 贴在最上层：Home 条那一截必须盖住脚手架底色，并跟 tab 栏同一实色。
-                        if (bottomInset > 0 && bottomBar != null)
-                          Positioned(
-                            left: 0,
-                            right: 0,
-                            bottom: 0,
-                            height: bottomInset,
-                            child: IgnorePointer(
-                              child: ColoredBox(color: bottomBar),
-                            ),
-                          ),
-                      ],
+                  final topColor = top ?? theme.colorScheme.surface;
+                  return AnnotatedRegion<SystemUiOverlayStyle>(
+                    value: BrowserChrome.overlayFor(topColor),
+                    child: ColoredBox(
+                      color: bottomBar ?? theme.colorScheme.surface,
+                      child: AppSafeArea(
+                        browserBottom: browserBottom,
+                        child: wrapWithWebEmojiFallback(
+                            child ?? const SizedBox.shrink()),
+                      ),
                     ),
                   );
                 },
@@ -380,6 +372,9 @@ class _TongYuConsoleAppState extends State<TongYuConsoleApp>
               onPlatformLogin: _platformResolved ? _openPlatformConsole : null,
             );
           case SessionPhase.loggedIn:
+            if (_session.agent?.mustChangePassword == true) {
+              return MustChangePasswordPage(session: _session);
+            }
             final agentId = _session.agent?.id ?? '';
             return WorkbenchPage(
               key: ValueKey<String>('workbench-$agentId'),

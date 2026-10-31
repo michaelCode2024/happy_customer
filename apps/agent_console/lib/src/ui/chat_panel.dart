@@ -13,7 +13,9 @@ import 'package:tongyu_agent_console/src/api/models.dart';
 import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
 import 'package:tongyu_agent_console/src/theme.dart';
 import 'package:tongyu_agent_console/src/util/attachment_picker.dart';
+import 'package:tongyu_agent_console/src/util/browser_chrome.dart';
 import 'package:tongyu_agent_console/src/util/voice_recording.dart';
+import 'package:tongyu_agent_console/src/ui/composer_emoji_panel.dart';
 import 'package:tongyu_agent_console/src/ui/voice_recorder_button.dart';
 import 'package:tongyu_agent_console/src/util/format.dart';
 import 'package:tongyu_agent_console/src/util/labels.dart';
@@ -115,6 +117,7 @@ class _ChatPanelState extends State<ChatPanel> {
   bool _stickToBottom = true;
   bool _userScrolling = false;
   bool _bottomScrollQueued = false;
+
   /// 上次已跟随的列表最大滚动范围；仅内容变长时再跳底，避免滚动中反复 jumpTo 闪屏。
   double? _lastStickMaxExtent;
   String? _scrollConversationId;
@@ -327,7 +330,10 @@ class _ChatPanelState extends State<ChatPanel> {
     _bottomScrollQueued = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _bottomScrollQueued = false;
-      if (!mounted || !_scroll.hasClients || !_stickToBottom || _userScrolling) {
+      if (!mounted ||
+          !_scroll.hasClients ||
+          !_stickToBottom ||
+          _userScrolling) {
         return;
       }
       final position = _scroll.position;
@@ -821,10 +827,14 @@ class _ChatPanelState extends State<ChatPanel> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                 decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primaryContainer.withAlpha(90),
+                  color: Theme.of(context)
+                      .colorScheme
+                      .primaryContainer
+                      .withAlpha(90),
                   border: Border(
                     top: BorderSide(
-                      color: Theme.of(context).colorScheme.primary.withAlpha(45),
+                      color:
+                          Theme.of(context).colorScheme.primary.withAlpha(45),
                       width: 1,
                     ),
                     bottom: BorderSide(
@@ -909,45 +919,43 @@ class _ChatPanelState extends State<ChatPanel> {
                 },
               ),
             _Composer(
-                controller: _composer,
-                focusNode: _composerFocus,
-                noteMode: _noteMode,
-                sending: _sending,
-                uploading: _uploading,
-                pending: _pending,
-                uploadError: _uploadError,
-                visitorTyping: workbench.visitorTyping,
-                canned: workbench.cannedForSelection,
-                supportsFiles: widget.picker.supportsArbitraryFiles,
-                quote: workbench.replyTo,
-                statusHint: _composerHint(conversation, workbench.selfId),
-                lockPublicReply: !_noteMode &&
-                    conversation.publicReplyBlockReason(workbench.selfId) !=
-                        null,
-                aiOpen: false,
-                aiPanel: null,
-                onChanged: _onComposerChanged,
-                onToggleNote: (value) => setState(() {
-                  _noteMode = value;
-                }),
-                onPickImage: () => _pickImage(),
-                onPickFile: () => _pickImage(document: true),
-                voiceControl: VoiceRecorderButton(
-                    key: ValueKey(conversation.id),
-                    color: RelayTheme.magenta,
-                    enabled: !_sending &&
-                        !_uploading &&
-                        !_noteMode &&
-                        conversation.publicReplyBlockReason(
-                                workbench.selfId) ==
-                            null,
-                    onRecorded: _attachVoice),
-                onClearQuote: () => workbench.quote(null),
-                onRemovePending: (id) => setState(
-                  () => _pending.removeWhere((item) => item.id == id),
-                ),
-                onSend: _send,
+              controller: _composer,
+              focusNode: _composerFocus,
+              noteMode: _noteMode,
+              sending: _sending,
+              uploading: _uploading,
+              pending: _pending,
+              uploadError: _uploadError,
+              visitorTyping: workbench.visitorTyping,
+              canned: workbench.cannedForSelection,
+              supportsFiles: widget.picker.supportsArbitraryFiles,
+              quote: workbench.replyTo,
+              statusHint: _composerHint(conversation, workbench.selfId),
+              lockPublicReply: !_noteMode &&
+                  conversation.publicReplyBlockReason(workbench.selfId) != null,
+              aiOpen: false,
+              aiPanel: null,
+              onChanged: _onComposerChanged,
+              onToggleNote: (value) => setState(() {
+                _noteMode = value;
+              }),
+              onPickImage: () => _pickImage(),
+              onPickFile: () => _pickImage(document: true),
+              voiceControl: VoiceRecorderButton(
+                  key: ValueKey(conversation.id),
+                  color: RelayTheme.magenta,
+                  enabled: !_sending &&
+                      !_uploading &&
+                      !_noteMode &&
+                      conversation.publicReplyBlockReason(workbench.selfId) ==
+                          null,
+                  onRecorded: _attachVoice),
+              onClearQuote: () => workbench.quote(null),
+              onRemovePending: (id) => setState(
+                () => _pending.removeWhere((item) => item.id == id),
               ),
+              onSend: _send,
+            ),
           ],
         );
       },
@@ -1042,323 +1050,330 @@ class _ThreadHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final compact = MediaQuery.sizeOf(context).width < 760;
-    return Container(
-      height: 58,
-      padding: EdgeInsets.fromLTRB(compact ? 2 : 14, 0, 8, 0),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        border: Border(
-          bottom: BorderSide(color: theme.colorScheme.outlineVariant),
+    final status = MediaQuery.paddingOf(context).top;
+    final barColor = theme.colorScheme.surface;
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: BrowserChrome.overlayFor(barColor),
+      child: Container(
+        height: 58 + status,
+        padding: EdgeInsets.fromLTRB(compact ? 2 : 14, status, 8, 0),
+        decoration: BoxDecoration(
+          color: barColor,
+          border: Border(
+            bottom: BorderSide(color: theme.colorScheme.outlineVariant),
+          ),
         ),
-      ),
-      child: Row(
-        children: <Widget>[
-          if (compact)
-            IconButton(
-              tooltip: '返回会话列表',
-              visualDensity: VisualDensity.compact,
-              onPressed: onBack ?? workbench.clearSelection,
-              icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 17),
-            ),
-          if (!compact) ...<Widget>[
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: theme.colorScheme.primary.withOpacity(.08),
-                borderRadius: BorderRadius.circular(8),
+        child: Row(
+          children: <Widget>[
+            if (compact)
+              IconButton(
+                tooltip: '返回会话列表',
+                visualDensity: VisualDensity.compact,
+                onPressed: onBack ?? workbench.clearSelection,
+                icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 17),
               ),
-              alignment: Alignment.center,
-              child: Text(
-                conversation.title.trim().isEmpty
-                    ? '客'
-                    : conversation.title.trim().substring(0, 1),
-                style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: theme.colorScheme.primary),
+            if (!compact) ...<Widget>[
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary.withOpacity(.08),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  conversation.title.trim().isEmpty
+                      ? '客'
+                      : conversation.title.trim().substring(0, 1),
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: theme.colorScheme.primary),
+                ),
               ),
-            ),
-            const SizedBox(width: 9),
-          ],
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Row(
-                  children: <Widget>[
-                    Flexible(
-                      child: Text(
-                        conversation.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
+              const SizedBox(width: 9),
+            ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      Flexible(
+                        child: Text(
+                          conversation.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                          ),
                         ),
                       ),
-                    ),
-                    if (MediaQuery.sizeOf(context).width >= 760) ...<Widget>[
-                      const SizedBox(width: 8),
-                      if (conversation.isResolved)
-                        const _HeaderChip(label: '已解决', tone: _ChipTone.neutral)
-                      else if (conversation.isUnassigned)
-                        const _HeaderChip(label: '待接待', tone: _ChipTone.warn)
-                      else if (conversation.needsAcceptance)
-                        _HeaderChip(
-                          // 别人待确认时写清是谁，避免自己误点「确认接单」。
-                          label: conversation.isHeldByOther(workbench.selfId)
-                              ? '${conversation.assigneeName.isEmpty ? '其他客服' : conversation.assigneeName}待确认'
-                              : '等待确认接单',
-                          tone: _ChipTone.warn,
-                        )
-                      else
-                        _HeaderChip(
-                          label: conversation.assigneeName.isEmpty
-                              ? '接待中'
-                              : conversation.assigneeName,
-                          tone: _ChipTone.info,
-                        ),
-                      if (conversation.priority > 0) ...<Widget>[
-                        const SizedBox(width: 6),
-                        _HeaderChip(
-                          label: conversation.priority >= 2 ? '高优先' : '优先',
-                          tone: conversation.priority >= 2
-                              ? _ChipTone.danger
-                              : _ChipTone.warn,
-                        ),
+                      if (MediaQuery.sizeOf(context).width >= 760) ...<Widget>[
+                        const SizedBox(width: 8),
+                        if (conversation.isResolved)
+                          const _HeaderChip(
+                              label: '已解决', tone: _ChipTone.neutral)
+                        else if (conversation.isUnassigned)
+                          const _HeaderChip(label: '待接待', tone: _ChipTone.warn)
+                        else if (conversation.needsAcceptance)
+                          _HeaderChip(
+                            // 别人待确认时写清是谁，避免自己误点「确认接单」。
+                            label: conversation.isHeldByOther(workbench.selfId)
+                                ? '${conversation.assigneeName.isEmpty ? '其他客服' : conversation.assigneeName}待确认'
+                                : '等待确认接单',
+                            tone: _ChipTone.warn,
+                          )
+                        else
+                          _HeaderChip(
+                            label: conversation.assigneeName.isEmpty
+                                ? '接待中'
+                                : conversation.assigneeName,
+                            tone: _ChipTone.info,
+                          ),
+                        if (conversation.priority > 0) ...<Widget>[
+                          const SizedBox(width: 6),
+                          _HeaderChip(
+                            label: conversation.priority >= 2 ? '高优先' : '优先',
+                            tone: conversation.priority >= 2
+                                ? _ChipTone.danger
+                                : _ChipTone.warn,
+                          ),
+                        ],
                       ],
                     ],
-                  ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    MediaQuery.sizeOf(context).width < 760
+                        ? (conversation.isResolved
+                            ? '已解决'
+                            : conversation.isUnassigned
+                                ? '待接待'
+                                : conversation.needsAcceptance
+                                    ? (conversation
+                                            .isHeldByOther(workbench.selfId)
+                                        ? '${conversation.assigneeName.isEmpty ? '其他客服' : conversation.assigneeName}待确认'
+                                        : '等待确认接单')
+                                    : conversation.assigneeName.isEmpty
+                                        ? '接待中'
+                                        : '${conversation.assigneeName} · 接待中')
+                        : [
+                            'ID: ${shortId(conversation.id)}',
+                            conversationSourceLabel(conversation.source),
+                            if (conversation.visitorUnread > 0)
+                              '访客未读 ${conversation.visitorUnread}',
+                          ].join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (!conversation.isUnassigned &&
+                !conversation.needsAcceptance &&
+                MediaQuery.sizeOf(context).width >= 760)
+              Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: conversation.isResolved
+                      ? Semantics(
+                          button: true,
+                          label: '重新打开',
+                          identifier: 'desk.resolve.reopen',
+                          child: OutlinedButton(
+                            key: const ValueKey('desk-resolve-reopen'),
+                            onPressed: () => workbench.setStatus('OPEN'),
+                            child: const Text('重新打开'),
+                          ),
+                        )
+                      : Semantics(
+                          button: true,
+                          label: '标记解决',
+                          identifier: 'desk.resolve.mark',
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: RelayTheme.tealGradient,
+                              borderRadius: BorderRadius.circular(12),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: RelayTheme.teal.withOpacity(0.28),
+                                  blurRadius: 18,
+                                  offset: const Offset(0, 8),
+                                ),
+                              ],
+                            ),
+                            child: FilledButton(
+                              key: const ValueKey('desk-resolve-mark'),
+                              onPressed: () => _markResolved(context),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: Colors.transparent,
+                                shadowColor: Colors.transparent,
+                                foregroundColor: Colors.white,
+                                elevation: 0,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              child: const Text('标记解决'),
+                            ),
+                          ),
+                        )),
+            // 接待入口改到底部操作坞，顶栏不再重复「开始接待」。
+            if (MediaQuery.sizeOf(context).width >= 760)
+              Padding(
+                // Keep clear of top-bar notification bell hit area.
+                padding: const EdgeInsets.only(left: 10, right: 6),
+                child: Semantics(
+                  button: true,
+                  label: '转交',
+                  identifier: 'desk.transfer.open',
+                  child: TextButton.icon(
+                    key: const ValueKey('desk-transfer-open'),
+                    onPressed: () => _showTransfer(context),
+                    icon: const Icon(Icons.swap_horiz, size: 18),
+                    label: const Text('转交'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: theme.colorScheme.onSurfaceVariant,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      minimumSize: const Size(48, 40),
+                      tapTargetSize: MaterialTapTargetSize.padded,
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  MediaQuery.sizeOf(context).width < 760
-                      ? (conversation.isResolved
-                          ? '已解决'
-                          : conversation.isUnassigned
-                              ? '待接待'
-                              : conversation.needsAcceptance
-                                  ? (conversation
-                                          .isHeldByOther(workbench.selfId)
-                                      ? '${conversation.assigneeName.isEmpty ? '其他客服' : conversation.assigneeName}待确认'
-                                      : '等待确认接单')
-                                  : conversation.assigneeName.isEmpty
-                                      ? '接待中'
-                                      : '${conversation.assigneeName} · 接待中')
-                      : [
-                          'ID: ${shortId(conversation.id)}',
-                          conversationSourceLabel(conversation.source),
-                          if (conversation.visitorUnread > 0)
-                            '访客未读 ${conversation.visitorUnread}',
-                        ].join(' · '),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+              ),
+            if (onOpenProfile != null &&
+                MediaQuery.sizeOf(context).width >= 760)
+              IconButton(
+                tooltip: '客户资料',
+                onPressed: onOpenProfile,
+                icon: const Icon(Icons.person_outline),
+              ),
+            if (MediaQuery.sizeOf(context).width >= 760)
+              IconButton(
+                tooltip: searchOpen ? '关闭搜索' : '搜索会话内容',
+                onPressed: onToggleSearch,
+                isSelected: searchOpen,
+                icon: Icon(searchOpen ? Icons.search_off : Icons.search),
+              ),
+            if (MediaQuery.sizeOf(context).width < 760 && onOpenAssist != null)
+              TextButton.icon(
+                  key: const ValueKey('mobile-ai-assist'),
+                  onPressed: onOpenAssist,
+                  icon: const Icon(Icons.auto_awesome_outlined, size: 18),
+                  label: const Text('AI'),
+                  style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8))),
+            PopupMenuButton<String>(
+              tooltip: '更多操作',
+              onSelected: (value) {
+                switch (value) {
+                  case 'profile':
+                    onOpenProfile?.call();
+                  case 'resolve':
+                    _markResolved(context);
+                  case 'reopen':
+                    workbench.setStatus('OPEN');
+                  case 'pending':
+                    workbench.setStatus('PENDING');
+                  case 'priority0':
+                    workbench.setPriority(0);
+                  case 'priority1':
+                    workbench.setPriority(1);
+                  case 'priority2':
+                    workbench.setPriority(2);
+                  case 'transfer':
+                    _showTransfer(context);
+                  case 'tags':
+                    _showTags(context);
+                  case 'copy':
+                    copyToClipboard(context, conversation.id, '会话 ID');
+                  case 'search':
+                    onToggleSearch();
+                }
+              },
+              itemBuilder: (context) => <PopupMenuEntry<String>>[
+                if (MediaQuery.sizeOf(context).width < 760 &&
+                    onOpenProfile != null)
+                  const PopupMenuItem(value: 'profile', child: Text('客户资料')),
+                if (MediaQuery.sizeOf(context).width < 760)
+                  const PopupMenuItem(value: 'search', child: Text('搜索会话内容')),
+                if (!conversation.isResolved)
+                  const PopupMenuItem<String>(
+                    key: ValueKey('desk-menu-resolve'),
+                    value: 'resolve',
+                    child: ListTile(
+                      dense: true,
+                      leading: Icon(Icons.check_circle_outline, size: 18),
+                      title: Text('标记解决'),
+                    ),
+                  )
+                else
+                  const PopupMenuItem<String>(
+                    key: ValueKey('desk-menu-reopen'),
+                    value: 'reopen',
+                    child: ListTile(
+                      dense: true,
+                      leading: Icon(Icons.lock_open_outlined, size: 18),
+                      title: Text('重新打开'),
+                    ),
+                  ),
+                const PopupMenuItem<String>(
+                  value: 'pending',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.hourglass_empty, size: 18),
+                    title: Text('标记等待中'),
+                  ),
+                ),
+                const PopupMenuDivider(),
+                const PopupMenuItem<String>(
+                  value: 'priority2',
+                  child: Text('优先级：高'),
+                ),
+                const PopupMenuItem<String>(
+                  value: 'priority1',
+                  child: Text('优先级：普通偏高'),
+                ),
+                const PopupMenuItem<String>(
+                  value: 'priority0',
+                  child: Text('优先级：普通'),
+                ),
+                const PopupMenuDivider(),
+                const PopupMenuItem<String>(
+                  key: ValueKey('desk-menu-transfer'),
+                  value: 'transfer',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.swap_horiz, size: 18),
+                    title: Text('转交'),
+                  ),
+                ),
+                const PopupMenuItem<String>(
+                  value: 'tags',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.sell_outlined, size: 18),
+                    title: Text('编辑标签'),
+                  ),
+                ),
+                const PopupMenuItem<String>(
+                  value: 'copy',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.content_copy, size: 18),
+                    title: Text('复制会话 ID'),
                   ),
                 ),
               ],
             ),
-          ),
-          if (!conversation.isUnassigned &&
-              !conversation.needsAcceptance &&
-              MediaQuery.sizeOf(context).width >= 760)
-            Padding(
-                padding: const EdgeInsets.only(left: 8),
-                child: conversation.isResolved
-                    ? Semantics(
-                        button: true,
-                        label: '重新打开',
-                        identifier: 'desk.resolve.reopen',
-                        child: OutlinedButton(
-                          key: const ValueKey('desk-resolve-reopen'),
-                          onPressed: () => workbench.setStatus('OPEN'),
-                          child: const Text('重新打开'),
-                        ),
-                      )
-                    : Semantics(
-                        button: true,
-                        label: '标记解决',
-                        identifier: 'desk.resolve.mark',
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: RelayTheme.tealGradient,
-                            borderRadius: BorderRadius.circular(12),
-                            boxShadow: [
-                              BoxShadow(
-                                color: RelayTheme.teal.withOpacity(0.28),
-                                blurRadius: 18,
-                                offset: const Offset(0, 8),
-                              ),
-                            ],
-                          ),
-                          child: FilledButton(
-                            key: const ValueKey('desk-resolve-mark'),
-                            onPressed: () => _markResolved(context),
-                            style: FilledButton.styleFrom(
-                              backgroundColor: Colors.transparent,
-                              shadowColor: Colors.transparent,
-                              foregroundColor: Colors.white,
-                              elevation: 0,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                            child: const Text('标记解决'),
-                          ),
-                        ),
-                      )),
-          // 接待入口改到底部操作坞，顶栏不再重复「开始接待」。
-          if (MediaQuery.sizeOf(context).width >= 760)
-            Padding(
-              // Keep clear of top-bar notification bell hit area.
-              padding: const EdgeInsets.only(left: 10, right: 6),
-              child: Semantics(
-                button: true,
-                label: '转交',
-                identifier: 'desk.transfer.open',
-                child: TextButton.icon(
-                  key: const ValueKey('desk-transfer-open'),
-                  onPressed: () => _showTransfer(context),
-                  icon: const Icon(Icons.swap_horiz, size: 18),
-                  label: const Text('转交'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: theme.colorScheme.onSurfaceVariant,
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    minimumSize: const Size(48, 40),
-                    tapTargetSize: MaterialTapTargetSize.padded,
-                  ),
-                ),
-              ),
-            ),
-          if (onOpenProfile != null && MediaQuery.sizeOf(context).width >= 760)
-            IconButton(
-              tooltip: '客户资料',
-              onPressed: onOpenProfile,
-              icon: const Icon(Icons.person_outline),
-            ),
-          if (MediaQuery.sizeOf(context).width >= 760)
-            IconButton(
-              tooltip: searchOpen ? '关闭搜索' : '搜索会话内容',
-              onPressed: onToggleSearch,
-              isSelected: searchOpen,
-              icon: Icon(searchOpen ? Icons.search_off : Icons.search),
-            ),
-          if (MediaQuery.sizeOf(context).width < 760 && onOpenAssist != null)
-            TextButton.icon(
-                key: const ValueKey('mobile-ai-assist'),
-                onPressed: onOpenAssist,
-                icon: const Icon(Icons.auto_awesome_outlined, size: 18),
-                label: const Text('AI'),
-                style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8))),
-          PopupMenuButton<String>(
-            tooltip: '更多操作',
-            onSelected: (value) {
-              switch (value) {
-                case 'profile':
-                  onOpenProfile?.call();
-                case 'resolve':
-                  _markResolved(context);
-                case 'reopen':
-                  workbench.setStatus('OPEN');
-                case 'pending':
-                  workbench.setStatus('PENDING');
-                case 'priority0':
-                  workbench.setPriority(0);
-                case 'priority1':
-                  workbench.setPriority(1);
-                case 'priority2':
-                  workbench.setPriority(2);
-                case 'transfer':
-                  _showTransfer(context);
-                case 'tags':
-                  _showTags(context);
-                case 'copy':
-                  copyToClipboard(context, conversation.id, '会话 ID');
-                case 'search':
-                  onToggleSearch();
-              }
-            },
-            itemBuilder: (context) => <PopupMenuEntry<String>>[
-              if (MediaQuery.sizeOf(context).width < 760 &&
-                  onOpenProfile != null)
-                const PopupMenuItem(value: 'profile', child: Text('客户资料')),
-              if (MediaQuery.sizeOf(context).width < 760)
-                const PopupMenuItem(value: 'search', child: Text('搜索会话内容')),
-              if (!conversation.isResolved)
-                const PopupMenuItem<String>(
-                  key: ValueKey('desk-menu-resolve'),
-                  value: 'resolve',
-                  child: ListTile(
-                    dense: true,
-                    leading: Icon(Icons.check_circle_outline, size: 18),
-                    title: Text('标记解决'),
-                  ),
-                )
-              else
-                const PopupMenuItem<String>(
-                  key: ValueKey('desk-menu-reopen'),
-                  value: 'reopen',
-                  child: ListTile(
-                    dense: true,
-                    leading: Icon(Icons.lock_open_outlined, size: 18),
-                    title: Text('重新打开'),
-                  ),
-                ),
-              const PopupMenuItem<String>(
-                value: 'pending',
-                child: ListTile(
-                  dense: true,
-                  leading: Icon(Icons.hourglass_empty, size: 18),
-                  title: Text('标记等待中'),
-                ),
-              ),
-              const PopupMenuDivider(),
-              const PopupMenuItem<String>(
-                value: 'priority2',
-                child: Text('优先级：高'),
-              ),
-              const PopupMenuItem<String>(
-                value: 'priority1',
-                child: Text('优先级：普通偏高'),
-              ),
-              const PopupMenuItem<String>(
-                value: 'priority0',
-                child: Text('优先级：普通'),
-              ),
-              const PopupMenuDivider(),
-              const PopupMenuItem<String>(
-                key: ValueKey('desk-menu-transfer'),
-                value: 'transfer',
-                child: ListTile(
-                  dense: true,
-                  leading: Icon(Icons.swap_horiz, size: 18),
-                  title: Text('转交'),
-                ),
-              ),
-              const PopupMenuItem<String>(
-                value: 'tags',
-                child: ListTile(
-                  dense: true,
-                  leading: Icon(Icons.sell_outlined, size: 18),
-                  title: Text('编辑标签'),
-                ),
-              ),
-              const PopupMenuItem<String>(
-                value: 'copy',
-                child: ListTile(
-                  dense: true,
-                  leading: Icon(Icons.content_copy, size: 18),
-                  title: Text('复制会话 ID'),
-                ),
-              ),
-            ],
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1383,7 +1398,7 @@ class _ThreadHeader extends StatelessWidget {
     }
 
     messenger.clearMaterialBanners();
-      messenger.showMaterialBanner(
+    messenger.showMaterialBanner(
       MaterialBanner(
         key: const ValueKey('desk-resolve-feedback-banner'),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -2181,10 +2196,10 @@ class _MessageBubble extends StatelessWidget {
                                           height: 1.65)))
                           : SelectableText(
                               message.content,
-                              style: withWebEmojiFallback(
-                                  theme.textTheme.bodyMedium?.copyWith(
-                                          color: textColor) ??
-                                      TextStyle(color: textColor)),
+                              style: withWebEmojiFallback(theme
+                                      .textTheme.bodyMedium
+                                      ?.copyWith(color: textColor) ??
+                                  TextStyle(color: textColor)),
                             ),
                     ),
                 ],
@@ -2433,9 +2448,9 @@ class _BubbleShell extends StatelessWidget {
     final light = scheme.brightness == Brightness.light;
     // 按内容收缩，只设最大宽度；短消息不再被撑成整行宽。
     return LayoutBuilder(builder: (context, constraints) {
-      final maxBubble = (constraints.maxWidth *
-              (mobile ? 0.84 : _bubbleWidthFactor))
-          .clamp(96.0, 520.0);
+      final maxBubble =
+          (constraints.maxWidth * (mobile ? 0.84 : _bubbleWidthFactor))
+              .clamp(96.0, 520.0);
       return Align(
         alignment: isAgent ? Alignment.centerRight : Alignment.centerLeft,
         child: ConstrainedBox(
@@ -2448,9 +2463,8 @@ class _BubbleShell extends StatelessWidget {
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
                 decoration: BoxDecoration(
                   // 浅色主题不用实心蓝渐变，改淡底；深色主题仍用主色渐变。
-                  gradient: isAgent && !light
-                      ? RelayTheme.actionGradient
-                      : null,
+                  gradient:
+                      isAgent && !light ? RelayTheme.actionGradient : null,
                   color: isAgent
                       ? (light ? bubbleColor : null)
                       : (light && mobile ? Colors.white : bubbleColor),
@@ -2472,7 +2486,8 @@ class _BubbleShell extends StatelessWidget {
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF3263FF).withOpacity(light ? 0.06 : 0.16),
+                      color: const Color(0xFF3263FF)
+                          .withOpacity(light ? 0.06 : 0.16),
                       blurRadius: light ? 12 : 18,
                       offset: const Offset(0, 6),
                     ),
@@ -3228,7 +3243,7 @@ class _FileChip extends StatelessWidget {
 }
 
 /// The composer.
-class _Composer extends StatelessWidget {
+class _Composer extends StatefulWidget {
   const _Composer({
     required this.controller,
     required this.focusNode,
@@ -3289,11 +3304,41 @@ class _Composer extends StatelessWidget {
   final Future<void> Function() onSend;
 
   @override
+  State<_Composer> createState() => _ComposerState();
+}
+
+class _ComposerState extends State<_Composer> {
+  final _emojiPortal = OverlayPortalController();
+  final Object _emojiTapGroup = Object();
+
+  @override
   Widget build(BuildContext context) {
+    final controller = widget.controller;
+    final focusNode = widget.focusNode;
+    final noteMode = widget.noteMode;
+    final sending = widget.sending;
+    final uploading = widget.uploading;
+    final pending = widget.pending;
+    final uploadError = widget.uploadError;
+    final visitorTyping = widget.visitorTyping;
+    final canned = widget.canned;
+    final supportsFiles = widget.supportsFiles;
+    final quote = widget.quote;
+    final statusHint = widget.statusHint;
+    final lockPublicReply = widget.lockPublicReply;
+    final aiPanel = widget.aiPanel;
+    final onChanged = widget.onChanged;
+    final onToggleNote = widget.onToggleNote;
+    final onPickImage = widget.onPickImage;
+    final onPickFile = widget.onPickFile;
+    final voiceControl = widget.voiceControl;
+    final onClearQuote = widget.onClearQuote;
+    final onRemovePending = widget.onRemovePending;
+    final onSend = widget.onSend;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final compact = MediaQuery.sizeOf(context).width < 760;
-    if (compact) return _MobileComposer(composer: this);
+    if (compact) return _MobileComposer(composer: widget);
     void insert(String text) {
       final selection = controller.selection;
       final start =
@@ -3357,33 +3402,29 @@ class _Composer extends StatelessWidget {
                 margin: const EdgeInsets.symmetric(horizontal: 8),
                 color: scheme.outlineVariant,
               ),
-              PopupMenuButton<String>(
-                tooltip: '表情',
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                icon: const Icon(Icons.sentiment_satisfied_alt_outlined,
-                    size: 20, color: RelayTheme.amber),
-                onSelected: insert,
-                itemBuilder: (_) => [
-                  for (final emoji in [
-                    '😊',
-                    '👍',
-                    '🙏',
-                    '🎉',
-                    '❤️',
-                    '🤔',
-                    '✅',
-                    '😄'
-                  ])
-                    PopupMenuItem(
-                      value: emoji,
-                      child: Text(emoji,
-                          style: const TextStyle(
-                            fontSize: 22,
-                            fontFamilyFallback: <String>['ChatEmoji'],
-                          )),
-                    )
-                ],
+              OverlayPortal.overlayChildLayoutBuilder(
+                controller: _emojiPortal,
+                overlayChildBuilder: (context, info) {
+                  return ComposerEmojiPopover(
+                    info: info,
+                    tapGroup: _emojiTapGroup,
+                    onDismiss: _emojiPortal.hide,
+                    onPick: insert,
+                  );
+                },
+                child: TapRegion(
+                  groupId: _emojiTapGroup,
+                  child: IconButton(
+                    tooltip: '表情',
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints(minWidth: 32, minHeight: 32),
+                    visualDensity: VisualDensity.compact,
+                    onPressed: _emojiPortal.toggle,
+                    icon: const Icon(Icons.sentiment_satisfied_alt_outlined,
+                        size: 20, color: RelayTheme.amber),
+                  ),
+                ),
               ),
               toolIcon(
                 tooltip: lockPublicReply ? '请先完成接待或转派' : '发送图片',
@@ -3424,7 +3465,7 @@ class _Composer extends StatelessWidget {
           ),
           if (aiPanel != null) ...[
             const SizedBox(height: 6),
-            aiPanel!,
+            aiPanel,
           ],
           const SizedBox(height: 6),
           if (statusHint != null)
@@ -3443,7 +3484,7 @@ class _Composer extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      statusHint!,
+                      statusHint,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: scheme.onSecondaryContainer,
                       ),
@@ -3453,7 +3494,7 @@ class _Composer extends StatelessWidget {
               ),
             ),
           if (uploadError != null)
-            Text(uploadError!,
+            Text(uploadError,
                 style: TextStyle(color: scheme.error, fontSize: 12)),
           if (quote != null)
             Container(
@@ -3468,7 +3509,7 @@ class _Composer extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '回复 ${quote!.senderName.isEmpty ? '访客' : quote!.senderName}：${quote!.content}',
+                    '回复 ${quote.senderName.isEmpty ? '访客' : quote.senderName}：${quote.content}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall,
@@ -3637,7 +3678,7 @@ class _ComposerModeTab extends StatelessWidget {
   }
 }
 
-// 手机输入区只消费父级已经处理好的安全区域，避免重复 padding。
+// 手机输入区把 Home 条画进自身底色，页面下不再另留一条空带。
 class _MobileComposer extends StatefulWidget {
   const _MobileComposer({required this.composer});
   final _Composer composer;
@@ -3647,6 +3688,7 @@ class _MobileComposer extends StatefulWidget {
 
 class _MobileComposerState extends State<_MobileComposer> {
   bool _tools = false;
+  bool _emojiOpen = false;
   @override
   void initState() {
     super.initState();
@@ -3724,275 +3766,278 @@ class _MobileComposerState extends State<_MobileComposer> {
                           fontWeight: FontWeight.w600,
                           color: action == null ? s.outline : accent))
                 ])));
-    return Container(
-        key: const ValueKey('mobile-composer'),
-        padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
-        decoration: BoxDecoration(
-            color: background,
-            border: Border(
-                top: BorderSide(color: s.outlineVariant.withOpacity(.55)))),
-        child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (c.statusHint != null)
-                Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Text(c.statusHint!,
-                        style: TextStyle(
-                            fontSize: 12, color: s.onSurfaceVariant))),
-              if (c.uploadError != null)
-                Text(c.uploadError!,
-                    style: TextStyle(color: s.error, fontSize: 12)),
-              if (c.noteMode)
-                Row(children: [
-                  Expanded(
-                      child: Text('内部备注 · 仅团队可见',
-                          style: TextStyle(
-                              fontSize: 12, color: RelayTheme.violet))),
-                  TextButton(
-                      onPressed: () => c.onToggleNote(false),
-                      child: const Text('取消'))
-                ]),
-              if (c.quote != null)
-                Row(children: [
-                  const Icon(Icons.reply, size: 16),
-                  const SizedBox(width: 6),
-                  Expanded(
-                      child: Text(
-                          '回复 ${c.quote!.senderName}：${c.quote!.content}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 12))),
-                  IconButton(
-                      tooltip: '取消引用',
-                      onPressed: c.onClearQuote,
-                      icon: const Icon(Icons.close, size: 16))
-                ]),
-              if (c.pending.isNotEmpty)
-                Wrap(spacing: 6, children: [
-                  for (final a in c.pending)
-                    InputChip(
-                        label: Text(a.fileName),
-                        onDeleted: () => c.onRemovePending(a.id))
-                ]),
-              Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                SizedBox(
-                    width: 30,
-                    height: 44,
-                    child: IconButton(
-                        padding: EdgeInsets.zero,
-                        tooltip: _tools ? '收起工具' : '展开工具',
-                        onPressed: () {
-                          c.focusNode.unfocus();
-                          setState(() => _tools = !_tools);
-                        },
-                        icon: Icon(
-                            _tools
-                                ? Icons.cancel_outlined
-                                : Icons.add_circle_outline,
-                            size: 26,
-                            color: _tools
-                                ? RelayTheme.blue
-                                : RelayTheme.blue.withOpacity(.85)))),
-                const SizedBox(width: 6),
-                Expanded(
-                    child: Container(
-                        decoration: BoxDecoration(
-                            // 回复/备注共用白底，避免切换时输入框颜色跳变。
-                            color: s.surface,
-                            border: Border.all(
-                                color: s.outlineVariant.withOpacity(.6)),
-                            borderRadius: BorderRadius.circular(9)),
-                        child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Expanded(
-                                  child: TextField(
-                                      controller: c.controller,
-                                      focusNode: c.focusNode,
-                                      minLines: 2,
-                                      maxLines: 5,
-                                      onChanged: c.onChanged,
-                                      textInputAction: TextInputAction.newline,
-                                      keyboardType: TextInputType.multiline,
-                                      style: withWebEmojiFallback(
-                                          const TextStyle(
-                                              fontSize: 15, height: 1.6)),
-                                      decoration: InputDecoration(
-                                          hintText: c.noteMode
-                                              ? '添加内部备注…'
-                                              : c.lockPublicReply
-                                                  ? '请先完成接待或转派'
-                                                  : c.visitorTyping
-                                                      ? '对方正在输入…'
-                                                      : '输入消息…',
-                                          isDense: true,
-                                          filled: false,
-                                          border: InputBorder.none,
-                                          enabledBorder: InputBorder.none,
-                                          focusedBorder: InputBorder.none,
-                                          contentPadding:
-                                              const EdgeInsets.fromLTRB(
-                                                  11, 9, 0, 9)))),
-                              PopupMenuButton<String>(
-                                  tooltip: '表情',
-                                  padding: EdgeInsets.zero,
-                                  constraints:
-                                      const BoxConstraints(minWidth: 50),
-                                  icon: const Icon(
-                                      Icons.sentiment_satisfied_alt_outlined,
-                                      size: 22,
-                                      color: RelayTheme.amber),
-                                  onSelected: _insert,
-                                  itemBuilder: (_) => [
-                                        for (final emoji in [
-                                          '😊',
-                                          '👍',
-                                          '🙏',
-                                          '❤️',
-                                          '✅'
-                                        ])
-                                          PopupMenuItem(
-                                              value: emoji,
-                                              child: Text(emoji,
-                                                  style: const TextStyle(
-                                                    fontFamilyFallback: <String>[
-                                                      'ChatEmoji'
-                                                    ],
-                                                  )))
-                                      ]),
-                            ]))),
-                const SizedBox(width: 6),
-                ValueListenableBuilder<TextEditingValue>(
-                    valueListenable: c.controller,
-                    builder: (context, value, _) {
-                      final busy = c.sending || c.uploading;
-                      final canSend = !busy &&
-                          !c.lockPublicReply &&
-                          (value.text.trim().isNotEmpty || c.pending.isNotEmpty);
-                      // 可发送/发送中：蓝渐变 + 白箭头；禁用：浅灰底灰箭头。
-                      final active = canSend || busy;
-                      return SizedBox(
-                          width: 44,
-                          height: 44,
-                          child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                gradient: active
-                                    ? RelayTheme.actionGradient
-                                    : null,
-                                color: active
-                                    ? null
-                                    : s.surfaceContainerHighest,
-                                borderRadius: BorderRadius.circular(9),
-                              ),
-                              child: IconButton(
-                                  tooltip: c.noteMode ? '保存备注' : '发送',
-                                  style: IconButton.styleFrom(
-                                    backgroundColor: Colors.transparent,
-                                    foregroundColor: active
-                                        ? Colors.white
-                                        : s.onSurfaceVariant,
-                                    disabledBackgroundColor:
-                                        Colors.transparent,
-                                    disabledForegroundColor: active
-                                        ? Colors.white
-                                        : s.onSurfaceVariant,
-                                    shape: RoundedRectangleBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(9)),
-                                  ),
-                                  onPressed: canSend ? c.onSend : null,
-                                  icon: busy
-                                      ? const SizedBox(
-                                          width: 18,
-                                          height: 18,
-                                          child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                              color: Colors.white))
-                                      : Icon(
-                                          c.noteMode
-                                              ? Icons.check
-                                              : Icons.arrow_upward,
-                                          size: 22,
-                                          color: active
-                                              ? Colors.white
-                                              : s.onSurfaceVariant,
-                                        ))));
-                    }),
-              ]),
-              if (_tools)
-                Padding(
-                    padding: const EdgeInsets.only(top: 18, bottom: 6),
-                    child: Wrap(spacing: 10, runSpacing: 16, children: [
-                      tool(
-                          Icons.image_outlined,
-                          '图片',
-                          c.uploading || c.lockPublicReply
-                              ? null
-                              : () {
-                                  c.onPickImage();
-                                },
-                          accent: RelayTheme.teal,
-                          soft: RelayTheme.tealSoft),
-                      if (c.supportsFiles)
-                        tool(
-                            Icons.insert_drive_file_outlined,
-                            '文件',
-                            c.uploading || c.lockPublicReply
-                                ? null
-                                : () {
-                                    c.onPickFile();
-                                  },
-                            accent: RelayTheme.blue,
-                            soft: RelayTheme.blueSoft),
-                      SizedBox(
-                          width: 66,
-                          child:
-                              Column(mainAxisSize: MainAxisSize.min, children: [
-                            Container(
-                                width: 48,
-                                height: 48,
-                                decoration: BoxDecoration(
-                                    color: RelayTheme.magentaSoft,
-                                    borderRadius: BorderRadius.circular(12)),
-                                child: IconTheme(
-                                    data: const IconThemeData(
-                                        color: RelayTheme.magenta, size: 23),
-                                    child: c.voiceControl)),
-                            const SizedBox(height: 5),
-                            const Text('语音',
-                                style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: RelayTheme.magenta))
-                          ])),
-                      if (c.canned.isNotEmpty)
-                        tool(Icons.bolt_outlined, '常用回复', () {
-                          MobileCannedBottomSheet.show(
-                            context: context,
-                            canned: c.canned,
-                            onSelect: (selected) {
-                              c.controller.text = selected;
-                              c.controller.selection = TextSelection.collapsed(
-                                  offset: selected.length);
-                              c.onChanged(selected);
-                              setState(() => _tools = false);
-                              c.focusNode.requestFocus();
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    return BrowserBottomChrome(
+        color: background,
+        child: Container(
+            key: const ValueKey('mobile-composer'),
+            padding: EdgeInsets.fromLTRB(10, 9, 10, 10 + bottomInset),
+            decoration: BoxDecoration(
+                color: background,
+                border: Border(
+                    top: BorderSide(color: s.outlineVariant.withOpacity(.55)))),
+            child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (c.statusHint != null)
+                    Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(c.statusHint!,
+                            style: TextStyle(
+                                fontSize: 12, color: s.onSurfaceVariant))),
+                  if (c.uploadError != null)
+                    Text(c.uploadError!,
+                        style: TextStyle(color: s.error, fontSize: 12)),
+                  if (c.noteMode)
+                    Row(children: [
+                      Expanded(
+                          child: Text('内部备注 · 仅团队可见',
+                              style: TextStyle(
+                                  fontSize: 12, color: RelayTheme.violet))),
+                      TextButton(
+                          onPressed: () => c.onToggleNote(false),
+                          child: const Text('取消'))
+                    ]),
+                  if (c.quote != null)
+                    Row(children: [
+                      const Icon(Icons.reply, size: 16),
+                      const SizedBox(width: 6),
+                      Expanded(
+                          child: Text(
+                              '回复 ${c.quote!.senderName}：${c.quote!.content}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 12))),
+                      IconButton(
+                          tooltip: '取消引用',
+                          onPressed: c.onClearQuote,
+                          icon: const Icon(Icons.close, size: 16))
+                    ]),
+                  if (c.pending.isNotEmpty)
+                    Wrap(spacing: 6, children: [
+                      for (final a in c.pending)
+                        InputChip(
+                            label: Text(a.fileName),
+                            onDeleted: () => c.onRemovePending(a.id))
+                    ]),
+                  Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                    SizedBox(
+                        width: 30,
+                        height: 44,
+                        child: IconButton(
+                            padding: EdgeInsets.zero,
+                            tooltip: _tools ? '收起工具' : '展开工具',
+                            onPressed: () {
+                              c.focusNode.unfocus();
+                              setState(() {
+                                _tools = !_tools;
+                                if (_tools) _emojiOpen = false;
+                              });
                             },
-                          );
-                        },
-                            accent: RelayTheme.amber,
-                            soft: RelayTheme.amberSoft),
-                      tool(Icons.edit_note_outlined, '内部备注', () {
-                        c.onToggleNote(true);
-                        setState(() => _tools = false);
-                        c.focusNode.requestFocus();
-                      },
-                          accent: RelayTheme.violet,
-                          soft: RelayTheme.violetSoft),
-                    ])),
-            ]));
+                            icon: Icon(
+                                _tools
+                                    ? Icons.cancel_outlined
+                                    : Icons.add_circle_outline,
+                                size: 26,
+                                color: _tools
+                                    ? RelayTheme.blue
+                                    : RelayTheme.blue.withOpacity(.85)))),
+                    const SizedBox(width: 6),
+                    Expanded(
+                        child: Container(
+                            decoration: BoxDecoration(
+                                // 回复/备注共用白底，避免切换时输入框颜色跳变。
+                                color: s.surface,
+                                border: Border.all(
+                                    color: s.outlineVariant.withOpacity(.6)),
+                                borderRadius: BorderRadius.circular(9)),
+                            child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Expanded(
+                                      child: TextField(
+                                          controller: c.controller,
+                                          focusNode: c.focusNode,
+                                          minLines: 2,
+                                          maxLines: 5,
+                                          onChanged: c.onChanged,
+                                          textInputAction:
+                                              TextInputAction.newline,
+                                          keyboardType: TextInputType.multiline,
+                                          style: withWebEmojiFallback(
+                                              const TextStyle(
+                                                  fontSize: 15, height: 1.6)),
+                                          decoration: InputDecoration(
+                                              hintText: c.noteMode
+                                                  ? '添加内部备注…'
+                                                  : c.lockPublicReply
+                                                      ? '请先完成接待或转派'
+                                                      : c.visitorTyping
+                                                          ? '对方正在输入…'
+                                                          : '输入消息…',
+                                              isDense: true,
+                                              filled: false,
+                                              border: InputBorder.none,
+                                              enabledBorder: InputBorder.none,
+                                              focusedBorder: InputBorder.none,
+                                              contentPadding:
+                                                  const EdgeInsets.fromLTRB(
+                                                      11, 9, 0, 9)))),
+                                  IconButton(
+                                      tooltip: '表情',
+                                      padding: EdgeInsets.zero,
+                                      constraints:
+                                          const BoxConstraints(minWidth: 36),
+                                      onPressed: () => setState(() {
+                                            _emojiOpen = !_emojiOpen;
+                                            if (_emojiOpen) _tools = false;
+                                          }),
+                                      icon: const Icon(
+                                          Icons
+                                              .sentiment_satisfied_alt_outlined,
+                                          size: 22,
+                                          color: RelayTheme.amber)),
+                                ]))),
+                    const SizedBox(width: 6),
+                    ValueListenableBuilder<TextEditingValue>(
+                        valueListenable: c.controller,
+                        builder: (context, value, _) {
+                          final busy = c.sending || c.uploading;
+                          final canSend = !busy &&
+                              !c.lockPublicReply &&
+                              (value.text.trim().isNotEmpty ||
+                                  c.pending.isNotEmpty);
+                          // 可发送/发送中：蓝渐变 + 白箭头；禁用：浅灰底灰箭头。
+                          final active = canSend || busy;
+                          return SizedBox(
+                              width: 44,
+                              height: 44,
+                              child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    gradient: active
+                                        ? RelayTheme.actionGradient
+                                        : null,
+                                    color: active
+                                        ? null
+                                        : s.surfaceContainerHighest,
+                                    borderRadius: BorderRadius.circular(9),
+                                  ),
+                                  child: IconButton(
+                                      tooltip: c.noteMode ? '保存备注' : '发送',
+                                      style: IconButton.styleFrom(
+                                        backgroundColor: Colors.transparent,
+                                        foregroundColor: active
+                                            ? Colors.white
+                                            : s.onSurfaceVariant,
+                                        disabledBackgroundColor:
+                                            Colors.transparent,
+                                        disabledForegroundColor: active
+                                            ? Colors.white
+                                            : s.onSurfaceVariant,
+                                        shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(9)),
+                                      ),
+                                      onPressed: canSend ? c.onSend : null,
+                                      icon: busy
+                                          ? const SizedBox(
+                                              width: 18,
+                                              height: 18,
+                                              child: CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                  color: Colors.white))
+                                          : Icon(
+                                              c.noteMode
+                                                  ? Icons.check
+                                                  : Icons.arrow_upward,
+                                              size: 22,
+                                              color: active
+                                                  ? Colors.white
+                                                  : s.onSurfaceVariant,
+                                            ))));
+                        }),
+                  ]),
+                  if (_emojiOpen)
+                    Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: ComposerEmojiPanel(onPick: _insert)),
+                  if (_tools)
+                    Padding(
+                        padding: const EdgeInsets.only(top: 18, bottom: 6),
+                        child: Wrap(spacing: 10, runSpacing: 16, children: [
+                          tool(
+                              Icons.image_outlined,
+                              '图片',
+                              c.uploading || c.lockPublicReply
+                                  ? null
+                                  : () {
+                                      c.onPickImage();
+                                    },
+                              accent: RelayTheme.teal,
+                              soft: RelayTheme.tealSoft),
+                          if (c.supportsFiles)
+                            tool(
+                                Icons.insert_drive_file_outlined,
+                                '文件',
+                                c.uploading || c.lockPublicReply
+                                    ? null
+                                    : () {
+                                        c.onPickFile();
+                                      },
+                                accent: RelayTheme.blue,
+                                soft: RelayTheme.blueSoft),
+                          SizedBox(
+                              width: 66,
+                              child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                        width: 48,
+                                        height: 48,
+                                        decoration: BoxDecoration(
+                                            color: RelayTheme.magentaSoft,
+                                            borderRadius:
+                                                BorderRadius.circular(12)),
+                                        child: IconTheme(
+                                            data: const IconThemeData(
+                                                color: RelayTheme.magenta,
+                                                size: 23),
+                                            child: c.voiceControl)),
+                                    const SizedBox(height: 5),
+                                    const Text('语音',
+                                        style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                            color: RelayTheme.magenta))
+                                  ])),
+                          if (c.canned.isNotEmpty)
+                            tool(Icons.bolt_outlined, '常用回复', () {
+                              MobileCannedBottomSheet.show(
+                                context: context,
+                                canned: c.canned,
+                                onSelect: (selected) {
+                                  c.controller.text = selected;
+                                  c.controller.selection =
+                                      TextSelection.collapsed(
+                                          offset: selected.length);
+                                  c.onChanged(selected);
+                                  setState(() => _tools = false);
+                                  c.focusNode.requestFocus();
+                                },
+                              );
+                            },
+                                accent: RelayTheme.amber,
+                                soft: RelayTheme.amberSoft),
+                          tool(Icons.edit_note_outlined, '内部备注', () {
+                            c.onToggleNote(true);
+                            setState(() => _tools = false);
+                            c.focusNode.requestFocus();
+                          },
+                              accent: RelayTheme.violet,
+                              soft: RelayTheme.violetSoft),
+                        ])),
+                ])));
   }
 }
 
@@ -4104,283 +4149,288 @@ class _TransferDialogState extends State<_TransferDialog> {
       scopesRoute: true,
       explicitChildNodes: true,
       child: Dialog(
-      backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 440),
-        child: Material(
-          color: Colors.white.withOpacity(0.96),
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-            side: BorderSide(color: scheme.outlineVariant.withOpacity(0.95)),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Container(
-                height: 4,
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      Color(0xFF5B8CFF),
-                      Color(0xFF845EF7),
-                      Color(0xFF12B886),
-                    ],
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440),
+          child: Material(
+            color: Colors.white.withOpacity(0.96),
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+              side: BorderSide(color: scheme.outlineVariant.withOpacity(0.95)),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  height: 4,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        Color(0xFF5B8CFF),
+                        Color(0xFF845EF7),
+                        Color(0xFF12B886),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(22, 18, 22, 18),
-                child: ListenableBuilder(
-                  listenable: widget.workbench,
-                  builder: (context, _) {
-                    final current = widget.workbench.selected?.assigneeId;
-                    final candidates = widget.workbench.agents
-                        .where((agent) => agent.id != current)
-                        .toList(growable: false);
-                    return Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          lead,
-                          style: TextStyle(
-                            fontSize: 12,
-                            height: 1.7,
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-                        Text(
-                          assigning ? '分配给' : '转交给',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        if (candidates.isEmpty)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            child: Text(
-                              '没有可分配的客服，请先给团队成员分配此客服入口。',
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: scheme.onSurfaceVariant,
-                              ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(22, 18, 22, 18),
+                  child: ListenableBuilder(
+                    listenable: widget.workbench,
+                    builder: (context, _) {
+                      final current = widget.workbench.selected?.assigneeId;
+                      final candidates = widget.workbench.agents
+                          .where((agent) => agent.id != current)
+                          .toList(growable: false);
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
                             ),
-                          )
-                        else
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(maxHeight: 200),
-                            child: ListView.separated(
-                              shrinkWrap: true,
-                              itemCount: candidates.length,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(height: 6),
-                              itemBuilder: (context, index) {
-                                final agent = candidates[index];
-                                final selected = _agentId == agent.id;
-                                return Material(
-                                  color: Colors.transparent,
-                                  child: InkWell(
-                                    borderRadius: BorderRadius.circular(12),
-                                    onTap: () =>
-                                        setState(() => _agentId = agent.id),
-                                    child: AnimatedContainer(
-                                      duration:
-                                          const Duration(milliseconds: 160),
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 12, vertical: 10),
-                                      decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(
-                                          color: selected
-                                              ? const Color(0xFFB8C9FF)
-                                              : scheme.outlineVariant,
-                                        ),
-                                        gradient: LinearGradient(
-                                          begin: Alignment.topLeft,
-                                          end: Alignment.bottomRight,
-                                          colors: selected
-                                              ? const [
-                                                  Color(0xFFE8EFFF),
-                                                  Color(0xFFE0E9FF),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            lead,
+                            style: TextStyle(
+                              fontSize: 12,
+                              height: 1.7,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          Text(
+                            assigning ? '分配给' : '转交给',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          if (candidates.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              child: Text(
+                                '没有可分配的客服，请先给团队成员分配此客服入口。',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                            )
+                          else
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxHeight: 200),
+                              child: ListView.separated(
+                                shrinkWrap: true,
+                                itemCount: candidates.length,
+                                separatorBuilder: (_, __) =>
+                                    const SizedBox(height: 6),
+                                itemBuilder: (context, index) {
+                                  final agent = candidates[index];
+                                  final selected = _agentId == agent.id;
+                                  return Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      borderRadius: BorderRadius.circular(12),
+                                      onTap: () =>
+                                          setState(() => _agentId = agent.id),
+                                      child: AnimatedContainer(
+                                        duration:
+                                            const Duration(milliseconds: 160),
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 12, vertical: 10),
+                                        decoration: BoxDecoration(
+                                          borderRadius:
+                                              BorderRadius.circular(12),
+                                          border: Border.all(
+                                            color: selected
+                                                ? const Color(0xFFB8C9FF)
+                                                : scheme.outlineVariant,
+                                          ),
+                                          gradient: LinearGradient(
+                                            begin: Alignment.topLeft,
+                                            end: Alignment.bottomRight,
+                                            colors: selected
+                                                ? const [
+                                                    Color(0xFFE8EFFF),
+                                                    Color(0xFFE0E9FF),
+                                                  ]
+                                                : const [
+                                                    Color(0xFFFFFFFF),
+                                                    Color(0xFFF7F9FF),
+                                                  ],
+                                          ),
+                                          boxShadow: selected
+                                              ? [
+                                                  BoxShadow(
+                                                    color:
+                                                        const Color(0xFF3263FF)
+                                                            .withOpacity(0.08),
+                                                    blurRadius: 18,
+                                                    offset: const Offset(0, 8),
+                                                  ),
                                                 ]
-                                              : const [
-                                                  Color(0xFFFFFFFF),
-                                                  Color(0xFFF7F9FF),
-                                                ],
+                                              : null,
                                         ),
-                                        boxShadow: selected
-                                            ? [
-                                                BoxShadow(
-                                                  color: const Color(0xFF3263FF)
-                                                      .withOpacity(0.08),
-                                                  blurRadius: 18,
-                                                  offset: const Offset(0, 8),
-                                                ),
-                                              ]
-                                            : null,
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          Container(
-                                            width: 32,
-                                            height: 32,
-                                            alignment: Alignment.center,
-                                            decoration: BoxDecoration(
-                                              color: RelayTheme.avatarTray(
-                                                  agent.id),
-                                              borderRadius:
-                                                  BorderRadius.circular(10),
-                                            ),
-                                            child: Text(
-                                              initials(agent.displayName),
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.w600,
-                                                color: RelayTheme.avatarInk(
+                                        child: Row(
+                                          children: [
+                                            Container(
+                                              width: 32,
+                                              height: 32,
+                                              alignment: Alignment.center,
+                                              decoration: BoxDecoration(
+                                                color: RelayTheme.avatarTray(
                                                     agent.id),
+                                                borderRadius:
+                                                    BorderRadius.circular(10),
+                                              ),
+                                              child: Text(
+                                                initials(agent.displayName),
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: RelayTheme.avatarInk(
+                                                      agent.id),
+                                                ),
                                               ),
                                             ),
-                                          ),
-                                          const SizedBox(width: 10),
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  agent.displayName,
-                                                  style: const TextStyle(
-                                                    fontSize: 13,
-                                                    fontWeight: FontWeight.w600,
+                                            const SizedBox(width: 10),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    agent.displayName,
+                                                    style: const TextStyle(
+                                                      fontSize: 13,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
                                                   ),
+                                                  const SizedBox(height: 2),
+                                                  Text(
+                                                    '客服 · ${_presenceLabel(agent)} · 接待中 ${agent.openConversations}',
+                                                    style: TextStyle(
+                                                      fontSize: 11,
+                                                      color: scheme
+                                                          .onSurfaceVariant,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            if (selected)
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 8,
+                                                        vertical: 3),
+                                                decoration: BoxDecoration(
+                                                  color:
+                                                      const Color(0xFFEDF2FF),
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                          999),
                                                 ),
-                                                const SizedBox(height: 2),
-                                                Text(
-                                                  '客服 · ${_presenceLabel(agent)} · 接待中 ${agent.openConversations}',
+                                                child: const Text(
+                                                  '已选',
                                                   style: TextStyle(
                                                     fontSize: 11,
-                                                    color: scheme
-                                                        .onSurfaceVariant,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: Color(0xFF3263FF),
                                                   ),
                                                 ),
-                                              ],
-                                            ),
-                                          ),
-                                          if (selected)
-                                            Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      horizontal: 8,
-                                                      vertical: 3),
-                                              decoration: BoxDecoration(
-                                                color: const Color(0xFFEDF2FF),
-                                                borderRadius:
-                                                    BorderRadius.circular(999),
                                               ),
-                                              child: const Text(
-                                                '已选',
-                                                style: TextStyle(
-                                                  fontSize: 11,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: Color(0xFF3263FF),
-                                                ),
-                                              ),
-                                            ),
-                                        ],
+                                          ],
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        const SizedBox(height: 14),
-                        Text(
-                          '转交备注',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Semantics(
-                          identifier: 'desk.transfer.note',
-                          label: '转交备注',
-                          textField: true,
-                          child: TextField(
-                            key: const ValueKey('desk-transfer-note'),
-                            controller: _note,
-                            minLines: 2,
-                            maxLines: 4,
-                            decoration: const InputDecoration(
-                              hintText: '说明转交原因，便于同事接手（选填）',
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            TextButton(
-                              onPressed: () => Navigator.of(context).pop(),
-                              child: const Text('取消'),
-                            ),
-                            const SizedBox(width: 8),
-                            DecoratedBox(
-                              decoration: BoxDecoration(
-                                gradient: RelayTheme.actionGradient,
-                                borderRadius: BorderRadius.circular(12),
-                                boxShadow: RelayTheme.popShadow(),
+                                  );
+                                },
                               ),
-                              child: FilledButton(
-                                key: const ValueKey('desk-transfer-confirm'),
-                                onPressed: _agentId == null
-                                    ? null
-                                    : () => Navigator.of(context).pop(
-                                          (_agentId!, _note.text.trim()),
-                                        ),
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: Colors.transparent,
-                                  disabledBackgroundColor: Colors.transparent,
-                                  shadowColor: Colors.transparent,
-                                  foregroundColor: Colors.white,
-                                  elevation: 0,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
+                            ),
+                          const SizedBox(height: 14),
+                          Text(
+                            '转交备注',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Semantics(
+                            identifier: 'desk.transfer.note',
+                            label: '转交备注',
+                            textField: true,
+                            child: TextField(
+                              key: const ValueKey('desk-transfer-note'),
+                              controller: _note,
+                              minLines: 2,
+                              maxLines: 4,
+                              decoration: const InputDecoration(
+                                hintText: '说明转交原因，便于同事接手（选填）',
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              TextButton(
+                                onPressed: () => Navigator.of(context).pop(),
+                                child: const Text('取消'),
+                              ),
+                              const SizedBox(width: 8),
+                              DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: RelayTheme.actionGradient,
+                                  borderRadius: BorderRadius.circular(12),
+                                  boxShadow: RelayTheme.popShadow(),
                                 ),
-                                child: Text(assigning ? '确认分配' : '确认转交'),
+                                child: FilledButton(
+                                  key: const ValueKey('desk-transfer-confirm'),
+                                  onPressed: _agentId == null
+                                      ? null
+                                      : () => Navigator.of(context).pop(
+                                            (_agentId!, _note.text.trim()),
+                                          ),
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: Colors.transparent,
+                                    disabledBackgroundColor: Colors.transparent,
+                                    shadowColor: Colors.transparent,
+                                    foregroundColor: Colors.white,
+                                    elevation: 0,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                  child: Text(assigning ? '确认分配' : '确认转交'),
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    );
-                  },
+                            ],
+                          ),
+                        ],
+                      );
+                    },
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
-    ),
     );
   }
 }

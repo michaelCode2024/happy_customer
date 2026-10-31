@@ -89,6 +89,7 @@ class _PlatformLoginPageState extends State<PlatformLoginPage> {
       badgeLabel: '平台运营',
       heroKind: LoginHeroKind.platform,
       onSurfaceSwitch: widget.controller.busy ? null : widget.onAgentLogin,
+      supportOrigin: () => _server.text,
       child: ListenableBuilder(
         listenable: widget.controller,
         builder: (context, _) {

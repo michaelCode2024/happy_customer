@@ -205,10 +205,33 @@ func (a *API) requireAgent(next func(http.ResponseWriter, *http.Request, auth.Pr
 			failCode(w, 401, "AGENT_SESSION_REVOKED", "账号或企业已停用，请重新登录")
 			return
 		}
+		if a.mustChangePassword(r.Context(), principal.AgentID) && !consoleAllowsUnchangedPassword(r) {
+			failCode(w, 403, "PASSWORD_CHANGE_REQUIRED", "请先修改初始密码后再使用工作台")
+			return
+		}
 		if !a.allowPlanRoute(w, r, principal) {
 			return
 		}
 		next(w, r, principal)
+	}
+}
+
+func (a *API) mustChangePassword(ctx context.Context, agentID uuid.UUID) bool {
+	var must bool
+	err := a.db.QueryRow(ctx, `select must_change_password from agent where id=$1`, agentID).Scan(&must)
+	return err == nil && must
+}
+
+func consoleAllowsUnchangedPassword(r *http.Request) bool {
+	switch r.URL.Path {
+	case "/api/v1/console/logout":
+		return r.Method == http.MethodPost
+	case "/api/v1/console/me":
+		return r.Method == http.MethodGet
+	case "/api/v1/console/me/password":
+		return r.Method == http.MethodPost
+	default:
+		return false
 	}
 }
 

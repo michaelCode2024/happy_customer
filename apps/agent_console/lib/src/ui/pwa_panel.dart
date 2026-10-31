@@ -11,10 +11,14 @@ class PwaPanel extends StatefulWidget {
       this.api,
       this.onReconnect,
       this.settingsOnly = false,
-      this.hideUpdateBanner = false});
+      this.hideUpdateBanner = false,
+      this.autoPrompt = true});
   final TongYuApi? api;
   final bool settingsOnly;
   final bool hideUpdateBanner;
+
+  /// 根上已经会弹出更新框。工作台这一条只留横幅，避免两个入口同时各弹一次。
+  final bool autoPrompt;
   final Future<void> Function()? onReconnect;
   @override
   State<PwaPanel> createState() => _PwaPanelState();
@@ -39,7 +43,9 @@ class _PwaPanelState extends State<PwaPanel> {
         if (mounted && pwaStatus()['installed'] != true) _installation();
       });
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) => _offerUpdate());
+    if (widget.autoPrompt) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _offerUpdate());
+    }
     if (kIsWeb)
       _timer = Timer.periodic(const Duration(seconds: 2), (_) {
         if (!mounted) return;
@@ -48,7 +54,7 @@ class _PwaPanelState extends State<PwaPanel> {
           _status = pwaStatus();
           _offline = browserOffline || (widget.api?.isOffline ?? false);
         });
-        unawaited(_offerUpdate());
+        if (widget.autoPrompt) unawaited(_offerUpdate());
         if (wasBrowserOffline && !browserOffline) unawaited(_reconnect());
       });
   }
@@ -85,7 +91,9 @@ class _PwaPanelState extends State<PwaPanel> {
     final ok = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
-        builder: (c) => AlertDialog(
+        builder: (c) => PopScope(
+            canPop: false,
+            child: AlertDialog(
                 title: const Text('通语有新版本'),
                 content: SizedBox(
                     width: 400,
@@ -109,24 +117,33 @@ class _PwaPanelState extends State<PwaPanel> {
                       ],
                     ))),
                 actions: [
-                  TextButton(
-                      onPressed: () => Navigator.pop(c, false),
-                      child: const Text('稍后')),
                   FilledButton(
                       onPressed: () => Navigator.pop(c, true),
                       child: const Text('立即更新')),
-                ]));
+                ])));
     if (ok != true || !mounted) return;
-    // 等待输入框的草稿防抖与本机存储队列完成，再允许重载。
-    await Future<void>.delayed(const Duration(milliseconds: 500));
-    await widget.api?.offlineStore?.flush();
-    if (!mounted) return;
-    if (widget.api?.offlineStore?.writeFailed == true) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('草稿尚未可靠保存，请先复制文字，再更新应用')));
-      return;
+    // 草稿落盘期间先占住提示，避免另一个入口把同一个更新框再打开。
+    await pwaAction('holdUpdate');
+    var handedOff = false;
+    try {
+      // 等待输入框的草稿防抖与本机存储队列完成，再允许重载。
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      await widget.api?.offlineStore?.flush();
+      if (!mounted) return;
+      if (widget.api?.offlineStore?.writeFailed == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('草稿尚未可靠保存，请先复制文字，再更新应用')));
+        return;
+      }
+      final message = await pwaAction('update');
+      handedOff = message == '正在更新…';
+      if (mounted && message.isNotEmpty) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(message)));
+      }
+    } finally {
+      if (!handedOff) await pwaAction('releaseUpdate');
     }
-    await _action('update');
   }
 
   Future<void> _reconnect() async {

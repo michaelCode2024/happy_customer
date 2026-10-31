@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'fake_platform_api.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tongyu_agent_console/main.dart';
@@ -189,8 +190,16 @@ void main() {
     });
     await boot(tester, MemoryCredentialStore());
     expect(BrowserChrome.top.value, const Color(0xFF2251F5));
+    final overlay = tester
+        .widget<AnnotatedRegion<SystemUiOverlayStyle>>(
+            find.byType(AnnotatedRegion<SystemUiOverlayStyle>).first)
+        .value;
+    expect(overlay.statusBarColor, Colors.transparent,
+        reason: '状态栏透明后页面顶部颜色才能透出来');
+    expect(overlay.statusBarIconBrightness, Brightness.light);
 
-    await tester.drag(find.byType(SingleChildScrollView), const Offset(0, -320));
+    await tester.drag(
+        find.byType(SingleChildScrollView), const Offset(0, -320));
     await tester.pumpAndSettle();
     expect(BrowserChrome.top.value, const Color(0xFFFFFFFF));
   });

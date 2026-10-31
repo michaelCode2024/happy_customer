@@ -1,13 +1,16 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
-/// 应用只消费一次底部安全距离，子页面和导航栏不再各自叠加。
+/// 只把底部安全距离写进 MediaQuery，不把每个页面整体上移。
+///
+/// Home 条那一截由贴底的导航栏、输入栏自己画进背景里。键盘弹起时改为 0，
+/// 避免和 viewInsets 叠成两段空白。
 class AppSafeArea extends StatelessWidget {
   const AppSafeArea({super.key, required this.child, this.browserBottom = 0});
   final Widget child;
   final double browserBottom;
 
-  /// 需要让出的底部高度。外层补色和这里必须用同一个值，否则色带会差几像素。
+  /// 贴底栏应让出的高度。键盘弹起时为 0。
   static double resolveBottom(MediaQueryData media, double browserBottom) =>
       media.viewInsets.bottom > 0
           ? 0.0
@@ -17,12 +20,15 @@ class AppSafeArea extends StatelessWidget {
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
     final bottom = resolveBottom(media, browserBottom);
+    final physical = media.viewInsets.bottom > 0
+        ? 0.0
+        : math.max(media.viewPadding.bottom, browserBottom);
     return MediaQuery(
       data: media.copyWith(
-          padding: media.padding.copyWith(bottom: bottom),
-          viewPadding: media.viewPadding.copyWith(
-              bottom: math.max(media.viewPadding.bottom, browserBottom))),
-      child: SafeArea(top: false, left: false, right: false, child: child),
+        padding: media.padding.copyWith(bottom: bottom),
+        viewPadding: media.viewPadding.copyWith(bottom: physical),
+      ),
+      child: child,
     );
   }
 }

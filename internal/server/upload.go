@@ -113,7 +113,7 @@ func (a *API) canUploadTo(r *http.Request, principal auth.Principal, conversatio
 	}
 	if principal.Kind == auth.KindAgent {
 		current, active := a.currentAgent(r.Context(), principal)
-		if !active || !a.authn.SessionValid(r.Context(), principal.SessionID, principal.AgentID) {
+		if !active || !a.authn.SessionValid(r.Context(), principal.SessionID, principal.AgentID) || a.mustChangePassword(r.Context(), principal.AgentID) {
 			return false
 		}
 		principal = current
@@ -230,7 +230,7 @@ func (a *API) authorizeAttachment(r *http.Request, tenantID, conversationID uuid
 	}
 	if principal.Kind == auth.KindAgent {
 		current, active := a.currentAgent(r.Context(), principal)
-		if !active || !a.authn.SessionValid(r.Context(), principal.SessionID, principal.AgentID) {
+		if !active || !a.authn.SessionValid(r.Context(), principal.SessionID, principal.AgentID) || a.mustChangePassword(r.Context(), principal.AgentID) {
 			return false
 		}
 		principal = current

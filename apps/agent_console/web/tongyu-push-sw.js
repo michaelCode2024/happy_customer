@@ -29,7 +29,18 @@ self.addEventListener('activate', event => event.waitUntil((async () => {
   await self.clients.claim();
 })()));
 self.addEventListener('message', event => {
-  if (event.data?.type === 'ACTIVATE_UPDATE') self.skipWaiting();
+  if (event.data?.type === 'ACTIVATE_UPDATE') {
+    event.waitUntil((async () => {
+      // 先接管再让页面刷新。先刷新时，新页面起来这份更新还在 waiting，提示会再出现。
+      await self.skipWaiting();
+      const pages = await self.clients.matchAll({type: 'window', includeUncontrolled: true});
+      for (const page of pages) {
+        let path = '';
+        try { path = new URL(page.url).pathname; } catch (_) { continue; }
+        if (path.startsWith('/console/')) page.postMessage({type: 'PWA_FORCE_RELOAD'});
+      }
+    })());
+  }
   if (event.data?.type === 'SHELL_STATUS' && event.ports[0]) {
     event.waitUntil(caches.open(SHELL_CACHE).then(cache=>cache.match('/console/pwa-assets.json')).then(async marker=>{const manifest=marker?await marker.json():null;event.ports[0].postMessage({ready:!!marker,version:SHELL_VERSION,release:manifest?.release||{}});}));
   }

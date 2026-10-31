@@ -41,6 +41,8 @@ type API struct {
 	aiAssistRate *ratelimit.Limiter
 	logger       *slog.Logger
 	startedAt    time.Time
+	// 有新推送时立刻投递，不等下一次 3 秒扫描。
+	pushNudge chan struct{}
 }
 
 func New(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) (*API, error) {
@@ -92,6 +94,7 @@ func New(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) (*API, error)
 		aiAssistRate: ratelimit.New(cfg.RateLimit.AssistPerMinute, cfg.RateLimit.AssistBurst),
 		logger:       logger,
 		startedAt:    time.Now(),
+		pushNudge:    make(chan struct{}, 1),
 	}
 	return api, nil
 }

@@ -64,6 +64,7 @@ class AgentProfile {
     required this.displayName,
     required this.role,
     this.presence,
+    this.mustChangePassword = false,
   });
 
   factory AgentProfile.fromJson(Map<String, dynamic> json) => AgentProfile(
@@ -72,6 +73,7 @@ class AgentProfile {
         displayName: asString(json['displayName']),
         role: asString(json['role']),
         presence: asNullableString(json['presence']),
+        mustChangePassword: asBool(json['mustChangePassword']),
       );
 
   final String id;
@@ -84,6 +86,9 @@ class AgentProfile {
   /// ONLINE, AWAY, OFFLINE, or null before the first presence frame.
   final String? presence;
 
+  /// 初始密码或被他人重置的密码，登录后必须先改掉才能进工作台。
+  final bool mustChangePassword;
+
   bool get canManageKnowledge => role == 'SUPERVISOR';
 
   bool get canViewReports => role == 'SUPERVISOR';
@@ -94,6 +99,7 @@ class AgentProfile {
         'displayName': displayName,
         'role': role,
         if (presence != null) 'presence': presence,
+        'mustChangePassword': mustChangePassword,
       };
 }
 

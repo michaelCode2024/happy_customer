@@ -318,7 +318,7 @@ func (a *API) listConversations(w http.ResponseWriter, r *http.Request, p auth.P
 	var css, logo, avatar, font string
 	var radius int
 	if err := a.db.QueryRow(r.Context(), `select coalesce(i.welcome_message,''), coalesce(i.offline_message,''), coalesce(s.enabled,false),
-	 (select count(*)::int from agent_presence ap join agent ag on ag.id=ap.agent_id join agent_inbox ai on ai.agent_id=ag.id where ai.inbox_id=i.id and ag.status='ACTIVE' and ap.status='ONLINE')
+	 (select count(*)::int from agent_presence ap join agent ag on ag.id=ap.agent_id join agent_inbox ai on ai.agent_id=ag.id where ai.inbox_id=i.id and ag.status='ACTIVE' and `+agentOnlineRecently+`)
 	 ,coalesce(i.custom_css,''),coalesce(i.logo_url,''),coalesce(i.avatar_url,''),coalesce(i.font_family,''),coalesce(i.bubble_radius,12)
 	 from inbox i left join ai_setting s on s.inbox_id=i.id where i.id=$1 and i.tenant_id=$2 and i.status='ACTIVE'`, p.InboxID, p.TenantID).Scan(&welcome, &offline, &aiEnabled, &online, &css, &logo, &avatar, &font, &radius); err != nil {
 		fail(w, 404, "客服入口已停用")

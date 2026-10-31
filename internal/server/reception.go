@@ -56,6 +56,7 @@ func (a *API) acceptReception(ctx context.Context, tenant, conversation, agent u
 	if err = tx.Commit(ctx); err != nil {
 		return err
 	}
+	a.nudgePush()
 	a.flushReceptionNotices(ctx)
 	return nil
 }

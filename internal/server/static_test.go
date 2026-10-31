@@ -29,11 +29,11 @@ func TestStaticRoutes(t *testing.T) {
 	for path, content := range map[string]string{
 		"widget.js":            "window.TongYu = {};",
 		"console/index.html":   `<base href="/console/">`,
-		"console/main.dart.js":                    "console.log('console');",
-		"console/canvaskit/chromium/canvaskit.wasm": "wasm-bytes",
+		"console/main.dart.js": "console.log('console');",
+		"console/canvaskit/chromium/canvaskit.wasm":   "wasm-bytes",
 		"console/assets/fonts/NotoSansSC-Regular.otf": "font-bytes",
-		"website/index.html":   `<title>通语 TongYu</title><a href="/console/?surface=agent">登录</a>`,
-		"website/site.css":     "body{margin:0}",
+		"website/index.html":                          `<title>通语 TongYu</title><a href="/console/?surface=agent">登录</a>`,
+		"website/site.css":                            "body{margin:0}",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(path)), []byte(content), 0644); err != nil {
 			t.Fatal(err)
@@ -68,6 +68,26 @@ func TestStaticRoutes(t *testing.T) {
 				t.Fatalf("status=%d body=%q", r.Code, r.Body.String())
 			}
 		})
+	}
+	support := httptest.NewRecorder()
+	mux.ServeHTTP(support, httptest.NewRequest(http.MethodGet, "/h5/tongyu-official-support?subject=工作台技术支持&storage=tongyu.console.support&source=PC&displayName=彩站主管&title=通语技术支持", nil))
+	supportBody := support.Body.String()
+	for _, want := range []string{
+		`"inboxKey":"tongyu-official-support"`,
+		`"subject":"工作台技术支持"`,
+		`"storage":"tongyu.console.support"`,
+		`"source":"PC"`,
+		`"displayName":"彩站主管"`,
+		`"title":"通语技术支持"`,
+	} {
+		if !strings.Contains(supportBody, want) {
+			t.Fatalf("missing %s in %s", want, supportBody)
+		}
+	}
+	rejected := httptest.NewRecorder()
+	mux.ServeHTTP(rejected, httptest.NewRequest(http.MethodGet, "/h5/tongyu-official-support?storage=../other-inbox", nil))
+	if strings.Contains(rejected.Body.String(), "storage") || strings.Contains(rejected.Body.String(), "other-inbox") {
+		t.Fatalf("rejected storage leaked: %s", rejected.Body.String())
 	}
 	redirect := httptest.NewRecorder()
 	mux.ServeHTTP(redirect, httptest.NewRequest(http.MethodGet, "/console", nil))

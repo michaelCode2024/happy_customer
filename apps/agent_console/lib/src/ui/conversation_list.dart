@@ -136,14 +136,12 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
                                   minimumSize: const Size(0, 28),
                                   tapTargetSize:
                                       MaterialTapTargetSize.shrinkWrap,
-                                  textStyle: const TextStyle(
-                                    fontSize: 11.5,
-                                    fontWeight: FontWeight.w600,
-                                  ),
                                 ),
                                 child: Text(
                                   '含已解决',
                                   style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w600,
                                     decoration: workbench.includeResolved
                                         ? TextDecoration.underline
                                         : TextDecoration.none,

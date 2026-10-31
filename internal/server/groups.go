@@ -49,6 +49,10 @@ func (a *API) groupAuth(next func(http.ResponseWriter, *http.Request, auth.Princ
 				fail(w, 401, "账号已停用")
 				return
 			}
+			if a.mustChangePassword(r.Context(), p.AgentID) {
+				failCode(w, 403, "PASSWORD_CHANGE_REQUIRED", "请先修改初始密码后再使用工作台")
+				return
+			}
 		}
 		if !a.allowPlanRoute(w, r, p) {
 			return
@@ -803,6 +807,10 @@ func (a *API) groupSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	if p.Kind == auth.KindAgent && !a.authn.SessionValid(r.Context(), p.SessionID, p.AgentID) {
 		fail(w, 401, "登录已失效")
+		return
+	}
+	if p.Kind == auth.KindAgent && a.mustChangePassword(r.Context(), p.AgentID) {
+		failCode(w, 403, "PASSWORD_CHANGE_REQUIRED", "请先修改初始密码后再使用工作台")
 		return
 	}
 	conn, e := a.accept(r, w)

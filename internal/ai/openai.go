@@ -122,7 +122,7 @@ func (p *openAIProvider) Generate(ctx context.Context, messages []Message) (stri
 	if len(parsed.Choices) == 0 {
 		return "", Usage{}, errors.New("model returned no choices")
 	}
-	return strings.TrimSpace(parsed.Choices[0].Message.Content), usageOf(parsed.Usage), nil
+	return SanitizeText(strings.TrimSpace(parsed.Choices[0].Message.Content)), usageOf(parsed.Usage), nil
 }
 
 // Stream forwards answer fragments as the model writes them. The channel closes
@@ -193,11 +193,12 @@ func (p *openAIProvider) Stream(ctx context.Context, messages []Message) (<-chan
 				return
 			}
 			for _, choice := range chunk.Choices {
-				if choice.Delta.Content == "" {
+				content := SanitizeText(choice.Delta.Content)
+				if content == "" {
 					continue
 				}
 				select {
-				case out <- choice.Delta.Content:
+				case out <- content:
 				case <-streamCtx.Done():
 					return
 				}

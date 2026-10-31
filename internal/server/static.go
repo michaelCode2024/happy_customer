@@ -21,7 +21,7 @@ var h5Page = template.Must(template.New("h5").Parse(`<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 	<title>通语客服</title>
-  <style>html,body{margin:0;width:100%;height:100%;overflow:hidden;position:fixed;inset:0;background:#f5f6f8}</style>
+  <style>html,body{margin:0;width:100%;height:100%;overflow:hidden;position:fixed;inset:0;background:#f5f6f8;overscroll-behavior:none}</style>
 </head>
 <body>
   <script>window.TongYuSettings={{.SettingsJSON}};</script>
@@ -96,8 +96,9 @@ func (a *API) registerStatic(mux *http.ServeMux) {
 			"autoOpen":     true,
 			"parentOrigin": firstNonEmpty(r.URL.Query().Get("parentOrigin"), "*"),
 		}
-		if r.URL.Query().Get("source") == "APP" {
-			settings["source"] = "APP"
+		switch source := r.URL.Query().Get("source"); source {
+		case "APP", "PC", "WEB":
+			settings["source"] = source
 		}
 		if theme := r.URL.Query().Get("theme"); theme == "light" || theme == "dark" {
 			settings["theme"] = theme
@@ -105,14 +106,20 @@ func (a *API) registerStatic(mux *http.ServeMux) {
 		if color := r.URL.Query().Get("primaryColor"); color != "" {
 			settings["primaryColor"] = color
 		}
-		if title := r.URL.Query().Get("title"); title != "" {
+		if title := h5QueryText(r, "title", 40); title != "" {
 			settings["title"] = title
 		}
 		if externalID := r.URL.Query().Get("externalId"); externalID != "" {
 			settings["externalId"] = externalID
 		}
-		if name := r.URL.Query().Get("displayName"); name != "" {
+		if name := h5QueryText(r, "displayName", 80); name != "" {
 			settings["displayName"] = name
+		}
+		if subject := h5QueryText(r, "subject", 80); subject != "" {
+			settings["subject"] = subject
+		}
+		if storage := h5StorageKey(strings.TrimSpace(r.URL.Query().Get("storage"))); storage != "" {
+			settings["storage"] = storage
 		}
 		encoded, err := json.Marshal(settings)
 		if err != nil {
@@ -260,6 +267,29 @@ func (a *API) setFrameAncestors(w http.ResponseWriter) {
 		ancestors = []string{"*"}
 	}
 	w.Header().Set("Content-Security-Policy", "frame-ancestors "+strings.Join(ancestors, " "))
+}
+
+func h5QueryText(r *http.Request, name string, max int) string {
+	value := strings.TrimSpace(r.URL.Query().Get(name))
+	runes := []rune(value)
+	if max > 0 && len(runes) > max {
+		return string(runes[:max])
+	}
+	return value
+}
+
+func h5StorageKey(value string) string {
+	if value == "" || len(value) > 64 {
+		return ""
+	}
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.' || r == '_' || r == '-':
+		default:
+			return ""
+		}
+	}
+	return value
 }
 
 func firstNonEmpty(values ...string) string {

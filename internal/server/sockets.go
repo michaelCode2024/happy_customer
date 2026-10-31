@@ -109,6 +109,10 @@ func (a *API) consoleSocket(w http.ResponseWriter, r *http.Request) {
 		fail(w, 401, "登录已失效")
 		return
 	}
+	if a.mustChangePassword(r.Context(), principal.AgentID) {
+		failCode(w, 403, "PASSWORD_CHANGE_REQUIRED", "请先修改初始密码后再使用工作台")
+		return
+	}
 	conn, err := a.accept(r, w)
 	if err != nil {
 		return

@@ -571,33 +571,40 @@ class _ManualQuotaEditorState extends State<ManualQuotaEditor> {
             ]),
             bottomNavigationBar: q == null
                 ? null
-                : SafeArea(
-                    child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 24, vertical: 14),
-                        color: theme.colorScheme.surface,
-                        child: Wrap(
-                            alignment: WrapAlignment.spaceBetween,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            spacing: 24,
-                            runSpacing: 12,
-                            children: [
-                              const Text('对企业全部客服账号生效 · 不涉及付款'),
-                              Row(mainAxisSize: MainAxisSize.min, children: [
-                                OutlinedButton(
-                                    onPressed: _saving
-                                        ? null
-                                        : () => Navigator.pop(context, false),
-                                    child: const Text('取消')),
-                                const SizedBox(width: 12),
-                                FilledButton(
-                                    onPressed: _saving ||
-                                            !widget.controller.isSuperAdmin
-                                        ? null
-                                        : _save,
-                                    child: Text(_saving ? '正在保存…' : '确认分配'))
-                              ])
-                            ]))),
+                : ColoredBox(
+                    color: theme.colorScheme.surface,
+                    child: SafeArea(
+                        top: false,
+                        child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 24, vertical: 14),
+                            child: Wrap(
+                                alignment: WrapAlignment.spaceBetween,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                spacing: 24,
+                                runSpacing: 12,
+                                children: [
+                                  const Text('对企业全部客服账号生效 · 不涉及付款'),
+                                  Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        OutlinedButton(
+                                            onPressed: _saving
+                                                ? null
+                                                : () => Navigator.pop(
+                                                    context, false),
+                                            child: const Text('取消')),
+                                        const SizedBox(width: 12),
+                                        FilledButton(
+                                            onPressed: _saving ||
+                                                    !widget
+                                                        .controller.isSuperAdmin
+                                                ? null
+                                                : _save,
+                                            child: Text(
+                                                _saving ? '正在保存…' : '确认分配'))
+                                      ])
+                                ])))),
             body: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : q == null

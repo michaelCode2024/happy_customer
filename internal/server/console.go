@@ -128,6 +128,8 @@ func (a *API) consoleLogin(w http.ResponseWriter, r *http.Request) {
 	_, _ = a.db.Exec(r.Context(), `insert into agent_presence(agent_id, status, last_seen_at)
 		values($1,'ONLINE', now())
 		on conflict (agent_id) do update set status='ONLINE', last_seen_at = now()`, account.ID)
+	var mustChange bool
+	_ = a.db.QueryRow(r.Context(), `select must_change_password from agent where id=$1`, account.ID).Scan(&mustChange)
 	a.recordAudit(r.Context(), account.TenantID, "AGENT", account.ID, "agent.login", "agent", account.ID, nil)
 
 	var tenantName, tenantSlug string
@@ -138,7 +140,7 @@ func (a *API) consoleLogin(w http.ResponseWriter, r *http.Request) {
 		"expiresIn": int(a.cfg.AgentSessionTTL.Seconds()),
 		"agent": map[string]any{
 			"id": account.ID, "email": account.Email, "displayName": account.DisplayName, "role": account.Role,
-			"presence": "ONLINE",
+			"presence": "ONLINE", "mustChangePassword": mustChange,
 		},
 		"tenant":  map[string]any{"id": account.TenantID, "name": tenantName, "slug": tenantSlug},
 		"inboxes": inboxes,
@@ -156,11 +158,12 @@ func (a *API) consoleLogout(w http.ResponseWriter, r *http.Request, p auth.Princ
 func (a *API) consoleMe(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 	var displayName, email, role, presence string
 	var maxConcurrent int
+	var mustChange bool
 	err := a.db.QueryRow(r.Context(), `
-		select ag.display_name, ag.email, ag.role, ag.max_concurrent, coalesce(ap.status,'OFFLINE')
+		select ag.display_name, ag.email, ag.role, ag.max_concurrent, coalesce(ap.status,'OFFLINE'), ag.must_change_password
 		  from agent ag left join agent_presence ap on ap.agent_id = ag.id
 		 where ag.id = $1 and ag.tenant_id = $2`, p.AgentID, p.TenantID).
-		Scan(&displayName, &email, &role, &maxConcurrent, &presence)
+		Scan(&displayName, &email, &role, &maxConcurrent, &presence, &mustChange)
 	if err != nil {
 		fail(w, 404, "坐席不存在")
 		return
@@ -174,8 +177,9 @@ func (a *API) consoleMe(w http.ResponseWriter, r *http.Request, p auth.Principal
 	respond(w, 200, map[string]any{
 		"id": p.AgentID, "email": email, "displayName": displayName, "role": role,
 		"presence": presence, "maxConcurrent": maxConcurrent, "openConversations": openConversations,
-		"tenant":  map[string]any{"id": p.TenantID, "name": tenantName, "slug": tenantSlug},
-		"inboxes": inboxes,
+		"mustChangePassword": mustChange,
+		"tenant":             map[string]any{"id": p.TenantID, "name": tenantName, "slug": tenantSlug},
+		"inboxes":            inboxes,
 	})
 }
 
@@ -206,9 +210,19 @@ func (a *API) consoleChangePassword(w http.ResponseWriter, r *http.Request, p au
 	if !decode(w, r, &in) {
 		return
 	}
-	account, err := a.authn.Login(r.Context(), p.Email, in.CurrentPassword, "")
+	// 按当前登录的坐席核对，不按邮箱再搜一遍。邮箱只在企业内唯一，跨企业同名会改到别人的密码。
+	var stored, status string
+	err := a.db.QueryRow(r.Context(), `select password_hash, status from agent where id=$1 and tenant_id=$2`, p.AgentID, p.TenantID).Scan(&stored, &status)
 	if err != nil {
+		fail(w, 500, "更新密码失败")
+		return
+	}
+	if status != "ACTIVE" || !auth.VerifyPassword(stored, in.CurrentPassword) {
 		failCode(w, 400, "PASSWORD_MISMATCH", "当前密码不正确")
+		return
+	}
+	if in.NewPassword == in.CurrentPassword {
+		fail(w, 400, "新密码不能与当前密码相同")
 		return
 	}
 	hash, err := auth.HashPassword(in.NewPassword)
@@ -216,12 +230,15 @@ func (a *API) consoleChangePassword(w http.ResponseWriter, r *http.Request, p au
 		fail(w, 400, err.Error())
 		return
 	}
-	if _, err := a.db.Exec(r.Context(), `update agent set password_hash=$1, updated_at=now() where id=$2`, hash, account.ID); err != nil {
+	if _, err := a.db.Exec(r.Context(), `update agent set password_hash=$1, must_change_password=false, updated_at=now() where id=$2 and tenant_id=$3`, hash, p.AgentID, p.TenantID); err != nil {
 		fail(w, 500, "更新密码失败")
 		return
 	}
-	// Force every other session to log in again.
-	_ = a.authn.RevokeAllSessions(r.Context(), account.ID)
+	// 包括当前这次登录在内的全部会话作废，并立即离线，避免改密后仍显示在线接待。
+	_ = a.authn.RevokeAllSessions(r.Context(), p.AgentID)
+	_, _ = a.db.Exec(r.Context(), `insert into agent_presence(agent_id, status, last_seen_at) values($1,'OFFLINE', now())
+		on conflict (agent_id) do update set status='OFFLINE', last_seen_at = now()`, p.AgentID)
+	a.publishAgentPresence(r.Context(), p.TenantID, p.AgentID, "OFFLINE")
 	a.recordAudit(r.Context(), p.TenantID, "AGENT", p.AgentID, "agent.password_changed", "agent", p.AgentID, nil)
 	respond(w, 200, map[string]any{"status": "OK", "message": "密码已更新，请重新登录"})
 }
@@ -630,6 +647,7 @@ func (a *API) consoleTransfer(w http.ResponseWriter, r *http.Request, p auth.Pri
 		fail(w, 500, "转接失败")
 		return
 	}
+	a.nudgePush()
 	a.flushReceptionNotices(r.Context())
 
 	if strings.TrimSpace(in.Note) != "" {

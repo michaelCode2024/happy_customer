@@ -9,6 +9,7 @@ import 'package:tongyu_agent_console/src/state/session_controller.dart';
 import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
 import 'package:tongyu_agent_console/src/theme.dart';
 import 'package:tongyu_agent_console/src/ui/knowledge_page.dart';
+import 'package:tongyu_agent_console/src/ui/overview_page.dart';
 import 'package:tongyu_agent_console/src/ui/settings_page.dart';
 
 class _Session extends SessionController {
@@ -54,10 +55,17 @@ void main() {
                   {'id': 'cat1', 'name': '产品说明'}
                 ]
               };
-            else if(route.endsWith('/knowledge-gaps')) {
-              body={'items':[{'question':'业务退款需要多久','reason':'LOW_CONFIDENCE','count':3}]};
-            }
-            else if (route.endsWith('/knowledge/search')) {
+            else if (route.endsWith('/knowledge-gaps')) {
+              body = {
+                'items': [
+                  {
+                    'question': '业务退款需要多久',
+                    'reason': 'LOW_CONFIDENCE',
+                    'count': 3
+                  }
+                ]
+              };
+            } else if (route.endsWith('/knowledge/search')) {
               answers++;
               body = {
                 'answer': '这是根据资料生成的回答',
@@ -109,17 +117,20 @@ void main() {
       await tester.tap(find.text('App 接入指南').first);
       await tester.pumpAndSettle();
       expect(find.textContaining('结尾重要说明'), findsWidgets);
-      await Scrollable.ensureVisible(tester.element(find.text('停用')), alignment: .5);
+      await Scrollable.ensureVisible(tester.element(find.text('停用')),
+          alignment: .5);
       await tester.pumpAndSettle();
       await tester.tap(find.text('停用'));
       await tester.pumpAndSettle();
       expect(writes, 1);
       expect(status, 'DISABLED');
-      await Scrollable.ensureVisible(tester.element(find.text('测试此知识')), alignment: .5);
+      await Scrollable.ensureVisible(tester.element(find.text('测试此知识')),
+          alignment: .5);
       await tester.pumpAndSettle();
       await tester.tap(find.text('测试此知识'));
       await tester.pumpAndSettle();
-      await Scrollable.ensureVisible(tester.element(find.text('生成回答')), alignment: .5);
+      await Scrollable.ensureVisible(tester.element(find.text('生成回答')),
+          alignment: .5);
       await tester.pumpAndSettle();
       await tester.tap(find.text('生成回答'));
       await tester.pumpAndSettle();
@@ -134,9 +145,10 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('补充知识'));
       await tester.pumpAndSettle();
-      expect(find.text('新增知识条目'),findsOneWidget);
-      final title=tester.widget<TextField>(find.widgetWithText(TextField,'标题'));
-      expect(title.controller!.text,'业务退款需要多久');
+      expect(find.text('新增知识条目'), findsOneWidget);
+      final title =
+          tester.widget<TextField>(find.widgetWithText(TextField, '标题'));
+      expect(title.controller!.text, '业务退款需要多久');
       expect(tester.takeException(), isNull);
     });
     testWidgets('个人设置分区与密码验证 $width', (tester) async {
@@ -158,12 +170,20 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('企业 ID'), findsNothing);
       expect(find.text('修改密码'), findsNothing);
+      expect(find.text('退出登录'), findsNothing);
       await tester.tap(find.text('账号安全').first);
       await tester.pumpAndSettle();
+      expect(find.text('本次登录'), findsWidgets);
+      expect(find.text('退出登录'), findsOneWidget);
       expect(find.text('当前密码'), findsOneWidget);
-      await tester.tap(find.widgetWithText(FilledButton, '修改密码'));
+      expect(find.text('新密码'), findsOneWidget);
+      expect(find.text('确认新密码'), findsOneWidget);
+      final changePassword = find.widgetWithText(FilledButton, '修改密码并重新登录');
+      await tester.ensureVisible(changePassword);
+      await tester.tap(changePassword);
       await tester.pumpAndSettle();
       expect(find.text('请填写当前密码与新密码'), findsOneWidget);
+      expect(find.text('确认修改'), findsNothing);
       final appearanceTab = find.text('外观与通知');
       await tester.ensureVisible(appearanceTab.first);
       await tester.tap(appearanceTab.first);
@@ -173,4 +193,57 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('工作台和知识库标题不钻进状态栏', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    const status = 47.0;
+    final api = TongYuApi(
+        server: 'http://localhost',
+        client: MockClient((_) async => http.Response('[]', 200)));
+    final session = _Session(api);
+    final workbench = WorkbenchController(api: api);
+    addTearDown(session.dispose);
+    addTearDown(workbench.dispose);
+    addTearDown(api.close);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: RelayTheme.light(),
+      home: MediaQuery(
+        data: const MediaQueryData(
+          size: Size(390, 844),
+          padding: EdgeInsets.only(top: status),
+        ),
+        child: Scaffold(
+          body: OverviewPage(
+            workbench: workbench,
+            name: '客服小林',
+            onInbox: () {},
+            onKnowledge: () {},
+          ),
+        ),
+      ),
+    ));
+    await tester.pump();
+    expect(
+        tester.getTopLeft(find.text('工作台')).dy, greaterThanOrEqualTo(status));
+
+    await tester.pumpWidget(MaterialApp(
+      theme: RelayTheme.light(),
+      home: MediaQuery(
+        data: const MediaQueryData(
+          size: Size(390, 844),
+          padding: EdgeInsets.only(top: status),
+        ),
+        child: KnowledgePage(session: session, workbench: workbench),
+      ),
+    ));
+    await tester.pump();
+    expect(
+        tester.getTopLeft(find.text('知识库')).dy, greaterThanOrEqualTo(status));
+  });
 }

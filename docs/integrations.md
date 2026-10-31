@@ -7,7 +7,7 @@
 - **网站 / H5**：通过公开 `inboxKey` 装载组件；`/h5/{inboxKey}` 可作为 App WebView 或业务系统 iframe。公开 Key 只标识入口，不是服务端密钥。
 - **客户业务系统**：企业管理员创建租户 API Key，服务端以 `X-TongYu-Key` 调用 `/api/v1/open/`，按 `read` / `write` 权限访问会话、访客、消息和统计。密钥只在创建时显示，不要放进网页或 App。完整列表见 [open-api.md](open-api.md)。
 - **访客身份**：匿名咨询只需 inboxKey；关联已登录客户必须传 identityToken。客户后端使用 write 权限的 APIKey 调用 `POST /api/v1/open/visitor-identity`，提交 inboxKey、externalId、displayName。返回的票据有效期 5 分钟，绑定企业、入口、客户 ID；bootstrap 从签名中读取身份，不受前端 externalId 覆盖。identityToken 不可作为聊天 Bearer Token 使用。
-- **事件推送**：企业配置 Webhook，接收会话、消息等事件；投递失败重试。接收方要校验签名并按事件 ID / 消息 ID 幂等处理。
+- **事件推送**：企业配置 Webhook，接收会话、消息等事件；投递失败重试。签名密钥不是 API Key，列表接口不返回这两套密钥的全文。接收方要校验签名并按投递 ID 幂等处理。契约见 [webhook.md](webhook.md)。
 - **聊天可靠性**：发送使用 `clientMessageId` 幂等；会话消息以 `sequence` 排序，断线后按 `after` 补拉；WebSocket 是实时通知，不是唯一事实来源。
 
 ## 业务系统 iframe 嵌入

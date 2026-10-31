@@ -241,7 +241,7 @@ func (a *API) maybeAutomationReply(ctx context.Context, tenantID, conversationID
 	var inboxID uuid.UUID
 	var assigned, paused, online bool
 	var status string
-	if a.db.QueryRow(ctx, `select c.inbox_id,c.assignee_id is not null,c.bot_paused,c.status,exists(select 1 from agent_inbox ai join agent_presence ap on ap.agent_id=ai.agent_id where ai.inbox_id=c.inbox_id and ap.status='ONLINE') from conversation c where c.id=$1 and c.tenant_id=$2`, conversationID, tenantID).Scan(&inboxID, &assigned, &paused, &status, &online) != nil || status == "RESOLVED" {
+	if a.db.QueryRow(ctx, `select c.inbox_id,c.assignee_id is not null,c.bot_paused,c.status,exists(select 1 from agent_inbox ai join agent_presence ap on ap.agent_id=ai.agent_id where ai.inbox_id=c.inbox_id and `+agentOnlineRecently+`) from conversation c where c.id=$1 and c.tenant_id=$2`, conversationID, tenantID).Scan(&inboxID, &assigned, &paused, &status, &online) != nil || status == "RESOLVED" {
 		return true
 	}
 	c, _ := a.loadAutomation(ctx, inboxID)

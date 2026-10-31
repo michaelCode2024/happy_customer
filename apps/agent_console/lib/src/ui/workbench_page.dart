@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'alert_enable_banner.dart';
 import 'pwa_panel.dart';
 import 'package:tongyu_agent_console/src/util/host_session.dart';
 import '../util/message_alert_stub.dart'
@@ -16,6 +17,7 @@ import 'package:tongyu_agent_console/src/util/app_update.dart';
 import 'dart:async';
 import 'package:tongyu_agent_console/src/ui/overview_page.dart';
 import 'package:tongyu_agent_console/src/ui/brand.dart';
+import 'package:tongyu_agent_console/src/theme.dart';
 
 import 'package:flutter/material.dart';
 
@@ -34,6 +36,7 @@ import 'package:tongyu_agent_console/src/ui/automation_page.dart';
 import 'package:tongyu_agent_console/src/ui/integration_page.dart';
 import 'package:tongyu_agent_console/src/ui/knowledge_page.dart';
 import 'package:tongyu_agent_console/src/ui/settings_page.dart';
+import 'package:tongyu_agent_console/src/ui/platform_support.dart';
 import 'package:tongyu_agent_console/src/ui/tenant_admin_page.dart';
 import 'package:tongyu_agent_console/src/ui/stats_page.dart';
 import 'package:tongyu_agent_console/src/ui/visitor_sidebar.dart';
@@ -50,12 +53,15 @@ enum WorkbenchSection {
   stats,
   knowledge,
   integrations,
+
   /// 关键词 / 欢迎语等自动回复；需套餐 automation + 主管。
   automation,
+
   /// H5/App 渠道与图文菜单；需套餐 channels + 主管。
   channels,
   enterprise,
   settings,
+
   /// 手机底栏「更多」枢纽页；宽屏侧栏不展示此项。
   more,
 }
@@ -357,9 +363,12 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
   Future<void> _saveMenuConfig() async {
     final slug = widget.session.tenant?.slug ?? 'default';
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('tongyu.menu_labels_$slug', jsonEncode(_customMenuLabels));
-    await prefs.setString('tongyu.menu_enabled_$slug', jsonEncode(_customMenuEnabled));
-    await prefs.setString('tongyu.menu_roles_$slug', jsonEncode(_customMenuRoles));
+    await prefs.setString(
+        'tongyu.menu_labels_$slug', jsonEncode(_customMenuLabels));
+    await prefs.setString(
+        'tongyu.menu_enabled_$slug', jsonEncode(_customMenuEnabled));
+    await prefs.setString(
+        'tongyu.menu_roles_$slug', jsonEncode(_customMenuRoles));
   }
 
   void _showMenuConfigDialog() {
@@ -379,7 +388,9 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
               children: [
                 Icon(Icons.tune_rounded, size: 20),
                 SizedBox(width: 8),
-                Text('自定义左侧导航与权限控制', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                Text('自定义左侧导航与权限控制',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
               ],
             ),
             content: SizedBox(
@@ -390,7 +401,8 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                 children: [
                   Text(
                     '管理员可配置各菜单项的展示名称、启用状态，以及访问权限控制（全员可见 / 仅主管可见）：',
-                    style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                    style:
+                        TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                   ),
                   const SizedBox(height: 12),
                   Flexible(
@@ -403,15 +415,18 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                               padding: const EdgeInsets.symmetric(vertical: 5),
                               child: Row(
                                 children: [
-                                  Icon(spec.icon, size: 18, color: scheme.onSurfaceVariant),
+                                  Icon(spec.icon,
+                                      size: 18, color: scheme.onSurfaceVariant),
                                   const SizedBox(width: 8),
                                   Expanded(
                                     flex: 3,
                                     child: TextFormField(
-                                      initialValue: tempLabels[spec.id] ?? spec.label,
+                                      initialValue:
+                                          tempLabels[spec.id] ?? spec.label,
                                       decoration: const InputDecoration(
                                         isDense: true,
-                                        contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                        contentPadding: EdgeInsets.symmetric(
+                                            horizontal: 8, vertical: 8),
                                         border: OutlineInputBorder(),
                                       ),
                                       style: const TextStyle(fontSize: 12),
@@ -425,17 +440,29 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                                   Expanded(
                                     flex: 2,
                                     child: DropdownButtonFormField<String>(
-                                      value: tempRoles[spec.id] ?? (spec.role ?? 'ALL'),
+                                      value: tempRoles[spec.id] ??
+                                          (spec.role ?? 'ALL'),
                                       isDense: true,
                                       decoration: const InputDecoration(
                                         isDense: true,
-                                        contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                        contentPadding: EdgeInsets.symmetric(
+                                            horizontal: 8, vertical: 6),
                                         border: OutlineInputBorder(),
                                       ),
-                                      style: TextStyle(fontSize: 12, color: scheme.onSurface),
+                                      style: RelayTheme.uiText(
+                                          fontSize: 12,
+                                          color: scheme.onSurface),
                                       items: const [
-                                        DropdownMenuItem(value: 'ALL', child: Text('全员可见', style: TextStyle(fontSize: 11))),
-                                        DropdownMenuItem(value: 'SUPERVISOR', child: Text('仅主管', style: TextStyle(fontSize: 11))),
+                                        DropdownMenuItem(
+                                            value: 'ALL',
+                                            child: Text('全员可见',
+                                                style:
+                                                    TextStyle(fontSize: 11))),
+                                        DropdownMenuItem(
+                                            value: 'SUPERVISOR',
+                                            child: Text('仅主管',
+                                                style:
+                                                    TextStyle(fontSize: 11))),
                                       ],
                                       onChanged: (v) {
                                         if (v != null) {
@@ -455,7 +482,8 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                                       });
                                     },
                                   ),
-                                  const Text('启用', style: TextStyle(fontSize: 12)),
+                                  const Text('启用',
+                                      style: TextStyle(fontSize: 12)),
                                 ],
                               ),
                             ),
@@ -498,7 +526,8 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     );
   }
 
-  List<_SectionSpec> _rawSections(AgentProfile? agent, {bool ignoreRoleFilter = false}) {
+  List<_SectionSpec> _rawSections(AgentProfile? agent,
+      {bool ignoreRoleFilter = false}) {
     final canReport = agent?.canViewReports ?? false;
     final admin = agent?.role == 'SUPERVISOR';
     return <_SectionSpec>[
@@ -604,23 +633,19 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
   List<_SectionSpec> _sections(AgentProfile? agent) {
     final raw = _rawSections(agent);
     final isSupervisor = agent?.role == 'SUPERVISOR';
-    return raw
-        .where((s) => _customMenuEnabled[s.id] ?? true)
-        .where((s) {
-          // 权限控制：如果管理员配置了特定角色，优先以配置为准；否则按默认角色限制
-          final requiredRole = _customMenuRoles[s.id] ?? (s.role ?? 'ALL');
-          if (requiredRole == 'SUPERVISOR' && !isSupervisor) {
-            return false;
-          }
-          return true;
-        })
-        .map((s) {
-          final customLabel = _customMenuLabels[s.id];
-          return (customLabel != null && customLabel.isNotEmpty)
-              ? s.copyWith(label: customLabel)
-              : s;
-        })
-        .toList();
+    return raw.where((s) => _customMenuEnabled[s.id] ?? true).where((s) {
+      // 权限控制：如果管理员配置了特定角色，优先以配置为准；否则按默认角色限制
+      final requiredRole = _customMenuRoles[s.id] ?? (s.role ?? 'ALL');
+      if (requiredRole == 'SUPERVISOR' && !isSupervisor) {
+        return false;
+      }
+      return true;
+    }).map((s) {
+      final customLabel = _customMenuLabels[s.id];
+      return (customLabel != null && customLabel.isNotEmpty)
+          ? s.copyWith(label: customLabel)
+          : s;
+    }).toList();
   }
 
   /// 手机底栏只留 3～4 个主入口，其余进「更多」页，避免十几个 Tab 挤成一团。
@@ -715,6 +740,11 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
         return TenantAdminPage(
           api: widget.session.api,
           tenantSlug: widget.session.tenant?.slug ?? '',
+          supportVisitorName: supportVisitorLabel(
+            tenantName: widget.session.tenant?.name ?? '',
+            role: widget.session.agent?.role ?? '',
+            displayName: widget.session.agent?.displayName ?? '',
+          ),
           onMemberSaved: () async {
             await widget.session.refreshProfile();
             await _workbench.loadAgents();
@@ -764,10 +794,12 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
               child: _bodyFor(useRail ? width - 78 : width),
             );
             final body = Column(children: [
+              if (!isHostedConsole) AlertEnableBanner(api: widget.session.api),
               if (!isHostedConsole)
                 PwaPanel(
                     api: widget.session.api,
                     hideUpdateBanner: false,
+                    autoPrompt: false,
                     onReconnect: () async {
                       await _workbench.refreshConversations();
                       await _workbench.reloadSelected();
@@ -799,8 +831,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                 bottomNavigationBar: hostedThread
                     ? null
                     : MobileBottomNavBar(
-                        currentIndex:
-                            onMoreTab ? moreTabIndex : phoneIndex,
+                        currentIndex: onMoreTab ? moreTabIndex : phoneIndex,
                         unreadCount: _workbench.unread,
                         showKnowledge: hasKnowledge,
                         onTap: (index) {
@@ -836,26 +867,24 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                                       ? _workbench.unread
                                       : 0)
                           ],
-                          footer: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (agent?.role == 'SUPERVISOR')
-                                  IconButton(
-                                    tooltip: '配置侧栏菜单',
-                                    onPressed: _showMenuConfigDialog,
-                                    icon: const Icon(Icons.tune_rounded, size: 20),
-                                  ),
-                                NotificationCenter(
-                                    api: widget.session.api,
-                                    onConversation:
-                                        _openNotificationConversation),
-                                if (canOpenWebsite)
-                                  IconButton(
-                                      tooltip: '手机客户端下载',
-                                      onPressed: openDownloads,
-                                      icon: const Icon(Icons.phone_android,
-                                          size: 20)),
-                              ]),
+                          footer:
+                              Column(mainAxisSize: MainAxisSize.min, children: [
+                            if (agent?.role == 'SUPERVISOR')
+                              IconButton(
+                                tooltip: '配置侧栏菜单',
+                                onPressed: _showMenuConfigDialog,
+                                icon: const Icon(Icons.tune_rounded, size: 20),
+                              ),
+                            NotificationCenter(
+                                api: widget.session.api,
+                                onConversation: _openNotificationConversation),
+                            if (canOpenWebsite)
+                              IconButton(
+                                  tooltip: '手机客户端下载',
+                                  onPressed: openDownloads,
+                                  icon: const Icon(Icons.phone_android,
+                                      size: 20)),
+                          ]),
                           avatar: InkWell(
                             onTap: () => setState(
                                 () => _section = WorkbenchSection.settings),
@@ -883,7 +912,9 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                                     .onSurfaceVariant)),
                         const Padding(
                             padding: EdgeInsets.symmetric(horizontal: 8),
-                            child: Text('/', style: TextStyle(color: Color(0xFFBDC7D6), fontSize: 13))),
+                            child: Text('/',
+                                style: TextStyle(
+                                    color: Color(0xFFBDC7D6), fontSize: 13))),
                         Expanded(
                             child: Text(
                                 sections
@@ -897,11 +928,12 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                         NotificationCenter(
                           api: widget.session.api,
                           onConversation: (id) async {
-                            setState(() => _section = WorkbenchSection.conversations);
+                            setState(() =>
+                                _section = WorkbenchSection.conversations);
                             await _workbench.select(id);
                           },
                         ),
-                        messageSoundButton(),
+                        messageSoundButton(api: widget.session.api),
                         const SizedBox(width: 8),
                         Text(agent?.displayName ?? '',
                             style: const TextStyle(fontSize: 12))
@@ -988,6 +1020,11 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
         return TenantAdminPage(
             api: widget.session.api,
             tenantSlug: widget.session.tenant?.slug ?? '',
+            supportVisitorName: supportVisitorLabel(
+              tenantName: widget.session.tenant?.name ?? '',
+              role: widget.session.agent?.role ?? '',
+              displayName: widget.session.agent?.displayName ?? '',
+            ),
             onMemberSaved: () async {
               await widget.session.refreshProfile();
               await _workbench.loadAgents();
@@ -1404,6 +1441,7 @@ class MobileConversationFlowState extends State<MobileConversationFlow> {
       final route = BrowserBackPageRoute<void>(
           settings: RouteSettings(name: '/conversation/$conversationId'),
           builder: (routeContext) => Scaffold(
+                backgroundColor: Theme.of(routeContext).colorScheme.surface,
                 body: ChatPanel(
                   workbench: widget.workbench,
                   picker: widget.picker,

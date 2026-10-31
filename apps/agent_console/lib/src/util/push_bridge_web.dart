@@ -31,13 +31,39 @@ Future<String> disableBackgroundPush(TongYuApi api) async {
   }
 }
 
+Future<bool> pushNeedsEnable(TongYuApi api) async {
+  try {
+    await js.promiseToFuture<Object?>(js
+        .callMethod(html.window, 'tongyuPreparePush', [api.server, api.token]));
+  } catch (_) {}
+  try {
+    final status = js.callMethod(html.window, 'tongyuPushStatus', []);
+    return js.getProperty(status, 'stage')?.toString() != 'enabled';
+  } catch (_) {
+    return true;
+  }
+}
+
 Future<String> enableBackgroundPush(TongYuApi api) async {
   try {
     // 权限请求留在用户点击事件中，避免 Safari 丢失手势授权。
     final result = await js.promiseToFuture<Object?>(js
         .callMethod(html.window, 'tongyuEnablePush', [api.server, api.token]));
     return result?.toString() ?? '已开启后台消息提醒';
-  } catch (_) {
-    return '未能开启。请使用 HTTPS，在 iPhone 上先添加到主屏幕，再允许通知。';
+  } catch (error) {
+    final message = _pushErrorText(error);
+    if (message.isNotEmpty) return message;
+    return '未能开启。请允许浏览器通知后重试。';
   }
+}
+
+String _pushErrorText(Object error) {
+  try {
+    final message = js.getProperty(error, 'message');
+    if (message is String && message.trim().isNotEmpty) return message.trim();
+  } catch (_) {}
+  final text = error.toString().trim();
+  const prefix = 'Exception: ';
+  if (text.startsWith(prefix)) return text.substring(prefix.length).trim();
+  return text == 'null' ? '' : text;
 }

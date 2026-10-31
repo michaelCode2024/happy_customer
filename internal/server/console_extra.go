@@ -84,6 +84,8 @@ func (a *API) consoleCreateCannedResponse(w http.ResponseWriter, r *http.Request
 	if !decode(w, r, &in) {
 		return
 	}
+	in.Title = ai.SanitizeText(in.Title)
+	in.Content = ai.SanitizeText(in.Content)
 	if strings.TrimSpace(in.Title) == "" || strings.TrimSpace(in.Content) == "" {
 		fail(w, 400, "标题和内容都不能为空")
 		return
@@ -125,6 +127,8 @@ func (a *API) consoleUpdateCannedResponse(w http.ResponseWriter, r *http.Request
 	if !decode(w, r, &in) {
 		return
 	}
+	in.Title = ai.SanitizeText(in.Title)
+	in.Content = ai.SanitizeText(in.Content)
 	tag, err := a.db.Exec(r.Context(), `update canned_response
 		set title = coalesce(nullif($3,''), title), content = coalesce(nullif($4,''), content), updated_at = now()
 		where id=$1 and tenant_id=$2`, id, p.TenantID, in.Title, in.Content)
@@ -275,7 +279,7 @@ func (a *API) consoleStats(w http.ResponseWriter, r *http.Request, p auth.Princi
 		where tenant_id=$1 and assignee_id is null and status <> 'RESOLVED'`, p.TenantID).Scan(&queued)
 	_ = a.db.QueryRow(r.Context(), `select count(*)::int from agent_presence ap
 		join agent ag on ag.id = ap.agent_id
-		where ag.tenant_id=$1 and ap.status = 'ONLINE' and ag.status='ACTIVE'`, p.TenantID).Scan(&onlineAgents)
+		where ag.tenant_id=$1 and `+agentOnlineRecently+` and ag.status='ACTIVE'`, p.TenantID).Scan(&onlineAgents)
 
 	leaderboard := make([]map[string]any, 0, 8)
 	leaderRows, err := a.db.Query(r.Context(), `
@@ -379,6 +383,9 @@ func (a *API) consoleKnowledgeCreate(w http.ResponseWriter, r *http.Request, p a
 	if !decode(w, r, &in) {
 		return
 	}
+	in.Title = ai.SanitizeText(in.Title)
+	in.Content = ai.SanitizeText(in.Content)
+	in.QuestionExamples = ai.SanitizeText(in.QuestionExamples)
 	if strings.TrimSpace(in.Title) == "" || strings.TrimSpace(in.Content) == "" {
 		fail(w, 400, "标题和内容都不能为空")
 		return
@@ -447,6 +454,12 @@ func (a *API) consoleKnowledgeUpdate(w http.ResponseWriter, r *http.Request, p a
 	}
 	if !decode(w, r, &in) {
 		return
+	}
+	in.Title = ai.SanitizeText(in.Title)
+	in.Content = ai.SanitizeText(in.Content)
+	if in.QuestionExamples != nil {
+		cleaned := ai.SanitizeText(*in.QuestionExamples)
+		in.QuestionExamples = &cleaned
 	}
 	status := strings.ToUpper(strings.TrimSpace(in.Status))
 	if status != "ACTIVE" && status != "DISABLED" {

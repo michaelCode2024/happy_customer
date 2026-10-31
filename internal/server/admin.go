@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/tongyu/tongyu/internal/ai"
 	"github.com/tongyu/tongyu/internal/auth"
 )
 
@@ -788,8 +789,8 @@ func (a *API) createTenantAgent(w http.ResponseWriter, r *http.Request, p auth.P
 		failCode(w, 409, "SEAT_LIMIT_REACHED", errSeatLimit(seatLimit).Error())
 		return
 	}
-	if _, err := tx.Exec(r.Context(), `insert into agent(id, tenant_id, email, display_name, password_hash, role, status, max_concurrent)
-		values($1,$2,$3,$4,$5,$6,'ACTIVE',$7)`, id, p.TenantID, email, in.DisplayName, hash, role, in.MaxConcurrent); err != nil {
+	if _, err := tx.Exec(r.Context(), `insert into agent(id, tenant_id, email, display_name, password_hash, role, status, max_concurrent, must_change_password)
+		values($1,$2,$3,$4,$5,$6,'ACTIVE',$7,true)`, id, p.TenantID, email, in.DisplayName, hash, role, in.MaxConcurrent); err != nil {
 		if isUniqueViolation(err) {
 			failCode(w, 409, "EMAIL_TAKEN", "该用户名已被使用")
 			return
@@ -1020,7 +1021,7 @@ func (a *API) adminResetPassword(w http.ResponseWriter, r *http.Request, p auth.
 		fail(w, 400, err.Error())
 		return
 	}
-	tag, err := a.db.Exec(r.Context(), `update agent set password_hash=$3, updated_at=now() where id=$1 and tenant_id=$2`,
+	tag, err := a.db.Exec(r.Context(), `update agent set password_hash=$3, must_change_password=true, updated_at=now() where id=$1 and tenant_id=$2`,
 		id, p.TenantID, hash)
 	if err != nil || tag.RowsAffected() == 0 {
 		fail(w, 404, "坐席不存在")
@@ -1634,8 +1635,8 @@ func (a *API) adminCreateKnowledgeEntry(w http.ResponseWriter, r *http.Request, 
 	if !decode(w, r, &in) {
 		return
 	}
-	title := strings.TrimSpace(in.Title)
-	content := strings.TrimSpace(in.Content)
+	title := strings.TrimSpace(ai.SanitizeText(in.Title))
+	content := strings.TrimSpace(ai.SanitizeText(in.Content))
 	if title == "" || content == "" {
 		fail(w, 400, "标题和内容不能为空")
 		return
@@ -1648,7 +1649,7 @@ func (a *API) adminCreateKnowledgeEntry(w http.ResponseWriter, r *http.Request, 
 	if _, err := a.db.Exec(r.Context(), `
 		insert into knowledge_entry(id, tenant_id, category_id, title, content, question_examples, status)
 		values($1,$2,$3,$4,$5,$6,$7)`,
-		id, p.TenantID, categoryID, title, content, strings.TrimSpace(in.QuestionExamples),
+		id, p.TenantID, categoryID, title, content, strings.TrimSpace(ai.SanitizeText(in.QuestionExamples)),
 		knowledgeStatus(in.Status)); err != nil {
 		a.logger.Error("create knowledge entry failed", "error", err)
 		fail(w, 500, "创建知识条目失败")
@@ -1686,8 +1687,8 @@ func (a *API) adminUpdateKnowledgeEntry(w http.ResponseWriter, r *http.Request, 
 		    status = coalesce($7, status),
 		    updated_at = now()
 		where id = $1 and tenant_id = $2`,
-		id, p.TenantID, categoryID, nullable(in.Title), nullable(in.Content),
-		nullable(in.QuestionExamples), status)
+		id, p.TenantID, categoryID, nullable(ai.SanitizeText(in.Title)), nullable(ai.SanitizeText(in.Content)),
+		nullable(ai.SanitizeText(in.QuestionExamples)), status)
 	if err != nil {
 		a.logger.Error("update knowledge entry failed", "error", err)
 		fail(w, 500, "更新知识条目失败")
@@ -1761,14 +1762,14 @@ func (a *API) adminImportKnowledge(w http.ResponseWriter, r *http.Request, p aut
 
 	imported, updated, skipped := 0, 0, 0
 	for _, entry := range in.Entries {
-		title := strings.TrimSpace(entry.Title)
-		content := strings.TrimSpace(entry.Content)
+		title := strings.TrimSpace(ai.SanitizeText(entry.Title))
+		content := strings.TrimSpace(ai.SanitizeText(entry.Content))
 		if title == "" || content == "" {
 			skipped++
 			continue
 		}
 		status := knowledgeStatus(entry.Status)
-		examples := strings.TrimSpace(entry.QuestionExamples)
+		examples := strings.TrimSpace(ai.SanitizeText(entry.QuestionExamples))
 		// Matched on title: a tenant re-uploading an edited FAQ replaces the old
 		// answer instead of accumulating near-duplicates the bot then has to
 		// choose between.

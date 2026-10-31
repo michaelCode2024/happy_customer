@@ -39,6 +39,8 @@ Future<void> disableBackgroundAlerts() async {
 }
 
 /// 安卓安装包：本机轮询值班（非 FCM）。iOS 请用 PWA / 浏览器通知。
+Future<bool> pushNeedsEnable(TongYuApi api) async => false;
+
 Future<String> enableBackgroundPush(TongYuApi api) async {
   if (defaultTargetPlatform != TargetPlatform.android) {
     return '此设备请使用网页版（PWA）开启浏览器通知';

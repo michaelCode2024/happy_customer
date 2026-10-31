@@ -30,6 +30,7 @@ const ICONS = {
   quote: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"></path><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"></path></svg>',
   pin: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"></line><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path></svg>',
   mic: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>',
+  keyboard: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"></rect><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"></path></svg>',
   trash: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>',
 };
 
@@ -217,7 +218,25 @@ export class WidgetView {
   #searchInput?: HTMLInputElement;
   #resultsNode?: HTMLDivElement;
   #pinnedBar?: HTMLDivElement;
-  #recordBar?: HTMLDivElement;
+  #holdButton?: HTMLButtonElement;
+  #voiceMask?: HTMLDivElement;
+  #voiceToast?: HTMLDivElement;
+  #voiceToastTimer?: ReturnType<typeof setTimeout>;
+  #voiceMode = false;
+  #fingerDown = false;
+  #holdCancel = false;
+  #holdStartY = 0;
+  #holdGen = 0;
+  #holdPointerId?: number;
+  #holdWatch?: (event: PointerEvent) => void;
+  #holdTouchWatch?: (event: TouchEvent) => void;
+  #audioContext?: AudioContext;
+  #monitorStream?: MediaStream;
+  #levelTimer?: ReturnType<typeof setInterval>;
+  #canMeter = false;
+  #heardSound = false;
+  #holdInterrupted = false;
+  #reportHoldEnd = false;
   #lastSnapshot?: Snapshot;
   #renderedConversation?: string;
   #atBottom = true;
@@ -265,6 +284,7 @@ export class WidgetView {
 
   /** Re-brands the widget from server-side white-label config delivered on bootstrap. */
   applyWhiteLabel(config: Partial<ResolvedOptions>): void {
+    this.#abandonRecording();
     Object.assign(this.#options, config);
     const customCss = this.#options.customCss
       ? `<style class="rd-extra-style">${this.#sanitizeCss(this.#options.customCss)}</style>`
@@ -298,9 +318,9 @@ export class WidgetView {
     }
   }
 
-  /** True while the microphone is capturing, so the host can warn on unload. */
+  /** True while the microphone is capturing or the permission prompt is open. */
   get recording(): boolean {
-    return this.#recording;
+    return this.#recording || this.#requestingMicrophone;
   }
 
   /**
@@ -400,16 +420,17 @@ export class WidgetView {
           <div class="rd-pinned" hidden></div>
           <div class="rd-messages" role="log" aria-live="polite"></div>
           <div class="rd-results" hidden></div>
-          <div class="rd-typing" hidden><span></span><span></span><span></span></div>
+          <div class="rd-voice-mask" hidden>
+            <div class="rd-voice-card">
+              <div class="rd-voice-waves" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+              <span class="rd-voice-cancel" hidden>${ICONS.close}</span>
+              <b class="rd-voice-count" hidden>10</b>
+            </div>
+            <p class="rd-voice-tip">手指上滑，取消发送</p>
+          </div>
         </div>
       </div>
-      <div class="rd-recording" hidden>
-        <span class="rd-rec-dot"></span>
-        <span class="rd-rec-time">0:00</span>
-        <span class="rd-rec-hint">正在录音，点击右侧发送</span>
-        <button type="button" class="rd-icon rd-rec-cancel" title="取消录音">${ICONS.trash}</button>
-        <button type="button" class="rd-send rd-rec-send" title="发送语音">${ICONS.send}</button>
-      </div>
+      <div class="rd-typing" hidden><span></span><span></span><span></span><em>对方正在输入…</em></div>
       <form class="rd-composer">
         <div class="rd-reply" hidden>
           <span class="rd-reply-icon">${ICONS.quote}</span>
@@ -419,10 +440,11 @@ export class WidgetView {
         <div class="rd-composer-toolbar" aria-label="消息工具">
           <button type="button" class="rd-icon rd-emoji-toggle" title="表情" aria-label="表情" aria-expanded="false">${ICONS.smile}</button>
           <button type="button" class="rd-icon rd-more-toggle" title="图片和文件" aria-label="图片和文件" aria-expanded="false">${ICONS.plus}</button>
-          <button type="button" class="rd-icon rd-mic" title="录制语音" aria-label="录制语音" hidden>${ICONS.mic}</button>
+          <button type="button" class="rd-icon rd-mic" title="语音" aria-label="语音" aria-pressed="false" hidden>${ICONS.mic}</button>
         </div>
         <div class="rd-composer-row">
           <textarea class="rd-input" rows="1" placeholder="${escapeAttr(this.#options.placeholder)}" maxlength="4000"></textarea>
+          <button type="button" class="rd-hold" hidden aria-live="polite" aria-label="按住说话">按住 说话</button>
           <button type="submit" class="rd-send" title="发送" aria-label="发送消息" ${this.#options.theme === 'dark' ? 'hidden' : ''} disabled>发送</button>
         </div>
         <div class="rd-tools" hidden>
@@ -438,6 +460,7 @@ export class WidgetView {
         <input type="file" class="rd-upload-input" data-kind="image" accept="image/*" multiple hidden>
         <input type="file" class="rd-upload-input" data-kind="camera" accept="image/*" capture="environment" hidden>
       </form>
+      <div class="rd-voice-toast" hidden role="status"><b>!</b><span></span></div>
       <div class="rd-footer"></div>
       <div class="rd-msg-menu" hidden role="menu" aria-label="消息操作">
         <button type="button" role="menuitem" data-msg-action="copy">复制</button>
@@ -498,7 +521,9 @@ export class WidgetView {
     this.#searchInput = panel.querySelector('.rd-search-input') as HTMLInputElement;
     this.#resultsNode = panel.querySelector('.rd-results') as HTMLDivElement;
     this.#pinnedBar = panel.querySelector('.rd-pinned') as HTMLDivElement;
-    this.#recordBar = panel.querySelector('.rd-recording') as HTMLDivElement;
+    this.#holdButton = panel.querySelector('.rd-hold') as HTMLButtonElement;
+    this.#voiceMask = panel.querySelector('.rd-voice-mask') as HTMLDivElement;
+    this.#voiceToast = panel.querySelector('.rd-voice-toast') as HTMLDivElement;
 
     this.#toolsNode = panel.querySelector('.rd-tools') as HTMLDivElement;
     this.#emojiNode = panel.querySelector('.rd-emojis') as HTMLDivElement;
@@ -517,7 +542,7 @@ export class WidgetView {
       closePanels();
     });
     // Keep touch taps from moving focus to the button and fighting the soft keyboard.
-    [more, emojiToggle].forEach(button => button.addEventListener('pointerdown', event => event.preventDefault()));
+    [more, emojiToggle, panel.querySelector('.rd-mic') as HTMLButtonElement].forEach(button => button.addEventListener('pointerdown', event => event.preventDefault()));
     panel.querySelectorAll<HTMLButtonElement>('[data-emoji-category]').forEach(button => {
       button.addEventListener('pointerdown', event => event.preventDefault());
       button.addEventListener('click', () => {
@@ -526,6 +551,7 @@ export class WidgetView {
       });
     });
     more.addEventListener('click', () => {
+      if (this.#voiceMode) this.#setVoiceMode(false);
       const open = this.#toolsNode!.hidden;
       if (open) this.#input?.blur();
       closePanels();
@@ -533,6 +559,7 @@ export class WidgetView {
       more.setAttribute('aria-expanded', String(open));
     });
     emojiToggle.addEventListener('click', () => {
+      if (this.#voiceMode) this.#setVoiceMode(false);
       const open = this.#emojiNode!.hidden;
       if (open) this.#input?.blur();
       closePanels();
@@ -631,20 +658,54 @@ export class WidgetView {
       this.#handlers.onClearQuote(),
     );
 
-    // Voice notes. The button only appears where the browser can actually
-    // record, because a microphone control that always fails is worse than no
-    // control at all.
+    // 点麦克风切到「按住 说话」；按住录音，松开发送，上滑取消。
     const mic = panel.querySelector('.rd-mic') as HTMLButtonElement;
+    const hold = this.#holdButton as HTMLButtonElement;
     mic.hidden = false;
     mic.addEventListener('click', () => {
-      if (typeof MediaRecorder === 'undefined' || typeof navigator.mediaDevices?.getUserMedia !== 'function') {
+      if (this.#recording || this.#requestingMicrophone || this.#fingerDown) return;
+      if (!this.#voiceMode && !this.#canRecord()) {
         this.#flashRecordingError('此浏览器不支持录音，请使用Chrome或Edge，并通过HTTPS或localhost访问');
         return;
       }
-      void this.#startRecording();
+      const next = !this.#voiceMode;
+      if (next) {
+        closePanels();
+        this.#input?.blur();
+      }
+      this.#setVoiceMode(next);
+      if (!next) this.#input?.focus();
     });
-    (panel.querySelector('.rd-rec-cancel') as HTMLButtonElement).addEventListener('click', () => this.#stopRecording(true));
-    (panel.querySelector('.rd-rec-send') as HTMLButtonElement).addEventListener('click', () => this.#stopRecording(false));
+    // 安卓 WebView 里只在 pointerdown 上 preventDefault，系统仍把按住当成滑动并立刻 pointercancel，
+    // 按钮来不及变色。触摸必须在 touchstart 上取消默认行为；鼠标继续走指针。
+    hold.addEventListener('pointerdown', (event) => {
+      if (event.pointerType === 'touch') return;
+      if (event.button !== 0) return;
+      event.preventDefault();
+      closePanels();
+      this.#beginHold(event.pointerId, event.clientY, 'mouse');
+    });
+    hold.addEventListener('contextmenu', (event) => event.preventDefault());
+    hold.addEventListener('pointermove', (event) => {
+      if (event.pointerType === 'touch') return;
+      this.#moveHold(event);
+    });
+    hold.addEventListener('pointerup', (event) => {
+      if (event.pointerType === 'touch') return;
+      this.#finishHold(event.pointerId, false);
+    });
+    hold.addEventListener('pointercancel', (event) => {
+      if (event.pointerType === 'touch') return;
+      this.#finishHold(event.pointerId, true);
+    });
+    hold.addEventListener('touchstart', (event) => {
+      if (event.touches.length !== 1) return;
+      event.preventDefault();
+      const touch = event.changedTouches[0];
+      if (!touch) return;
+      closePanels();
+      this.#beginHold(touch.identifier, touch.clientY, 'touch');
+    }, { passive: false });
 
     let searchTimer: ReturnType<typeof setTimeout> | undefined;
     (panel.querySelector('.rd-search-toggle') as HTMLButtonElement).addEventListener('click', () => {
@@ -723,6 +784,11 @@ export class WidgetView {
     const hasText = Boolean(this.#input?.value.trim());
     const send = this.#composer?.querySelector<HTMLButtonElement>('.rd-send');
     const more = this.#composer?.querySelector<HTMLButtonElement>('.rd-more-toggle');
+    if (this.#voiceMode) {
+      if (send) send.hidden = true;
+      if (more) more.hidden = false;
+      return;
+    }
     if (send) {
       send.hidden = this.#options.theme === 'dark' && !hasText;
       send.disabled = !hasText;
@@ -789,16 +855,13 @@ export class WidgetView {
     if (snapshot.offline) {
       return snapshot.offlineMessage || this.#options.offlineMessage || '当前离线，留言稍后回复';
     }
-    if (snapshot.agentTyping) {
-      return '客服正在输入…';
-    }
     if (snapshot.connection !== 'OPEN') {
       return '正在重连…';
     }
     if (snapshot.agentsOnline > 0) {
-      return snapshot.aiEnabled ? `在线 ${snapshot.agentsOnline} · 可自动应答` : `在线 ${snapshot.agentsOnline}`;
+      return '在线';
     }
-    return snapshot.offlineMessage || this.#options.offlineMessage || '离线 · 请留言';
+    return '离线';
   }
 
   #renderConversationList(snapshot: Snapshot): void {
@@ -1513,92 +1576,489 @@ export class WidgetView {
     });
   }
 
-  async #startRecording(): Promise<void> {
-    if (this.#recording || this.#requestingMicrophone) {
+  #canRecord(): boolean {
+    return typeof MediaRecorder !== 'undefined' && typeof navigator.mediaDevices?.getUserMedia === 'function';
+  }
+
+  #setVoiceMode(on: boolean): void {
+    if (!on && (this.#fingerDown || this.#recording || this.#requestingMicrophone)) {
+      this.#fingerDown = false;
+      this.#holdCancel = false;
+      this.#holdGen += 1;
+      this.#unwatchHoldPointer();
+      if (this.#recording) this.#stopRecording(true);
+      else this.#releaseLevelMeter();
+    }
+    if (on === this.#voiceMode) return;
+    this.#voiceMode = on;
+    this.#syncVoiceChrome();
+  }
+
+  /** 换肤会拆掉面板，先停掉还在进行的录音，避免麦克风停不下来。 */
+  #abandonRecording(): void {
+    this.#fingerDown = false;
+    this.#holdCancel = false;
+    this.#holdGen += 1;
+    this.#unwatchHoldPointer();
+    if (this.#voiceToastTimer) {
+      clearTimeout(this.#voiceToastTimer);
+      this.#voiceToastTimer = undefined;
+    }
+    if (this.#recording) this.#stopRecording(true);
+    else this.#releaseLevelMeter();
+    this.#voiceMode = false;
+  }
+
+  #syncVoiceChrome(): void {
+    const mic = this.#root.querySelector('.rd-mic') as HTMLButtonElement | null;
+    if (mic) {
+      mic.innerHTML = this.#voiceMode ? ICONS.keyboard : ICONS.mic;
+      const label = this.#voiceMode ? '键盘' : '语音';
+      mic.title = label;
+      mic.setAttribute('aria-label', label);
+      mic.setAttribute('aria-pressed', this.#voiceMode ? 'true' : 'false');
+    }
+    if (this.#input) this.#input.hidden = this.#voiceMode;
+    if (this.#holdButton) this.#holdButton.hidden = !this.#voiceMode;
+    this.#syncSendButton();
+    this.#paintVoice();
+  }
+
+  #beginHold(pointerId: number, clientY: number, source: 'mouse' | 'touch'): void {
+    if (this.#fingerDown || this.#recording) return;
+    if (!this.#canRecord()) {
+      this.#flashRecordingError('此浏览器不支持录音，请使用Chrome或Edge，并通过HTTPS或localhost访问');
       return;
     }
+    this.#fingerDown = true;
+    this.#holdCancel = false;
+    this.#holdInterrupted = false;
+    this.#reportHoldEnd = false;
+    this.#heardSound = false;
+    this.#canMeter = false;
+    this.#holdStartY = clientY;
+    this.#holdGen += 1;
+    const gen = this.#holdGen;
+    if (source === 'mouse') {
+      const hold = this.#holdButton;
+      if (hold) {
+        try {
+          hold.setPointerCapture(pointerId);
+        } catch {
+          // 指针可能在按下的同一瞬间已经结束。
+        }
+      }
+      this.#watchHoldPointer(pointerId);
+    } else {
+      this.#watchHoldTouch(pointerId);
+    }
+    this.#armLevelMeter();
+    this.#paintVoice();
+    if (this.#requestingMicrophone) {
+      void this.#startRecordingWhenIdle(gen);
+      return;
+    }
+    void this.#startRecording(gen);
+  }
+
+  /** 上一次开麦还没返回时又按住了，等那次结束再开始这一次。 */
+  async #startRecordingWhenIdle(gen: number): Promise<void> {
+    while (this.#requestingMicrophone && gen === this.#holdGen) {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    }
+    if (gen !== this.#holdGen || this.#recording) return;
+    if (!this.#fingerDown) {
+      if (this.#reportHoldEnd) {
+        this.#reportHoldEnd = false;
+        this.#paintVoice();
+        this.#flashHoldEnd();
+      }
+      return;
+    }
+    await this.#startRecording(gen);
+  }
+
+  #watchHoldPointer(pointerId: number): void {
+    this.#unwatchHoldPointer();
+    this.#holdPointerId = pointerId;
+    this.#holdWatch = (watchEvent: PointerEvent) => {
+      if (watchEvent.pointerId !== pointerId) return;
+      if (watchEvent.type === 'pointermove') {
+        this.#moveHold(watchEvent);
+        return;
+      }
+      this.#finishHold(watchEvent.pointerId, watchEvent.type === 'pointercancel');
+    };
+    window.addEventListener('pointermove', this.#holdWatch, true);
+    window.addEventListener('pointerup', this.#holdWatch, true);
+    window.addEventListener('pointercancel', this.#holdWatch, true);
+  }
+
+  #watchHoldTouch(pointerId: number): void {
+    this.#unwatchHoldPointer();
+    this.#holdPointerId = pointerId;
+    this.#holdTouchWatch = (event: TouchEvent) => {
+      const ended = event.type === 'touchend' || event.type === 'touchcancel';
+      const list = ended ? event.changedTouches : event.touches;
+      const mine = Array.from(list).find((item) => item.identifier === pointerId);
+      if (!mine) return;
+      if (event.type === 'touchmove') {
+        event.preventDefault();
+        this.#moveHoldY(mine.clientY);
+        return;
+      }
+      this.#finishHold(pointerId, event.type === 'touchcancel');
+    };
+    window.addEventListener('touchmove', this.#holdTouchWatch, { capture: true, passive: false });
+    window.addEventListener('touchend', this.#holdTouchWatch, { capture: true, passive: false });
+    window.addEventListener('touchcancel', this.#holdTouchWatch, { capture: true, passive: false });
+  }
+
+  #unwatchHoldPointer(): void {
+    if (this.#holdWatch) {
+      window.removeEventListener('pointermove', this.#holdWatch, true);
+      window.removeEventListener('pointerup', this.#holdWatch, true);
+      window.removeEventListener('pointercancel', this.#holdWatch, true);
+      this.#holdWatch = undefined;
+    }
+    if (this.#holdTouchWatch) {
+      window.removeEventListener('touchmove', this.#holdTouchWatch, true);
+      window.removeEventListener('touchend', this.#holdTouchWatch, true);
+      window.removeEventListener('touchcancel', this.#holdTouchWatch, true);
+      this.#holdTouchWatch = undefined;
+    }
+    this.#holdPointerId = undefined;
+  }
+
+  #moveHold(event: PointerEvent): void {
+    if (this.#holdPointerId != null && event.pointerId !== this.#holdPointerId) return;
+    this.#moveHoldY(event.clientY);
+  }
+
+  #moveHoldY(clientY: number): void {
+    if (!this.#fingerDown) return;
+    const cancel = this.#holdStartY - clientY > 80;
+    if (cancel === this.#holdCancel) return;
+    this.#holdCancel = cancel;
+    this.#paintVoice(this.#recording ? Date.now() - this.#recordStartedAt : undefined);
+  }
+
+  #finishHold(pointerId: number, interrupted: boolean): void {
+    if (this.#holdPointerId != null && pointerId !== this.#holdPointerId) return;
+    if (!this.#fingerDown && !this.#recording) return;
+    this.#unwatchHoldPointer();
+    const recording = this.#recording;
+    this.#fingerDown = false;
+    if (interrupted) this.#holdInterrupted = true;
+    if (recording) {
+      this.#stopRecording(this.#holdCancel);
+      return;
+    }
+    this.#paintVoice();
+    // 麦克风还在打开时，等请求结束再提示，避免和失败文案叠在一起。
+    if (this.#requestingMicrophone) {
+      this.#reportHoldEnd = true;
+      return;
+    }
+    this.#flashHoldEnd();
+  }
+
+  #flashHoldEnd(): void {
+    if (this.#holdCancel) {
+      this.#flashRecordingError('已取消');
+      return;
+    }
+    if (this.#holdInterrupted) {
+      this.#flashRecordingError('录音没开始，请重新按住说话');
+      return;
+    }
+    this.#flashRecordingError('请按住，直到显示正在录音');
+  }
+
+  #paintVoice(elapsedMs?: number): void {
+    const holding = this.#fingerDown || this.#recording;
+    const cancel = holding && this.#holdCancel;
+    const silent = this.#recording && this.#canMeter && !this.#heardSound;
+    this.#composer?.classList.toggle('is-holding', holding && !cancel && !silent);
+    this.#composer?.classList.toggle('is-silent', holding && !cancel && silent);
+    this.#composer?.classList.toggle('is-cancel', cancel);
+    const hold = this.#holdButton;
+    if (hold) {
+      const label = cancel
+        ? '松开 取消'
+        : !holding
+          ? '按住 说话'
+          : !this.#recording
+            ? '正在打开麦克风'
+            : silent
+              ? '未检测到声音'
+              : '正在录音';
+      hold.textContent = label;
+      hold.setAttribute('aria-label', label.replace(/\s/g, ''));
+      hold.setAttribute('aria-pressed', holding ? 'true' : 'false');
+    }
+    const mask = this.#voiceMask;
+    if (!mask) return;
+    mask.hidden = !holding;
+    mask.classList.toggle('is-cancel', cancel);
+    mask.classList.toggle('is-silent', silent);
+    mask.classList.toggle('is-live', this.#recording && this.#canMeter && this.#heardSound && !cancel);
+    const tip = mask.querySelector('.rd-voice-tip');
+    if (tip) {
+      tip.textContent = cancel
+        ? '松开手指，取消发送'
+        : !this.#recording
+          ? '正在打开麦克风，请继续按住'
+          : silent
+            ? '未检测到声音，请靠近麦克风说话'
+            : '正在录音，松手即可发送';
+    }
+    const waves = mask.querySelector('.rd-voice-waves') as HTMLElement | null;
+    const cancelIcon = mask.querySelector('.rd-voice-cancel') as HTMLElement | null;
+    const count = mask.querySelector('.rd-voice-count') as HTMLElement | null;
+    const left = elapsedMs == null ? Number.POSITIVE_INFINITY : Math.max(0, 60_000 - elapsedMs);
+    const showCount = this.#recording && !cancel && left <= 10_000;
+    if (cancelIcon) cancelIcon.hidden = !cancel;
+    if (count) {
+      count.hidden = !showCount;
+      if (showCount) count.textContent = String(Math.max(1, Math.ceil(left / 1000)));
+    }
+    if (waves) waves.hidden = cancel || showCount;
+  }
+
+  #armLevelMeter(): void {
+    if (this.#audioContext) {
+      void this.#audioContext.resume();
+      return;
+    }
+    const Ctor = window.AudioContext
+      ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctor) return;
+    try {
+      this.#audioContext = new Ctor();
+      void this.#audioContext.resume();
+    } catch {
+      this.#audioContext = undefined;
+    }
+  }
+
+  #attachLevelMeter(stream: MediaStream): void {
+    const ctx = this.#audioContext;
+    if (!ctx) return;
+    // 音量只看复制出来的音轨，避免和录音抢同一路麦克风。
+    const monitor = stream.clone();
+    this.#monitorStream = monitor;
+    const gen = this.#holdGen;
+    void ctx.resume().then(() => {
+      if (gen !== this.#holdGen || !this.#recording || this.#monitorStream !== monitor || ctx.state !== 'running') {
+        monitor.getTracks().forEach((track) => track.stop());
+        if (this.#monitorStream === monitor) this.#monitorStream = undefined;
+        return;
+      }
+      try {
+        const source = ctx.createMediaStreamSource(monitor);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        const bins = new Uint8Array(analyser.fftSize);
+        const bars = this.#voiceMask?.querySelectorAll<HTMLElement>('.rd-voice-waves i');
+        this.#canMeter = true;
+        this.#levelTimer = setInterval(() => {
+          if (!this.#recording) return;
+          analyser.getByteTimeDomainData(bins);
+          let sum = 0;
+          for (let index = 0; index < bins.length; index += 1) {
+            const sample = ((bins[index] ?? 128) - 128) / 128;
+            sum += sample * sample;
+          }
+          const rms = Math.sqrt(sum / bins.length);
+          if (rms > 0.015 && !this.#heardSound) {
+            this.#heardSound = true;
+            this.#paintVoice(Date.now() - this.#recordStartedAt);
+          }
+          const heard = this.#heardSound;
+          bars?.forEach((bar, index) => {
+            if (!heard) {
+              bar.style.transform = '';
+              return;
+            }
+            const value = bins[Math.min(bins.length - 1, Math.floor((index + 0.5) * bins.length / bars.length))] ?? 128;
+            const amp = Math.min(1, Math.abs(value - 128) / 32);
+            bar.style.transform = `scaleY(${(0.35 + amp * 2.2).toFixed(2)})`;
+          });
+        }, 80);
+        this.#paintVoice(Date.now() - this.#recordStartedAt);
+      } catch {
+        this.#canMeter = false;
+        monitor.getTracks().forEach((track) => track.stop());
+        if (this.#monitorStream === monitor) this.#monitorStream = undefined;
+      }
+    }).catch(() => {
+      this.#canMeter = false;
+      monitor.getTracks().forEach((track) => track.stop());
+      if (this.#monitorStream === monitor) this.#monitorStream = undefined;
+    });
+  }
+
+  #releaseLevelMeter(): void {
+    if (this.#levelTimer) {
+      clearInterval(this.#levelTimer);
+      this.#levelTimer = undefined;
+    }
+    this.#canMeter = false;
+    this.#heardSound = false;
+    this.#monitorStream?.getTracks().forEach((track) => track.stop());
+    this.#monitorStream = undefined;
+    this.#voiceMask?.classList.remove('is-live');
+    this.#voiceMask?.querySelectorAll<HTMLElement>('.rd-voice-waves i').forEach((bar) => {
+      bar.style.transform = '';
+    });
+    const ctx = this.#audioContext;
+    this.#audioContext = undefined;
+    if (ctx && ctx.state !== 'closed') void ctx.close();
+  }
+
+  async #startRecording(gen: number): Promise<void> {
+    if (this.#recording || this.#requestingMicrophone) return;
     this.#requestingMicrophone = true;
-    const mic = this.#root.querySelector('.rd-mic') as HTMLButtonElement | null;
-    if (mic) { mic.disabled = true; mic.setAttribute('aria-label', '等待麦克风权限'); }
     let stream: MediaStream;
     try {
       stream = await requestMicrophone(() => navigator.mediaDevices.getUserMedia({ audio: true }));
     } catch (error) {
-      this.#flashRecordingError(error instanceof Error && error.message.includes('授权未完成') ? error.message : '无法访问麦克风，请检查浏览器权限');
+      const message = error instanceof Error && error.message.includes('授权未完成')
+        ? error.message
+        : '无法访问麦克风，请检查浏览器权限';
+      const newerHold = gen !== this.#holdGen && this.#fingerDown;
+      if (!newerHold) {
+        if (gen === this.#holdGen) {
+          this.#fingerDown = false;
+          this.#unwatchHoldPointer();
+        }
+        this.#reportHoldEnd = false;
+        this.#releaseLevelMeter();
+        this.#paintVoice();
+        this.#flashRecordingError(message);
+      }
       return;
     } finally {
       this.#requestingMicrophone = false;
-      if (mic) { mic.disabled = false; mic.setAttribute('aria-label', '录制语音'); }
     }
-    const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((type) =>
-      MediaRecorder.isTypeSupported(type),
-    );
-    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    if (gen !== this.#holdGen || !this.#fingerDown) {
+      stream.getTracks().forEach((track) => track.stop());
+      const newerHold = gen !== this.#holdGen && this.#fingerDown;
+      if (!newerHold) this.#releaseLevelMeter();
+      const endedThisGesture = gen === this.#holdGen && !this.#fingerDown;
+      if (endedThisGesture || (this.#reportHoldEnd && !this.#fingerDown && !this.#recording)) {
+        this.#reportHoldEnd = false;
+        this.#paintVoice();
+        this.#flashHoldEnd();
+      }
+      return;
+    }
+    let recorder: MediaRecorder;
+    try {
+      const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((type) =>
+        MediaRecorder.isTypeSupported(type),
+      );
+      recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    } catch {
+      stream.getTracks().forEach((track) => track.stop());
+      this.#fingerDown = false;
+      this.#unwatchHoldPointer();
+      this.#releaseLevelMeter();
+      this.#paintVoice();
+      this.#flashRecordingError('无法开始录音');
+      return;
+    }
     this.#recorder = recorder;
     this.#recordChunks = collectRecordingChunks(recorder);
     recorder.addEventListener('stop', () => {
       stream.getTracks().forEach((track) => track.stop());
     });
-    recorder.start();
+    try {
+      recorder.start(200);
+    } catch {
+      if (recorder.state === 'inactive') {
+        try {
+          recorder.start();
+        } catch {
+          // 分片启动失败时再试一次；仍失败则按未开始处理。
+        }
+      }
+    }
+    const started = recorder.state === 'recording';
+    if (!started) {
+      stream.getTracks().forEach((track) => track.stop());
+      this.#fingerDown = false;
+      this.#unwatchHoldPointer();
+      this.#releaseLevelMeter();
+      this.#recorder = undefined;
+      this.#recordChunks = [];
+      this.#paintVoice();
+      this.#flashRecordingError('无法开始录音');
+      return;
+    }
     this.#recording = true;
     this.#recordStartedAt = Date.now();
-    this.#recordBar!.hidden = false;
-    (this.#composer as HTMLFormElement).hidden = true;
-    const label = this.#recordBar!.querySelector('.rd-rec-time') as HTMLElement;
+    this.#attachLevelMeter(stream);
+    this.#paintVoice(0);
     this.#recordTimer = setInterval(() => {
-      label.textContent = durationLabel(Date.now() - this.#recordStartedAt);
-    }, 500);
-    label.textContent = '0:00';
+      const elapsed = Date.now() - this.#recordStartedAt;
+      if (elapsed >= 60_000) {
+        this.#fingerDown = false;
+        this.#holdCancel = false;
+        this.#unwatchHoldPointer();
+        this.#stopRecording(false);
+        return;
+      }
+      this.#paintVoice(elapsed);
+    }, 200);
+    if (!this.#fingerDown) this.#stopRecording(this.#holdCancel);
   }
 
   #stopRecording(cancel: boolean): void {
     const recorder = this.#recorder;
-    if (!recorder || !this.#recording) {
-      return;
-    }
+    if (!recorder || !this.#recording) return;
     const elapsed = Date.now() - this.#recordStartedAt;
+    const silent = this.#canMeter && !this.#heardSound;
     this.#recording = false;
+    this.#holdCancel = false;
     if (this.#recordTimer) {
       clearInterval(this.#recordTimer);
       this.#recordTimer = undefined;
     }
-    this.#recordBar!.hidden = true;
-    (this.#composer as HTMLFormElement).hidden = false;
+    this.#releaseLevelMeter();
+    this.#paintVoice();
     this.#recorder = undefined;
     const chunks = this.#recordChunks;
     this.#recordChunks = [];
+    const deliver = !cancel && elapsed >= 1_000 && !silent;
+    const tooShort = elapsed < 1_000;
     recorder.addEventListener('stop', () => {
-      if (cancel) {
-        return;
-      }
-      // A tap rather than a hold: anything under half a second is almost
-      // always an accidental press, and the server would store a silent file.
-      if (elapsed < 500 || chunks.length === 0) {
-        this.#flashRecordingError('录音时间太短');
+      if (cancel) return;
+      if (!deliver || chunks.length === 0) {
+        this.#flashRecordingError(tooShort ? '说话时间太短' : '没有录到声音，请检查麦克风');
         return;
       }
       this.#handlers.onVoice(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }), elapsed);
     });
-    recorder.stop();
+    try {
+      recorder.stop();
+    } catch {
+      if (!cancel) this.#flashRecordingError(tooShort ? '说话时间太短' : '没有录到声音，请检查麦克风');
+    }
   }
 
   #flashRecordingError(message: string): void {
-    const bar = this.#recordBar;
-    if (!bar) {
-      return;
-    }
-    bar.hidden = false;
-    bar.classList.add('is-error');
-    const label = bar.querySelector('.rd-rec-time') as HTMLElement;
-    const hint = bar.querySelector('.rd-rec-hint') as HTMLElement;
-    hint.textContent = message;
-    label.textContent = '';
-    setTimeout(() => {
-      bar.classList.remove('is-error');
-      bar.hidden = true;
-      hint.textContent = '正在录音，点击右侧发送';
-      (this.#composer as HTMLFormElement).hidden = false;
-    }, 2_000);
+    const toast = this.#voiceToast;
+    if (!toast) return;
+    const text = toast.querySelector('span');
+    if (text) text.textContent = message;
+    toast.hidden = false;
+    if (this.#voiceToastTimer) clearTimeout(this.#voiceToastTimer);
+    this.#voiceToastTimer = setTimeout(() => {
+      toast.hidden = true;
+    }, message.length > 12 ? 2_200 : 1_400);
   }
 
   #autoGrow(): void {
@@ -1694,7 +2154,7 @@ export class WidgetView {
     const questionInk = chipInk(accent, light);
     const radius = this.#options.bubbleRadius ?? 12;
     const fontStack = this.#options.fontFamily ||
-      'system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif';
+      'system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
     const side = this.#options.position === 'left' ? 'left' : 'right';
     return `
 :host { all: initial; }
@@ -1770,7 +2230,7 @@ ${this.#options.embedded ? `
   font: inherit; background: ${light ? '#f9fafb' : '#1f2937'}; color: inherit; outline: none; transition: background-color 0.12s, color 0.12s, border-color 0.12s;
 }
 .rd-search-input:focus { border-color: ${accent}; background: ${light ? '#ffffff' : '#111827'}; }
-.rd-body { position: relative; flex: 1; min-height: 0; display: flex; background: ${light ? '#f9fafb' : '#111827'}; }
+.rd-body { position: relative; flex: 1; min-height: 0; display: flex; overflow: hidden; background: ${light ? '#f9fafb' : '#111827'}; }
 .rd-thread { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .rd-messages { background: ${light ? '#f7f8fa' : '#171b24'}; flex: 1; overflow-y: auto; padding: 20px 18px 12px; display: flex; flex-direction: column; gap: 16px; scrollbar-width: thin; }
 .rd-messages::-webkit-scrollbar { width: 6px; }
@@ -1895,7 +2355,7 @@ ${this.#options.embedded ? `
 .rd-state.is-failed svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; }
 .rd-receipt { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: ${light ? '#939aab' : '#8b91a0'}; }
 .rd-receipt svg { width: 13px; height: 13px; display: block; }
-.rd-receipt.is-read { color: ${accent}; }
+.rd-receipt.is-read { color: var(--rd-chip-ink, ${questionInk}); }
 .rd-sys { align-self: center; font-size: 12px; color: ${light ? '#8c93a3' : '#8b91a0'}; background: ${light ? '#f5f6f8' : '#23262d'}; padding: 3px 8px; border-radius: 4px; }
 /* 自动回复角标/气泡跟入口主色走（含白标 --rd-accent），不用写死通语蓝。 */
 .rd-auto-badge { display: inline-flex; align-items: center; margin-left: 6px; font-size: 10.5px; font-weight: 600; color: var(--rd-accent-ink, var(--rd-accent, ${accent})); background: color-mix(in srgb, var(--rd-accent, ${accent}) 22%, ${light ? '#ffffff' : '#171b24'}); border-radius: 999px; padding: 1px 7px; vertical-align: middle; }
@@ -1928,9 +2388,10 @@ ${this.#options.embedded ? `
 .rd-result-excerpt { font-size: 13px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .rd-result mark { background: ${accent}33; color: inherit; border-radius: 3px; padding: 0 2px; }
 .rd-result time { font-size: 11px; color: ${light ? '#939aab' : '#8b91a0'}; flex: none; }
-.rd-typing { display: flex; gap: 4px; padding: 0 18px 8px; }
+.rd-typing { display: flex; align-items: center; gap: 6px; flex-shrink: 0; position: relative; z-index: 5; padding: 6px 16px; background: ${light ? '#ffffff' : '#1e1f24'}; color: ${light ? '#171717' : '#e8eaef'}; font-size: 12px; line-height: 1.4; border-top: 1px solid ${light ? '#E5E8EF' : '#2b2f37'}; }
 .rd-typing[hidden] { display: none; }
-.rd-typing span { width: 6px; height: 6px; border-radius: 50%; background: ${light ? '#b8bdca' : '#5b6172'}; animation: rd-bounce 1.2s infinite; }
+.rd-typing em { font-style: normal; }
+.rd-typing span { width: 6px; height: 6px; border-radius: 50%; background: ${light ? '#646A73' : '#c5cad3'}; animation: rd-bounce 1.2s infinite; }
 .rd-typing span:nth-child(2) { animation-delay: .15s; }
 .rd-typing span:nth-child(3) { animation-delay: .3s; }
 @keyframes rd-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: .5; } 30% { transform: translateY(-4px); opacity: 1; } }
@@ -1999,15 +2460,54 @@ ${this.#options.embedded ? `
 .rd-send:hover:not(:disabled) { filter: brightness(1.05); }
 .rd-send svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
 .rd-send:disabled { opacity: .4; cursor: not-allowed; }
-.rd-recording { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-top: 1px solid ${light ? '#eef0f5' : '#2b2f37'}; font-size: 13px; }
-.rd-recording[hidden] { display: none; }
-.rd-recording.is-error { color: #ff4d4f; }
-.rd-rec-dot { width: 9px; height: 9px; border-radius: 50%; background: #ff4d4f; animation: rd-pulse 1s infinite; }
-.rd-recording.is-error .rd-rec-dot { display: none; }
-@keyframes rd-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
-.rd-rec-time { font-variant-numeric: tabular-nums; font-weight: 600; }
-.rd-rec-hint { flex: 1; opacity: .75; font-size: 12px; }
-.rd-recording .rd-icon { color: inherit; }
+.rd-hold {
+  display: flex; align-items: center; justify-content: center; flex: 1 1 auto; min-width: 0; height: 42px; padding: 0;
+  border: 1px solid ${light ? '#e5e6eb' : '#3a4150'}; border-radius: 8px;
+  background: ${light ? '#ffffff' : '#2a3140'}; color: ${light ? '#1f2329' : '#eef2f1'};
+  font: 500 16px/1 var(--rd-font); cursor: pointer; user-select: none; -webkit-user-select: none;
+  -webkit-touch-callout: none; touch-action: none; overscroll-behavior: none;
+}
+.rd-composer.is-holding .rd-hold { background: #95ec69; border-color: #95ec69; color: #111; }
+.rd-composer.is-silent .rd-hold { background: #ffb020; border-color: #ffb020; color: #111; }
+.rd-composer.is-cancel .rd-hold { background: #fa5151; border-color: #fa5151; color: #fff; }
+.rd-voice-mask {
+  position: absolute; inset: 0; z-index: 6; display: flex; flex-direction: column; align-items: center;
+  justify-content: flex-end; padding: 0 16px 18px; background: rgba(0, 0, 0, .38); pointer-events: none;
+}
+.rd-voice-mask[hidden] { display: none; }
+.rd-voice-card {
+  width: 160px; height: 88px; border-radius: 14px; background: #95ec69; color: #fff;
+  display: flex; align-items: center; justify-content: center;
+}
+.rd-voice-mask.is-silent .rd-voice-card { background: #ffb020; }
+.rd-voice-mask.is-cancel .rd-voice-card { background: #fa5151; }
+.rd-voice-mask.is-silent .rd-voice-waves i { animation: none; transform: scaleY(.35); }
+.rd-voice-waves { display: flex; align-items: center; justify-content: center; gap: 3px; height: 36px; }
+.rd-voice-waves i {
+  display: block; width: 3px; height: 16px; border-radius: 2px; background: #fff; transform-origin: center;
+  animation: rd-wave .9s ease-in-out infinite;
+}
+.rd-voice-waves i:nth-child(2), .rd-voice-waves i:nth-child(8) { animation-delay: .1s; }
+.rd-voice-waves i:nth-child(3), .rd-voice-waves i:nth-child(7) { animation-delay: .2s; }
+.rd-voice-waves i:nth-child(4), .rd-voice-waves i:nth-child(6) { animation-delay: .3s; }
+.rd-voice-waves i:nth-child(5) { animation-delay: .4s; }
+.rd-voice-mask.is-live .rd-voice-waves i { animation: none; }
+@keyframes rd-wave { 0%, 100% { transform: scaleY(.35); } 50% { transform: scaleY(1.7); } }
+.rd-voice-cancel { display: inline-flex; color: #fff; }
+.rd-voice-cancel svg { width: 28px; height: 28px; }
+.rd-voice-count { font-size: 42px; font-weight: 500; line-height: 1; color: #fff; }
+.rd-voice-tip { margin: 16px 0 4px; color: #fff; font-size: 16px; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,.35); }
+.rd-voice-toast {
+  position: absolute; left: 50%; top: 42%; z-index: 45; transform: translate(-50%, -50%);
+  width: max-content; max-width: 220px; padding: 22px 16px 16px; border-radius: 12px;
+  background: rgba(28, 28, 28, .82); color: #fff; text-align: center; pointer-events: none;
+}
+.rd-voice-toast[hidden] { display: none; }
+.rd-voice-toast b {
+  display: grid; place-items: center; width: 36px; height: 36px; margin: 0 auto 10px;
+  border: 2px solid #fff; border-radius: 50%; font-size: 22px; font-weight: 600; line-height: 1;
+}
+.rd-voice-toast span { display: block; font-size: 14px; line-height: 1.45; }
 .rd-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 14px 12px; font-size: 12px; color: ${light ? '#5b6172' : '#a8aebb'}; }
 .rd-footer[hidden] { display: none; }
 .rd-stars { display: inline-flex; gap: 2px; }
@@ -2095,11 +2595,11 @@ ${this.#options.launcher === 'bubble' ? '.rd-launcher-label { display: none; }' 
 /* 与坐席工作台统一的外观；企业主色、嵌入模式和全部功能继续由配置驱动。 */
 .rd-panel { border-radius: 17px; border-color: ${light ? '#e9edf3' : '#303848'}; }
 .rd-panel:not(.is-embedded) { width: 360px; }
-.rd-header { background: ${accent}; color: #fff; padding: 22px 20px; border-bottom: 0; }
-.rd-heading strong { color: #fff; font-size: 18px; }
-.rd-subtitle, .rd-service-subtitle { color: #ffffffcc; font-size: 11px; }
-.rd-header-actions .rd-icon { color: #fff; background: transparent; }
-.rd-header .rd-page-back { color: #fff; }
+.rd-header { background: ${accent}; color: ${accentInk}; padding: 22px 20px; border-bottom: 0; }
+.rd-heading strong { color: ${accentInk}; font-size: 18px; }
+.rd-subtitle, .rd-service-subtitle { color: ${accentInk}; font-size: 11px; opacity: .78; }
+.rd-header-actions .rd-icon { color: ${accentInk}; background: transparent; }
+.rd-header .rd-page-back { color: ${accentInk}; }
 .rd-body, .rd-messages { background: ${light ? '#fafbfd' : '#171b24'}; }
 .rd-messages { padding: 20px 16px; gap: 20px; }
 .rd-empty { border-color: ${light ? '#e9edf3' : '#303848'}; box-shadow: none; padding: 16px; }
@@ -2116,6 +2616,7 @@ ${this.#options.launcher === 'bubble' ? '.rd-launcher-label { display: none; }' 
 .rd-composer-toolbar .rd-icon:hover { background:${light ? '#f0f3f8' : '#303848'}; }
 .rd-composer-row { align-items:flex-end; gap:10px; padding:6px 12px 12px; min-width:0; }
 .rd-composer-row .rd-input { flex:1 1 0%; width:0; min-width:0; min-height:42px; padding:10px 12px; line-height:20px; border-radius:8px; }
+.rd-composer-row .rd-hold { flex:1 1 0%; width:0; min-width:0; height:42px; border-radius:8px; }
 .rd-composer-row .rd-send { flex:0 0 60px; width:60px; height:42px; border-radius:8px; font-size:14px; }
 @media (max-width: 480px) { .rd-panel:not(.is-embedded) { width: 100vw; border-radius: 0; } .rd-header { padding: 14px 16px; } }
 `;

@@ -85,6 +85,7 @@ class _LoginPageState extends State<LoginPage> {
       subtitle: '欢迎回来，登录后继续接待你的客户。',
       badgeLabel: '客服 / 企业账号',
       onSurfaceSwitch: widget.session.busy ? null : widget.onPlatformLogin,
+      supportOrigin: () => _server.text,
       child: ListenableBuilder(
         listenable: widget.session,
         builder: (context, _) {

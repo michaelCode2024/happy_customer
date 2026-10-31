@@ -555,8 +555,8 @@ Future<void> showCreatedTenant(
               const SizedBox(height: 12),
               Text(
                 created.initialPassword.isEmpty
-                    ? '密码由你设定，请转告客服主管。'
-                    : '初始密码只显示这一次，请立即转告客服主管。',
+                    ? '密码已由您设定，请告知客服主管于首次登录后尽快修改密码。'
+                    : '初始密码仅显示一次，请立即告知客服主管，并请其于首次登录后尽快修改密码。',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),

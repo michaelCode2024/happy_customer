@@ -8,13 +8,19 @@ import 'package:tongyu_agent_console/src/api/api_exception.dart';
 import 'package:tongyu_agent_console/src/api/models.dart';
 import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
 import 'package:tongyu_agent_console/src/ui/error_banner.dart';
+import 'package:tongyu_agent_console/src/ui/platform_support.dart';
 
 /// 企业管理员的自助管理空间；所有数据仍由服务端按当前企业鉴权。
 class TenantAdminPage extends StatefulWidget {
   const TenantAdminPage(
-      {super.key, required this.api, this.tenantSlug = '', this.onMemberSaved});
+      {super.key,
+      required this.api,
+      this.tenantSlug = '',
+      this.supportVisitorName = '',
+      this.onMemberSaved});
   final TongYuApi api;
   final String tenantSlug;
+  final String supportVisitorName;
   final Future<void> Function()? onMemberSaved;
   @override
   State<TenantAdminPage> createState() => _TenantAdminPageState();
@@ -109,7 +115,7 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
             builder: (_) => AlertDialog(
                   title: const Text('成员已创建'),
                   content: SelectableText(
-                      '登录用户名与初始密码仅显示一次，请立即交给对应成员：\n\n'
+                      '登录用户名与初始密码仅显示一次，请立即交予对应成员，并请其于首次登录后尽快修改密码。\n\n'
                       '初始密码：$initialPassword'),
                   actions: [
                     TextButton(
@@ -266,8 +272,7 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
                 .contains(_memberQuery.toLowerCase()))
             .toList();
         final online = _members
-            .where((m) =>
-                m['status'] == 'ACTIVE' && m['presence'] == 'ONLINE')
+            .where((m) => m['status'] == 'ACTIVE' && m['presence'] == 'ONLINE')
             .length;
         final supervisors =
             _members.where((m) => m['role'] == 'SUPERVISOR').length;
@@ -275,147 +280,163 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
         final usedSeats = asInt(_subscription['usedSeats']);
         final seatsLeft =
             seatLimit > 0 ? (seatLimit - usedSeats).clamp(0, seatLimit) : 0;
-        return ListView(padding: const EdgeInsets.fromLTRB(20, 16, 20, 24), children: [
-          _heading(
-              '团队成员',
-              seatLimit > 0
-                  ? '集中查看团队账号、接待权限与在线状态。可在席位额度内添加成员（已用 $usedSeats / $seatLimit，剩余 $seatsLeft）。'
-                  : '集中查看团队账号、接待权限与在线状态。可在席位额度内添加成员。',
-              '添加成员',
-              () => _member()),
-          // 汇总当前企业的真实成员数据；搜索只筛选列表，不改变团队总览。
-          Padding(
-            padding: const EdgeInsets.only(bottom: 14),
-            child: Row(children: [
-              Expanded(
-                  child: _memberMetric('团队成员', _members.length,
-                      Icons.groups_2_outlined, const Color(0xFF3263FF))),
-              const SizedBox(width: 10),
-              Expanded(
-                  child: _memberMetric('在线成员', online,
-                      Icons.bolt_rounded, const Color(0xFF31977C))),
-              const SizedBox(width: 10),
-              Expanded(
-                  child: _memberMetric('主管', supervisors,
-                      Icons.shield_outlined, const Color(0xFF7C5CFC))),
-            ]),
-          ),
-          WorkspaceCard(
-              padding: EdgeInsets.zero,
-              title: '成员列表',
-              subtitle: '共 ${_members.length} 人 · 搜索只影响下方结果',
-              icon: Icons.people_alt_outlined,
-              actions: [
-                SizedBox(
-                    width: constraints.maxWidth < 420
-                        ? constraints.maxWidth - 120
-                        : 240,
-                    child: TextField(
-                        onChanged: (v) => setState(() => _memberQuery = v),
-                        style: const TextStyle(fontSize: 12.5),
-                        decoration: const InputDecoration(
-                            isDense: true,
-                            hintText: '搜索姓名或用户名',
-                            fillColor: Color(0xFFF7F9FD),
-                            prefixIconConstraints:
-                                BoxConstraints(minWidth: 32, minHeight: 32),
-                            prefixIcon:
-                                Icon(Icons.search_rounded, size: 16),
-                            contentPadding: EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 8)))),
-              ],
-              child: members.isEmpty
-                  ? const WorkspaceEmptyState(
-                      icon: Icons.person_search_outlined,
-                      title: '没有匹配的团队成员',
-                      description: '换一个姓名或用户名再试，或点击「添加成员」新建账号。',
-                      compact: true)
-                  : Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (constraints.maxWidth >= 850)
-                          SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: ConstrainedBox(
-                                  constraints: BoxConstraints(
-                                      minWidth: constraints.maxWidth - 42),
-                                  child: DataTable(columns: const [
-                                    DataColumn(label: Text('成员')),
-                                    DataColumn(label: Text('登录用户名')),
-                                    DataColumn(label: Text('角色')),
-                                    DataColumn(label: Text('接待渠道')),
-                                    DataColumn(label: Text('状态')),
-                                    DataColumn(label: Text('操作'))
-                                  ], rows: [
-                                    for (final member in members)
-                                      DataRow(cells: [
-                                        DataCell(Row(children: [
-                                          Container(
-                                            width: 24,
-                                            height: 24,
-                                            decoration: BoxDecoration(
-                                              color: theme.colorScheme.primary
-                                                  .withOpacity(.09),
-                                              borderRadius:
-                                                  BorderRadius.circular(6),
-                                            ),
-                                            alignment: Alignment.center,
-                                            child: Text(
-                                                asString(member['displayName'])
-                                                        .isEmpty
-                                                    ? '人'
-                                                    : asString(member[
-                                                            'displayName'])
-                                                        .substring(0, 1),
-                                                style: TextStyle(
-                                                    fontSize: 11,
-                                                    fontWeight: FontWeight.w600,
+        return ListView(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+            children: [
+              _heading(
+                  '团队成员',
+                  seatLimit > 0
+                      ? '集中查看团队账号、接待权限与在线状态。可在席位额度内添加成员（已用 $usedSeats / $seatLimit，剩余 $seatsLeft）。'
+                      : '集中查看团队账号、接待权限与在线状态。可在席位额度内添加成员。',
+                  '添加成员',
+                  () => _member()),
+              // 汇总当前企业的真实成员数据；搜索只筛选列表，不改变团队总览。
+              Padding(
+                padding: const EdgeInsets.only(bottom: 14),
+                child: Row(children: [
+                  Expanded(
+                      child: _memberMetric('团队成员', _members.length,
+                          Icons.groups_2_outlined, const Color(0xFF3263FF))),
+                  const SizedBox(width: 10),
+                  Expanded(
+                      child: _memberMetric('在线成员', online, Icons.bolt_rounded,
+                          const Color(0xFF31977C))),
+                  const SizedBox(width: 10),
+                  Expanded(
+                      child: _memberMetric('主管', supervisors,
+                          Icons.shield_outlined, const Color(0xFF7C5CFC))),
+                ]),
+              ),
+              WorkspaceCard(
+                  padding: EdgeInsets.zero,
+                  title: '成员列表',
+                  subtitle: '共 ${_members.length} 人 · 搜索只影响下方结果',
+                  icon: Icons.people_alt_outlined,
+                  actions: [
+                    SizedBox(
+                        width: constraints.maxWidth < 420
+                            ? constraints.maxWidth - 120
+                            : 240,
+                        child: TextField(
+                            onChanged: (v) => setState(() => _memberQuery = v),
+                            style: const TextStyle(fontSize: 12.5),
+                            decoration: const InputDecoration(
+                                isDense: true,
+                                hintText: '搜索姓名或用户名',
+                                fillColor: Color(0xFFF7F9FD),
+                                prefixIconConstraints:
+                                    BoxConstraints(minWidth: 32, minHeight: 32),
+                                prefixIcon:
+                                    Icon(Icons.search_rounded, size: 16),
+                                contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 8)))),
+                  ],
+                  child: members.isEmpty
+                      ? const WorkspaceEmptyState(
+                          icon: Icons.person_search_outlined,
+                          title: '没有匹配的团队成员',
+                          description: '换一个姓名或用户名再试，或点击「添加成员」新建账号。',
+                          compact: true)
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                              if (constraints.maxWidth >= 850)
+                                SingleChildScrollView(
+                                    scrollDirection: Axis.horizontal,
+                                    child: ConstrainedBox(
+                                        constraints: BoxConstraints(
+                                            minWidth:
+                                                constraints.maxWidth - 42),
+                                        child: DataTable(columns: const [
+                                          DataColumn(label: Text('成员')),
+                                          DataColumn(label: Text('登录用户名')),
+                                          DataColumn(label: Text('角色')),
+                                          DataColumn(label: Text('接待渠道')),
+                                          DataColumn(label: Text('状态')),
+                                          DataColumn(label: Text('操作'))
+                                        ], rows: [
+                                          for (final member in members)
+                                            DataRow(cells: [
+                                              DataCell(Row(children: [
+                                                Container(
+                                                  width: 24,
+                                                  height: 24,
+                                                  decoration: BoxDecoration(
                                                     color: theme
-                                                        .colorScheme.primary)),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Text(asString(member['displayName']))
-                                        ])),
-                                        DataCell(Text(asString(member['email']))),
-                                        DataCell(Text(_role(member['role']))),
-                                        DataCell(Text(
-                                            '${asList(member['inboxIds']).length} 个渠道')),
-                                        DataCell(Row(children: [
-                                          Icon(Icons.circle,
-                                              size: 7,
-                                              color: member['status'] !=
-                                                      'ACTIVE'
-                                                  ? Colors.grey
-                                                  : member['presence'] ==
-                                                          'ONLINE'
-                                                      ? const Color(0xff34a853)
-                                                      : Colors.grey),
-                                          const SizedBox(width: 6),
-                                          Text(member['status'] != 'ACTIVE'
-                                              ? '已停用'
-                                              : member['presence'] == 'ONLINE'
-                                                  ? '在线'
-                                                  : '离线')
-                                        ])),
-                                        DataCell(TextButton(
-                                            onPressed: () => _member(member),
-                                            child: const Text('编辑'))),
-                                      ])
-                                  ]))),
-                        if (constraints.maxWidth < 850)
-                          for (final member in members)
-                            ListTile(
-                                dense: true,
-                                contentPadding: EdgeInsets.zero,
-                                title: Text(asString(member['displayName'])),
-                                subtitle: Text(
-                                    '${member['email']}\n${_role(member['role'])} · ${asList(member['inboxIds']).length} 个渠道'),
-                                isThreeLine: true,
-                                trailing: TextButton(
-                                    onPressed: () => _member(member),
-                                    child: const Text('编辑'))),
-                      ])),
-        ]);
+                                                        .colorScheme.primary
+                                                        .withOpacity(.09),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            6),
+                                                  ),
+                                                  alignment: Alignment.center,
+                                                  child: Text(
+                                                      asString(member[
+                                                                  'displayName'])
+                                                              .isEmpty
+                                                          ? '人'
+                                                          : asString(member[
+                                                                  'displayName'])
+                                                              .substring(0, 1),
+                                                      style: TextStyle(
+                                                          fontSize: 11,
+                                                          fontWeight:
+                                                              FontWeight.w600,
+                                                          color: theme
+                                                              .colorScheme
+                                                              .primary)),
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Text(asString(
+                                                    member['displayName']))
+                                              ])),
+                                              DataCell(Text(
+                                                  asString(member['email']))),
+                                              DataCell(
+                                                  Text(_role(member['role']))),
+                                              DataCell(Text(
+                                                  '${asList(member['inboxIds']).length} 个渠道')),
+                                              DataCell(Row(children: [
+                                                Icon(Icons.circle,
+                                                    size: 7,
+                                                    color: member['status'] !=
+                                                            'ACTIVE'
+                                                        ? Colors.grey
+                                                        : member['presence'] ==
+                                                                'ONLINE'
+                                                            ? const Color(
+                                                                0xff34a853)
+                                                            : Colors.grey),
+                                                const SizedBox(width: 6),
+                                                Text(
+                                                    member['status'] != 'ACTIVE'
+                                                        ? '已停用'
+                                                        : member['presence'] ==
+                                                                'ONLINE'
+                                                            ? '在线'
+                                                            : '离线')
+                                              ])),
+                                              DataCell(TextButton(
+                                                  onPressed: () =>
+                                                      _member(member),
+                                                  child: const Text('编辑'))),
+                                            ])
+                                        ]))),
+                              if (constraints.maxWidth < 850)
+                                for (final member in members)
+                                  ListTile(
+                                      dense: true,
+                                      contentPadding: EdgeInsets.zero,
+                                      title:
+                                          Text(asString(member['displayName'])),
+                                      subtitle: Text(
+                                          '${member['email']}\n${_role(member['role'])} · ${asList(member['inboxIds']).length} 个渠道'),
+                                      isThreeLine: true,
+                                      trailing: TextButton(
+                                          onPressed: () => _member(member),
+                                          child: const Text('编辑'))),
+                            ])),
+            ]);
       });
 
   Widget _memberMetric(String label, int count, IconData icon, Color tone) {
@@ -454,12 +475,11 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
       ]),
     );
   }
-  Widget _inboxList() => ListView(padding: const EdgeInsets.only(bottom: 20), children: [
-        _heading(
-            '客服入口',
-            '每个入口单独设置接待文案、允许域名，以及「自动分配 / 分配后自动接单」（点进入口编辑）。',
-            '创建入口',
-            () => _inbox()),
+
+  Widget _inboxList() =>
+      ListView(padding: const EdgeInsets.only(bottom: 20), children: [
+        _heading('客服入口', '每个入口单独设置接待文案、允许域名，以及「自动分配 / 分配后自动接单」（点进入口编辑）。',
+            '创建入口', () => _inbox()),
         for (final inbox in _inboxes)
           Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
@@ -484,76 +504,81 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
                 ),
               )),
       ]);
-  Widget _usage() => ListView(padding: const EdgeInsets.fromLTRB(20, 16, 20, 24), children: [
+  Widget _usage() =>
+      ListView(padding: const EdgeInsets.fromLTRB(20, 16, 20, 24), children: [
         const WorkspaceHeading('套餐与用量', '查看当前服务额度与本月实际使用情况'),
         WorkspaceCard(
             padding: const EdgeInsets.all(18),
-            child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(children: [
-                    Container(
-                      width: 32,
-                      height: 32,
-                      decoration: BoxDecoration(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .primary
-                              .withOpacity(.08),
-                          borderRadius: BorderRadius.circular(8)),
-                      child: Icon(Icons.workspace_premium_outlined,
-                          size: 17,
-                          color: Theme.of(context).colorScheme.primary),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(planLabel(asString(_subscription['plan'])),
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleMedium
-                                    ?.copyWith(fontSize: 16)),
-                            Text(
-                                '订阅状态：${billingStatusLabel(asString(_subscription['status']))}',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.copyWith(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .onSurfaceVariant)),
-                          ]),
-                    ),
-                  ]),
-                  const SizedBox(height: 18),
-                  _usageRow('活跃坐席', asInt(_subscription['usedSeats']),
-                      asInt(_subscription['seatLimit'])),
-                  const SizedBox(height: 18),
-                  _usageRow('本月消息', asInt(_subscription['usedMessages']),
-                      asInt(_subscription['monthlyMessageLimit'])),
-                  const SizedBox(height: 18),
-                  _usageRow('本月 AI 回复', asInt(_subscription['usedAi']),
-                      asInt(_subscription['monthlyAiLimit'])),
-                  const SizedBox(height: 18),
-                  Divider(color: Theme.of(context).colorScheme.outlineVariant),
-                  const SizedBox(height: 12),
-                  Text(
-                      '服务截止：${_subscription['serviceEndsAt'] == null ? '长期有效' : fullTime(asDate(_subscription['serviceEndsAt']))}',
-                      style: Theme.of(context).textTheme.bodySmall),
-                  if (_subscription['plan'] == 'TRIAL') ...[
-                    const SizedBox(height: 4),
-                    Text('试用截止：${fullTime(asDate(_subscription['trialEndsAt']))}',
-                        style: Theme.of(context).textTheme.bodySmall)
-                  ],
-                ])),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .primary
+                          .withOpacity(.08),
+                      borderRadius: BorderRadius.circular(8)),
+                  child: Icon(Icons.workspace_premium_outlined,
+                      size: 17, color: Theme.of(context).colorScheme.primary),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(planLabel(asString(_subscription['plan'])),
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(fontSize: 16)),
+                        Text(
+                            '订阅状态：${billingStatusLabel(asString(_subscription['status']))}',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant)),
+                      ]),
+                ),
+              ]),
+              const SizedBox(height: 18),
+              _usageRow('活跃坐席', asInt(_subscription['usedSeats']),
+                  asInt(_subscription['seatLimit'])),
+              const SizedBox(height: 18),
+              _usageRow('本月消息', asInt(_subscription['usedMessages']),
+                  asInt(_subscription['monthlyMessageLimit'])),
+              const SizedBox(height: 18),
+              _usageRow('本月 AI 回复', asInt(_subscription['usedAi']),
+                  asInt(_subscription['monthlyAiLimit'])),
+              const SizedBox(height: 18),
+              Divider(color: Theme.of(context).colorScheme.outlineVariant),
+              const SizedBox(height: 12),
+              Text(
+                  '服务截止：${_subscription['serviceEndsAt'] == null ? '长期有效' : fullTime(asDate(_subscription['serviceEndsAt']))}',
+                  style: Theme.of(context).textTheme.bodySmall),
+              if (_subscription['plan'] == 'TRIAL') ...[
+                const SizedBox(height: 4),
+                Text('试用截止：${fullTime(asDate(_subscription['trialEndsAt']))}',
+                    style: Theme.of(context).textTheme.bodySmall)
+              ],
+            ])),
         const SizedBox(height: 12),
         Center(
-          child: Text('如需增加坐席、提升额度或变更套餐，请联系平台超级管理员。',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  fontSize: 11,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          child: TextButton.icon(
+            onPressed: () => openPlatformSupport(
+              context,
+              origin: widget.api.server,
+              displayName: widget.supportVisitorName,
+              subject: '工作台席位与套餐',
+            ),
+            icon: const Icon(Icons.headset_mic_outlined, size: 16),
+            label: const Text('如需增加坐席、提升额度或变更套餐，请联系通语技术支持'),
+          ),
         ),
       ]);
   Widget _usageRow(String label, int used, int limit) =>
@@ -578,7 +603,8 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
                   Theme.of(context).colorScheme.surfaceContainerHigh),
         ),
       ]);
-  Widget _auditList() => ListView(padding: const EdgeInsets.fromLTRB(20, 16, 20, 24), children: [
+  Widget _auditList() =>
+      ListView(padding: const EdgeInsets.fromLTRB(20, 16, 20, 24), children: [
         const WorkspaceHeading('操作记录', '最近的管理操作与执行人'),
         WorkspaceListCard(
           title: '最近的管理操作',
@@ -648,7 +674,7 @@ class _MemberDialogState extends State<_MemberDialog> {
   @override
   Widget build(BuildContext context) => ConsoleFormDialog(
         description: widget.member == null
-            ? '在席位额度内新建成员，并分配可接待的客服入口。系统生成初始密码，创建后仅显示一次。'
+            ? '在席位额度内新建成员，并分配可接待的客服入口。系统将生成初始密码，仅显示一次。成员首次登录后须尽快修改密码。'
             : '管理成员资料、账号状态与可接待的客服入口。',
         busy: _saving,
         error: _error,
@@ -724,7 +750,7 @@ class _MemberDialogState extends State<_MemberDialog> {
                                 value: _active,
                                 onChanged: (v) => setState(() => _active = v)),
                           if (widget.member == null)
-                            const Text('系统生成初始密码，创建后仅显示一次。'),
+                            const Text('系统将生成初始密码，仅显示一次。成员首次登录后须尽快修改密码。'),
                         ])))),
       );
   Future<void> _save() async {

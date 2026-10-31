@@ -42,8 +42,8 @@ class OverviewPage extends StatelessWidget {
           return LayoutBuilder(builder: (context, constraints) {
             final narrow = constraints.maxWidth < 900;
             return SingleChildScrollView(
-              padding: EdgeInsets.fromLTRB(
-                  narrow ? 16 : 20, 16, narrow ? 16 : 20, 28),
+              padding: EdgeInsets.fromLTRB(narrow ? 16 : 20,
+                  16 + MediaQuery.paddingOf(context).top, narrow ? 16 : 20, 28),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -266,9 +266,8 @@ class OverviewPage extends StatelessWidget {
         child: WorkspaceEmptyState(
           icon: Icons.forum_outlined,
           title: '还没有客户来过',
-          description: isAdmin
-              ? '先到「接入管理」挂上网站代码，客户点开就能发起会话。'
-              : '客户从网站发来消息后，会出现在这里。',
+          description:
+              isAdmin ? '先到「接入管理」挂上网站代码，客户点开就能发起会话。' : '客户从网站发来消息后，会出现在这里。',
           action: isAdmin && onIntegrations != null
               ? FilledButton(
                   onPressed: onIntegrations, child: const Text('去接入网站'))
@@ -317,16 +316,16 @@ class OverviewPage extends StatelessWidget {
         icon: Icons.chat_bubble_outline_rounded,
         title: '客户会话',
         subtitle: '接待、回复与转接',
-        trailing: Icon(Icons.chevron_right_rounded,
-            size: 16, color: scheme.outline),
+        trailing:
+            Icon(Icons.chevron_right_rounded, size: 16, color: scheme.outline),
         onTap: onInbox,
       ),
       WorkspaceListRow(
         icon: Icons.menu_book_outlined,
         title: '知识库',
         subtitle: '标准答案与话术核对',
-        trailing: Icon(Icons.chevron_right_rounded,
-            size: 16, color: scheme.outline),
+        trailing:
+            Icon(Icons.chevron_right_rounded, size: 16, color: scheme.outline),
         onTap: onKnowledge,
       ),
       if (isAdmin && onIntegrations != null)
@@ -469,9 +468,7 @@ class _GreetingBar extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    queued > 0
-                        ? '待接待 $queued · 点此进入客户消息'
-                        : '接待队列已清空 · 点此查看会话',
+                    queued > 0 ? '待接待 $queued · 点此进入客户消息' : '接待队列已清空 · 点此查看会话',
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w700,
@@ -516,9 +513,7 @@ class _GreetingBar extends StatelessWidget {
           Text(
             '$period好，$greeting。这里汇总当前接待情况与常用入口。',
             style: TextStyle(
-                fontSize: 12.5,
-                height: 1.5,
-                color: scheme.onSurfaceVariant),
+                fontSize: 12.5, height: 1.5, color: scheme.onSurfaceVariant),
           ),
         ],
       );
@@ -593,9 +588,7 @@ class _TipRow extends StatelessWidget {
       Expanded(
         child: Text(text,
             style: TextStyle(
-                fontSize: 11.5,
-                height: 1.55,
-                color: scheme.onSurfaceVariant)),
+                fontSize: 11.5, height: 1.55, color: scheme.onSurfaceVariant)),
       ),
     ]);
   }

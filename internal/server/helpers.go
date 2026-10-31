@@ -45,6 +45,10 @@ func stripHiddenModel(metadata []byte) []byte {
 	return encoded
 }
 
+// 访客侧「在线」和自动分单都看最近心跳，不能只看状态字段。
+// 工作台大约每 45 秒上报一次活跃、每 4 分钟刷新一次状态；关掉页面后状态仍可能停在 ONLINE。
+const agentOnlineRecently = `ap.status = 'ONLINE' and ap.last_seen_at > now() - interval '8 minutes'`
+
 type inboxContext struct {
 	ID              uuid.UUID
 	TenantID        uuid.UUID
@@ -73,7 +77,7 @@ func (a *API) loadInbox(ctx handlerContext, publicKey string) (inboxContext, err
 		       (select count(*)::int from agent_presence ap
 		          join agent ag on ag.id = ap.agent_id
 		          join agent_inbox ai on ai.agent_id = ag.id
-		         where ai.inbox_id = i.id and ap.status = 'ONLINE' and ag.status = 'ACTIVE'),
+		         where ai.inbox_id = i.id and `+agentOnlineRecently+` and ag.status = 'ACTIVE'),
 		       i.logo_url, i.avatar_url, i.font_family, i.bubble_radius, i.custom_css
 		  from inbox i
 		  left join ai_setting s on s.inbox_id = i.id

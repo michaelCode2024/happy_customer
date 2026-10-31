@@ -17,6 +17,17 @@ Widget _withBar() => MaterialApp(
     );
 
 void main() {
+  test('状态栏跟页面顶色走，不铺一层实色', () {
+    final blue = BrowserChrome.overlayFor(const Color(0xFF2251F5));
+    expect(blue.statusBarColor, Colors.transparent);
+    expect(blue.statusBarIconBrightness, Brightness.light);
+    expect(blue.systemStatusBarContrastEnforced, isFalse);
+
+    final white = BrowserChrome.overlayFor(Colors.white);
+    expect(white.statusBarColor, Colors.transparent);
+    expect(white.statusBarIconBrightness, Brightness.dark);
+  });
+
   test('底部安全距离只算一次，键盘弹起时不补', () {
     const media = MediaQueryData(size: Size(390, 844));
     expect(

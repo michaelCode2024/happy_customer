@@ -38,151 +38,160 @@ class MobileTopAppBar extends StatelessWidget implements PreferredSizeWidget {
     final isDark = theme.brightness == Brightness.dark;
     final agent = session.agent;
 
-    return Container(
-      height: preferredSize.height + MediaQuery.paddingOf(context).top,
-      padding: EdgeInsets.only(
-        top: MediaQuery.paddingOf(context).top,
-        left: 12,
-        right: 8,
-      ),
-      decoration: BoxDecoration(
-        color: isDark ? theme.colorScheme.surface : Colors.white,
-        border: Border(
-          bottom: BorderSide(
-            color: isDark
-                ? theme.colorScheme.outlineVariant.withAlpha(50)
-                : const Color(0xFFE8EEF5),
-            width: 0.8,
+    final barColor = isDark ? theme.colorScheme.surface : Colors.white;
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: BrowserChrome.overlayFor(barColor),
+      child: Container(
+        height: preferredSize.height + MediaQuery.paddingOf(context).top,
+        padding: EdgeInsets.only(
+          top: MediaQuery.paddingOf(context).top,
+          left: 12,
+          right: 8,
+        ),
+        decoration: BoxDecoration(
+          color: barColor,
+          border: Border(
+            bottom: BorderSide(
+              color: isDark
+                  ? theme.colorScheme.outlineVariant.withAlpha(50)
+                  : const Color(0xFFE8EEF5),
+              width: 0.8,
+            ),
           ),
         ),
-      ),
-      child: Row(
-        children: [
-          // 坐席头像与在线状态
-          InkWell(
-            onTap: onTapAvatar,
-            borderRadius: BorderRadius.circular(18),
-            child: Padding(
-              padding: const EdgeInsets.all(4.0),
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Container(
-                    width: 34,
-                    height: 34,
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF3263FF), Color(0xFF5B8CFF)],
+        child: Row(
+          children: [
+            // 坐席头像与在线状态
+            InkWell(
+              onTap: onTapAvatar,
+              borderRadius: BorderRadius.circular(18),
+              child: Padding(
+                padding: const EdgeInsets.all(4.0),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF3263FF), Color(0xFF5B8CFF)],
+                        ),
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: RelayTheme.blue.withAlpha(50),
+                            blurRadius: 4,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
                       ),
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: RelayTheme.blue.withAlpha(50),
-                          blurRadius: 4,
-                          offset: const Offset(0, 1),
+                      alignment: Alignment.center,
+                      child: Text(
+                        (agent?.displayName.isNotEmpty ?? false)
+                            ? agent!.displayName.characters.first
+                            : '座',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      right: -1,
+                      bottom: -1,
+                      child: Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: workbench.socketState == SocketState.open
+                              ? const Color(0xFF10B981)
+                              : const Color(0xFFEF4444),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: isDark
+                                ? theme.colorScheme.surface
+                                : Colors.white,
+                            width: 1.8,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            // 标题与租户空间
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: isDark
+                              ? theme.colorScheme.onSurface
+                              : RelayTheme.ink,
+                        ),
+                      ),
+                      if (workbench.queued > 0) ...[
+                        const SizedBox(width: 8),
+                        InkWell(
+                          onTap: onShowQueue,
+                          borderRadius: BorderRadius.circular(10),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 1.5),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFF4E5),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: const Color(0xFFFFD8A8),
+                                width: 0.6,
+                              ),
+                            ),
+                            child: Text(
+                              '${workbench.queued} 待领',
+                              style: const TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFFD97706),
+                              ),
+                            ),
+                          ),
                         ),
                       ],
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      (agent?.displayName.isNotEmpty ?? false)
-                          ? agent!.displayName.characters.first
-                          : '座',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
+                    ],
                   ),
-                  Positioned(
-                    right: -1,
-                    bottom: -1,
-                    child: Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        color: workbench.socketState == SocketState.open
-                            ? const Color(0xFF10B981)
-                            : const Color(0xFFEF4444),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: isDark ? theme.colorScheme.surface : Colors.white,
-                          width: 1.8,
-                        ),
-                      ),
+                  Text(
+                    session.tenant?.name ?? '工作空间',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color:
+                          isDark ? theme.colorScheme.outline : RelayTheme.muted,
                     ),
                   ),
                 ],
               ),
             ),
-          ),
-          const SizedBox(width: 8),
-          // 标题与租户空间
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        color: isDark ? theme.colorScheme.onSurface : RelayTheme.ink,
-                      ),
-                    ),
-                    if (workbench.queued > 0) ...[
-                      const SizedBox(width: 8),
-                      InkWell(
-                        onTap: onShowQueue,
-                        borderRadius: BorderRadius.circular(10),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 1.5),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFFFF4E5),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: const Color(0xFFFFD8A8),
-                              width: 0.6,
-                            ),
-                          ),
-                          child: Text(
-                            '${workbench.queued} 待领',
-                            style: const TextStyle(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFFD97706),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                Text(
-                  session.tenant?.name ?? '工作空间',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: isDark ? theme.colorScheme.outline : RelayTheme.muted,
-                  ),
-                ),
-              ],
+            // 声音开关
+            messageSoundButton(api: session.api),
+            // 通知中心
+            NotificationCenter(
+              api: session.api,
+              onConversation: onNotificationConversation,
             ),
-          ),
-          // 声音开关
-          messageSoundButton(),
-          // 通知中心
-          NotificationCenter(
-            api: session.api,
-            onConversation: onNotificationConversation,
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -209,7 +218,7 @@ class MobileBottomNavBar extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final bottomPadding = MediaQuery.paddingOf(context).bottom;
-    // 贴底栏真正的实色：外层安全区按这个色补齐 Home 条那一截。
+    // Home 条画在栏内，背景铺到底，图标停在安全距离之上。
     final barColor = isDark ? theme.colorScheme.surface : Colors.white;
 
     return BrowserBottomChrome(
@@ -301,20 +310,18 @@ class MobileBottomNavBar extends StatelessWidget {
                 children: [
                   AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 3),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
                     decoration: BoxDecoration(
-                      color: selected
-                          ? RelayTheme.blueSoft
-                          : Colors.transparent,
+                      color:
+                          selected ? RelayTheme.blueSoft : Colors.transparent,
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: Icon(
                       selected ? activeIcon : icon,
                       size: 22,
-                      color: selected
-                          ? RelayTheme.blue
-                          : const Color(0xFF8E9CAE),
+                      color:
+                          selected ? RelayTheme.blue : const Color(0xFF8E9CAE),
                     ),
                   ),
                   if (badgeCount != null && badgeCount > 0)
@@ -350,9 +357,7 @@ class MobileBottomNavBar extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                  color: selected
-                      ? RelayTheme.blue
-                      : const Color(0xFF8E9CAE),
+                  color: selected ? RelayTheme.blue : const Color(0xFF8E9CAE),
                 ),
               ),
             ],
@@ -393,6 +398,7 @@ class MobileMoreHubPage extends StatelessWidget {
   final String? agentName;
   final String? tenantName;
   final VoidCallback? onOpenSettings;
+
   /// 页顶附加入口（如网页版「系统更新」），避免埋进设置子页后找不到。
   final Widget? header;
 
@@ -409,117 +415,119 @@ class MobileMoreHubPage extends StatelessWidget {
       (groups[e.group.isEmpty ? '其它' : e.group] ??= []).add(e);
     }
 
-    return ColoredBox(
-      color: bg,
-      child: CustomScrollView(
-        slivers: [
-          SliverToBoxAdapter(
-            child: SafeArea(
-              bottom: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '更多',
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 26,
-                        letterSpacing: -0.4,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      [
-                        if (tenantName != null && tenantName!.isNotEmpty)
-                          tenantName!,
-                        if (agentName != null && agentName!.isNotEmpty)
-                          agentName!,
-                      ].join(' · '),
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          if (header != null)
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: BrowserChrome.overlayFor(bg),
+      child: ColoredBox(
+        color: bg,
+        child: CustomScrollView(
+          slivers: [
             SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                child: Material(
-                  color: card,
-                  borderRadius: BorderRadius.circular(14),
-                  clipBehavior: Clip.antiAlias,
-                  child: header,
-                ),
-              ),
-            ),
-          for (final entry in groups.entries) ...[
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
-                child: Text(
-                  entry.key,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                  ),
-                ),
-              ),
-            ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Material(
-                  color: card,
-                  borderRadius: BorderRadius.circular(14),
-                  clipBehavior: Clip.antiAlias,
+              child: SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      for (var i = 0; i < entry.value.length; i++) ...[
-                        if (i > 0)
-                          Divider(
-                            height: 1,
-                            indent: 60,
-                            color: theme.colorScheme.outlineVariant
-                                .withValues(alpha: 0.55),
-                          ),
-                        _MoreHubTile(entry: entry.value[i]),
-                      ],
+                      Text(
+                        '更多',
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 26,
+                          letterSpacing: -0.4,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        [
+                          if (tenantName != null && tenantName!.isNotEmpty)
+                            tenantName!,
+                          if (agentName != null && agentName!.isNotEmpty)
+                            agentName!,
+                        ].join(' · '),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          fontSize: 13,
+                        ),
+                      ),
                     ],
                   ),
                 ),
               ),
             ),
-          ],
-          if (onOpenSettings != null &&
-              !entries.any((e) => e.label == '设置'))
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
-                child: Material(
-                  color: card,
-                  borderRadius: BorderRadius.circular(14),
-                  clipBehavior: Clip.antiAlias,
-                  child: _MoreHubTile(
-                    entry: MobileMoreEntry(
-                      label: '设置',
-                      group: '个人设置',
-                      icon: Icons.settings_outlined,
-                      onTap: onOpenSettings!,
+            if (header != null)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: Material(
+                    color: card,
+                    borderRadius: BorderRadius.circular(14),
+                    clipBehavior: Clip.antiAlias,
+                    child: header,
+                  ),
+                ),
+              ),
+            for (final entry in groups.entries) ...[
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+                  child: Text(
+                    entry.key,
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
                     ),
                   ),
                 ),
               ),
-            ),
-          const SliverToBoxAdapter(child: SizedBox(height: 32)),
-        ],
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Material(
+                    color: card,
+                    borderRadius: BorderRadius.circular(14),
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      children: [
+                        for (var i = 0; i < entry.value.length; i++) ...[
+                          if (i > 0)
+                            Divider(
+                              height: 1,
+                              indent: 60,
+                              color: theme.colorScheme.outlineVariant
+                                  .withValues(alpha: 0.55),
+                            ),
+                          _MoreHubTile(entry: entry.value[i]),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+            if (onOpenSettings != null && !entries.any((e) => e.label == '设置'))
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
+                  child: Material(
+                    color: card,
+                    borderRadius: BorderRadius.circular(14),
+                    clipBehavior: Clip.antiAlias,
+                    child: _MoreHubTile(
+                      entry: MobileMoreEntry(
+                        label: '设置',
+                        group: '个人设置',
+                        icon: Icons.settings_outlined,
+                        onTap: onOpenSettings!,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            const SliverToBoxAdapter(child: SizedBox(height: 32)),
+          ],
+        ),
       ),
     );
   }

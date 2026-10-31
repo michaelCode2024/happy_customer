@@ -1,8 +1,11 @@
-import 'package:tongyu_agent_console/src/util/message_sound_card.dart';
 import 'dart:async';
 import 'dart:html' as html;
 import 'dart:js_util' as js_util;
+
 import 'package:flutter/material.dart';
+import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
+import 'package:tongyu_agent_console/src/util/message_sound_card.dart';
+import 'package:tongyu_agent_console/src/util/push_bridge_web.dart';
 
 /// Flutter 3.24 的 dart:html Document 未声明 hasFocus，走 JS 互操作；失败则只看可见性。
 bool pageVisible() {
@@ -202,6 +205,63 @@ void _setSoundEnabled(bool enabled) {
   }
 }
 
+bool get messageSoundEnabled => _soundEnabled.value;
+Listenable get messageSoundListenable => _soundEnabled;
+void turnMessageSoundOn() {
+  if (!_soundEnabled.value) _setSoundEnabled(true);
+}
+
+bool _deskGrantedNow() {
+  if (!html.Notification.supported) return false;
+  if (html.Notification.permission != 'granted') return false;
+  // 坐席在工作台关掉桌面提醒时保留关闭；没记过则视为已经允许。
+  return html.window.localStorage['tongyu.desktopAlerts'] != 'off';
+}
+
+final _deskAlerts = ValueNotifier<bool>(_deskGrantedNow());
+bool get deskAlertsGranted => _deskAlerts.value;
+Listenable get deskAlertsListenable => _deskAlerts;
+
+bool get notificationPermissionMissing {
+  if (!html.Notification.supported) return false;
+  return html.Notification.permission != 'granted';
+}
+
+void _publishDeskAlerts() {
+  final next = _deskGrantedNow();
+  if (_deskAlerts.value != next) _deskAlerts.value = next;
+}
+
+/// 浏览器已经允许、工作台没有关掉时，把桌面提醒记上。
+/// 只改本地开关，不覆盖坐席主动关闭。
+void adoptGrantedDeskAlerts() {
+  if (!html.Notification.supported) return;
+  if (html.Notification.permission != 'granted') {
+    _publishDeskAlerts();
+    return;
+  }
+  if (html.window.localStorage['tongyu.desktopAlerts'] != 'off') {
+    html.window.localStorage['tongyu.desktopAlerts'] = 'on';
+  }
+  _publishDeskAlerts();
+}
+
+bool _deskWatching = false;
+void watchDeskAlerts() {
+  if (_deskWatching) return;
+  _deskWatching = true;
+  html.document.onVisibilityChange.listen((_) {
+    if (html.document.visibilityState == 'visible') adoptGrantedDeskAlerts();
+  });
+}
+
+void rememberDeskAlerts() {
+  if (html.Notification.permission == 'granted') {
+    html.window.localStorage['tongyu.desktopAlerts'] = 'on';
+  }
+  _publishDeskAlerts();
+}
+
 void messageAlert(String name, String body, {String senderName = ''}) {
   unawaited(_dispatchMessageAlert(name, body, senderName: senderName));
 }
@@ -241,7 +301,7 @@ Future<void> _dispatchMessageAlert(String name, String body,
   }
 }
 
-Widget messageSoundButton() => ValueListenableBuilder<bool>(
+Widget messageSoundButton({TongYuApi? api}) => ValueListenableBuilder<bool>(
       valueListenable: _soundEnabled,
       builder: (context, enabled, _) => IconButton(
         tooltip: enabled
@@ -256,8 +316,8 @@ Widget messageSoundButton() => ValueListenableBuilder<bool>(
                   title: const Text('消息与声音提醒'),
                   content: SizedBox(
                       width: 430,
-                      child:
-                          SingleChildScrollView(child: messageAlertSettings())),
+                      child: SingleChildScrollView(
+                          child: messageAlertSettings(api: api))),
                   actions: [
                     TextButton(
                         onPressed: () => Navigator.pop(ctx),
@@ -267,10 +327,11 @@ Widget messageSoundButton() => ValueListenableBuilder<bool>(
       ),
     );
 
-Widget messageAlertSettings() => const _AlertSettings();
+Widget messageAlertSettings({TongYuApi? api}) => _AlertSettings(api: api);
 
 class _AlertSettings extends StatefulWidget {
-  const _AlertSettings();
+  const _AlertSettings({this.api});
+  final TongYuApi? api;
   @override
   State<_AlertSettings> createState() => _AlertSettingsState();
 }
@@ -310,7 +371,7 @@ class _AlertSettingsState extends State<_AlertSettings> {
             const SizedBox(height: 12),
             SwitchListTile(
                 title: const Text('桌面通知'),
-                subtitle: Text(_status ?? '离开当前页面时提醒，并显示发送者和消息内容'),
+                subtitle: Text(_status ?? '离开当前页面时提醒。允许后会同时打开浏览器推送，关掉标签也能收到'),
                 value:
                     html.window.localStorage['tongyu.desktopAlerts'] == 'on' &&
                         html.Notification.permission == 'granted',
@@ -318,6 +379,16 @@ class _AlertSettingsState extends State<_AlertSettings> {
                   if (!v) {
                     setState(() => html
                         .window.localStorage['tongyu.desktopAlerts'] = 'off');
+                    _publishDeskAlerts();
+                    final api = widget.api;
+                    if (api == null) return;
+                    final message = await disableBackgroundPush(api);
+                    if (!mounted) return;
+                    if (message != '后台消息提醒已关闭') {
+                      html.window.localStorage['tongyu.desktopAlerts'] = 'on';
+                      _publishDeskAlerts();
+                    }
+                    setState(() => _status = message);
                     return;
                   }
                   if (!html.Notification.supported) {
@@ -328,13 +399,18 @@ class _AlertSettingsState extends State<_AlertSettings> {
                       .timeout(const Duration(seconds: 8),
                           onTimeout: () => 'default');
                   if (!mounted) return;
+                  final granted = permission == 'granted';
                   setState(() {
                     html.window.localStorage['tongyu.desktopAlerts'] =
-                        permission == 'granted' ? 'on' : 'off';
-                    _status = permission == 'granted'
-                        ? '已开启桌面通知'
-                        : '浏览器未允许通知；提示音和未读角标仍可使用';
+                        granted ? 'on' : 'off';
+                    _status = granted ? '正在打开浏览器推送…' : '浏览器未允许通知；提示音和未读角标仍可使用';
                   });
+                  _publishDeskAlerts();
+                  final api = widget.api;
+                  if (!granted || api == null) return;
+                  final message = await enableBackgroundPush(api);
+                  if (!mounted) return;
+                  setState(() => _status = message);
                 }),
           ]));
 }

@@ -327,8 +327,8 @@ class TenantDetailPane extends StatelessWidget {
       builder: (context) => AlertDialog(
         title: const Text('重置客服主管密码'),
         content: Text(
-          '将为 ${owner.email} 生成新密码，并注销该账号的全部登录状态。'
-          '旧密码立即失效，新密码只显示一次。',
+          '将为 ${owner.email} 生成新密码，并立即注销该账号的全部登录。'
+          '旧密码即刻失效，新密码仅显示一次。该账号下次登录后须尽快修改密码。',
         ),
         actions: <Widget>[
           TextButton(
@@ -358,7 +358,7 @@ class TenantDetailPane extends StatelessWidget {
       builder: (context) => AlertDialog(
         title: const Text('新密码已生成'),
         content: SelectableText(
-          '$password\n\n请立即转告 ${owner.email}，此密码只显示这一次。',
+          '$password\n\n请立即告知 ${owner.email}。此密码仅显示一次，下次登录后须尽快修改。',
         ),
         actions: <Widget>[
           TextButton(

@@ -439,7 +439,8 @@ class WorkbenchController extends ChangeNotifier {
     }
     if (event.type == 'message.created') {
       if (event.data['senderType'] == 'VISITOR' &&
-          event.data['private'] != true) {
+          event.data['private'] != true &&
+          _assignedToMe(event.conversationId)) {
         var senderName = asString(event.data['senderName']);
         if (senderName.trim().isEmpty) {
           final matches =
@@ -781,7 +782,21 @@ class WorkbenchController extends ChangeNotifier {
     }
   }
 
+  /// 响铃和系统通知只给当前接待人。未分配或同事的会话仍可出现在列表里，但不能响到别人手机上。
+  bool _assignedToMe(String conversationId) {
+    if (selfId.isEmpty || conversationId.isEmpty) return false;
+    for (final row in _conversations) {
+      if (row.id == conversationId) return row.assigneeId == selfId;
+    }
+    return false;
+  }
+
   Future<void> _checkMissedAlerts(Conversation row, int after) async {
+    if (row.assigneeId != selfId || selfId.isEmpty) {
+      // 不是自己的会话直接记住进度，避免下次刷新把同一条消息再判一遍。
+      _notificationSequences[row.id] = row.lastSequence;
+      return;
+    }
     if (!_checkingNotifications.add(row.id)) return;
     try {
       final page =

@@ -16,12 +16,12 @@ import (
 // with a tool_calls array in each choice instead of a plain message content
 // field.
 type completionRequestWithTools struct {
-	Model       string      `json:"model"`
-	Messages    []Message   `json:"messages"`
-	Temperature float64     `json:"temperature,omitempty"`
-	MaxTokens   int         `json:"max_tokens,omitempty"`
-	Tools       []toolDef   `json:"tools,omitempty"`
-	ToolChoice  any         `json:"tool_choice,omitempty"`
+	Model       string    `json:"model"`
+	Messages    []Message `json:"messages"`
+	Temperature float64   `json:"temperature,omitempty"`
+	MaxTokens   int       `json:"max_tokens,omitempty"`
+	Tools       []toolDef `json:"tools,omitempty"`
+	ToolChoice  any       `json:"tool_choice,omitempty"`
 }
 
 type toolDef struct {
@@ -120,7 +120,7 @@ func (p *openAIProvider) GenerateWithTools(ctx context.Context, messages []Messa
 		choice := parsed.Choices[0]
 		if len(choice.Message.ToolCalls) == 0 {
 			usage := usageOf(parsed.Usage)
-			return strings.TrimSpace(choice.Message.Content), usage, nil
+			return SanitizeText(strings.TrimSpace(choice.Message.Content)), usage, nil
 		}
 		if round >= maxToolRounds {
 			return "", Usage{}, fmt.Errorf("tool call depth exceeded (%d rounds)", maxToolRounds)

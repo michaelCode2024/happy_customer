@@ -13,6 +13,8 @@ Base：`{PUBLIC_BASE_URL}/api/v1/open`
 
 权限：`read` / `write`（创建密钥时勾选）。所有数据按密钥所属租户隔离，路径与 Body 不能跨租户。
 
+API Key 和 Webhook 签名密钥是两套凭证。创建 API Key 的响应字段 `key` 只出现一次，之后列表只有前 12 位 `keyPrefix`，不能靠前缀或截图把全文补回来；数字 `0` 与字母 `O` 不是同一字符。签名密钥的格式、事件正文，以及怎样用 `conversationId` 查出 `externalId`，见 [Webhook](webhook.md)。
+
 ## 接口一览
 
 | 方法 | 路径 | 权限 | 说明 |
@@ -106,7 +108,7 @@ readerType 为 VISITOR / AGENT，readerId 必须属于对应客户会话或企�
 
 ### Webhook 实时同步
 
-企业管理员在「应用接入 → Webhook」勾选 `conversation.read` 与 `conversation.delivered`，已有回调需补选。消息提醒订阅 `message.created` / `message.agent`。回执请求与 Webhook 入队在同一事务完成，重复游标不重复入队；投递按至少一次处理，接收方仍必须幂等。
+投递请求、签名、重试，以及 API Key 与签名密钥的区别见 [Webhook](webhook.md)。企业管理员在「应用接入 → Webhook」勾选 `conversation.read` 与 `conversation.delivered`，已有回调需补选。消息提醒订阅 `message.created` / `message.agent`。回执请求与 Webhook 入队在同一事务完成，重复游标不重复入队；投递按至少一次处理，接收方仍必须幂等。
 
 ```json
 {"conversationId":"<uuid>","readerType":"VISITOR","readerId":"<uuid>","sequence":12}

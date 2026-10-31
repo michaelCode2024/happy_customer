@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:tongyu_agent_console/src/ui/platform_support.dart';
 import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
 import 'pwa_panel.dart';
 import 'package:tongyu_agent_console/src/util/message_alert_stub.dart'
@@ -57,16 +58,27 @@ class _SettingsPageState extends State<SettingsPage> {
   String _versionLabel = '读取中…';
   String? _nameError;
   String? _passwordError;
-  bool _obscure = true;
+  bool _obscureCurrent = true;
+  bool _obscureNew = true;
+  bool _obscureConfirm = true;
 
-  InputDecoration _field(String label, {Widget? suffixIcon}) => InputDecoration(
+  InputDecoration _field(
+    String label, {
+    Widget? suffixIcon,
+    String? helperText,
+    IconData? prefixIcon,
+  }) =>
+      InputDecoration(
         labelText: label,
+        helperText: helperText,
+        helperMaxLines: 2,
         floatingLabelBehavior: FloatingLabelBehavior.always,
         filled: true,
         fillColor:
             Theme.of(context).colorScheme.surfaceContainerHighest.withAlpha(45),
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        prefixIcon: prefixIcon == null ? null : Icon(prefixIcon, size: 18),
         suffixIcon: suffixIcon,
       );
 
@@ -145,10 +157,21 @@ class _SettingsPageState extends State<SettingsPage> {
       setState(() => _passwordError = '新密码至少 8 位');
       return;
     }
+    if (next == current) {
+      setState(() => _passwordError = '新密码不能与当前密码相同');
+      return;
+    }
     if (next != _confirmPassword.text) {
       setState(() => _passwordError = '两次输入的新密码不一致');
       return;
     }
+    final confirmed = await _confirm(
+      title: '修改密码',
+      message: '修改后，这个账号在所有设备上的登录都会立即结束，包括当前这台。'
+          '你需要用新密码重新登录，接待状态会变为离线。',
+      confirmLabel: '确认修改',
+    );
+    if (!confirmed || !mounted) return;
     setState(() {
       _savingPassword = true;
       _passwordError = null;
@@ -164,7 +187,8 @@ class _SettingsPageState extends State<SettingsPage> {
       _currentPassword.clear();
       _newPassword.clear();
       _confirmPassword.clear();
-      _toast('密码已修改');
+      // 服务端已作废全部会话。这里再清本机登录，避免停在一张已失效的页面上。
+      await widget.session.logout();
     } on ApiException catch (failure) {
       if (mounted) {
         setState(() => _passwordError = failure.message);
@@ -174,6 +198,41 @@ class _SettingsPageState extends State<SettingsPage> {
         setState(() => _savingPassword = false);
       }
     }
+  }
+
+  Widget _passwordField({
+    required TextEditingController controller,
+    required String label,
+    required bool obscure,
+    required VoidCallback onToggle,
+    String? helperText,
+    List<String>? autofillHints,
+    TextInputAction action = TextInputAction.next,
+    ValueChanged<String>? onSubmitted,
+  }) {
+    return TextField(
+      controller: controller,
+      enabled: !_savingPassword,
+      obscureText: obscure,
+      autocorrect: false,
+      enableSuggestions: false,
+      autofillHints: autofillHints,
+      textInputAction: action,
+      keyboardType: TextInputType.visiblePassword,
+      onSubmitted: onSubmitted,
+      decoration: _field(
+        label,
+        helperText: helperText,
+        prefixIcon: Icons.lock_outline,
+        suffixIcon: IconButton(
+          tooltip: obscure ? '显示此密码' : '隐藏此密码',
+          icon: Icon(
+            obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+          ),
+          onPressed: _savingPassword ? null : onToggle,
+        ),
+      ),
+    );
   }
 
   void _toast(String message) {
@@ -207,8 +266,8 @@ class _SettingsPageState extends State<SettingsPage> {
                   color: Colors.transparent,
                   child: ExpansionTile(
                       tilePadding: EdgeInsets.zero,
-                      title:
-                          const Text('查看企业与连接信息', style: TextStyle(fontSize: 13)),
+                      title: const Text('查看企业与连接信息',
+                          style: TextStyle(fontSize: 13)),
                       children: [
                         _InfoRow(
                             label: '企业标识', value: session.tenant?.slug ?? '—'),
@@ -286,50 +345,63 @@ class _SettingsPageState extends State<SettingsPage> {
             'password': _Section(
               title: '修改密码',
               children: <Widget>[
-                TextField(
-                  controller: _currentPassword,
-                  enabled: !_savingPassword,
-                  obscureText: _obscure,
-                  decoration: _field('当前密码'),
+                const _SecurityNote(
+                  icon: Icons.shield_outlined,
+                  message: '修改后，这个账号在所有设备上的登录都会立即结束，包括当前这台。'
+                      '你需要用新密码重新登录，接待状态会变为离线。',
                 ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _newPassword,
-                  enabled: !_savingPassword,
-                  obscureText: _obscure,
-                  decoration: _field('新密码（至少 8 位）'),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _confirmPassword,
-                  enabled: !_savingPassword,
-                  obscureText: _obscure,
-                  decoration: _field(
-                    '确认新密码',
-                    suffixIcon: IconButton(
-                      tooltip: _obscure ? '显示密码' : '隐藏密码',
-                      icon: Icon(
-                        _obscure
-                            ? Icons.visibility_outlined
-                            : Icons.visibility_off_outlined,
+                AutofillGroup(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _passwordField(
+                        controller: _currentPassword,
+                        label: '当前密码',
+                        obscure: _obscureCurrent,
+                        autofillHints: const [AutofillHints.password],
+                        onToggle: () =>
+                            setState(() => _obscureCurrent = !_obscureCurrent),
                       ),
-                      onPressed: () => setState(() => _obscure = !_obscure),
-                    ),
+                      const SizedBox(height: 10),
+                      _passwordField(
+                        controller: _newPassword,
+                        label: '新密码',
+                        helperText: '至少 8 位，且不能与当前密码相同',
+                        obscure: _obscureNew,
+                        autofillHints: const [AutofillHints.newPassword],
+                        onToggle: () =>
+                            setState(() => _obscureNew = !_obscureNew),
+                      ),
+                      const SizedBox(height: 10),
+                      _passwordField(
+                        controller: _confirmPassword,
+                        label: '确认新密码',
+                        obscure: _obscureConfirm,
+                        autofillHints: const [AutofillHints.newPassword],
+                        action: TextInputAction.done,
+                        onSubmitted: (_) {
+                          if (!_savingPassword) _savePassword();
+                        },
+                        onToggle: () =>
+                            setState(() => _obscureConfirm = !_obscureConfirm),
+                      ),
+                    ],
                   ),
                 ),
                 if (_passwordError != null) _ErrorText(_passwordError!),
-                const SizedBox(height: 10),
+                const SizedBox(height: 4),
                 Align(
                   alignment: Alignment.centerRight,
-                  child: FilledButton.tonal(
+                  child: FilledButton.icon(
                     onPressed: _savingPassword ? null : _savePassword,
-                    child: _savingPassword
+                    icon: _savingPassword
                         ? const SizedBox(
                             width: 16,
                             height: 16,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Text('修改密码'),
+                        : const Icon(Icons.lock_reset, size: 18),
+                    label: Text(_savingPassword ? '正在修改…' : '修改密码并重新登录'),
                   ),
                 ),
               ],
@@ -397,12 +469,33 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
               ],
             ),
-            'signout': OutlinedButton.icon(
-              onPressed: () => _confirmSignOut(context),
-              icon: const Icon(Icons.logout, size: 18),
-              label: const Text('退出登录'),
+            'signout': _Section(
+              title: '本次登录',
+              children: <Widget>[
+                _InfoRow(label: '登录账号', value: agent?.email ?? '—'),
+                _InfoRow(label: '企业', value: session.tenant?.name ?? '—'),
+                _InfoRow(label: '角色', value: _roleLabel(agent?.role ?? '')),
+                const _SecurityNote(
+                  icon: Icons.logout,
+                  danger: true,
+                  message: '退出只结束本机这次登录，其他设备不受影响。'
+                      '接待状态会变为离线，未结束的会话仍保留。再次进入需要重新输入密码。',
+                ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: theme.colorScheme.error,
+                      foregroundColor: theme.colorScheme.onError,
+                    ),
+                    onPressed: _confirmSignOut,
+                    icon: const Icon(Icons.logout, size: 18),
+                    label: const Text('退出登录'),
+                  ),
+                ),
+              ],
             ),
-            'notifications': messageAlertSettings(),
+            'notifications': messageAlertSettings(api: widget.session.api),
             'version': _VersionCard(
               versionLabel: _versionLabel,
               checking: _checkingUpdate,
@@ -413,24 +506,65 @@ class _SettingsPageState extends State<SettingsPage> {
                   openDownloads();
                   return;
                 }
-                final uri = Uri.parse(widget.session.api.server)
-                    .resolve('/downloads/');
+                final uri =
+                    Uri.parse(widget.session.api.server).resolve('/downloads/');
                 await launchUrl(uri, mode: LaunchMode.externalApplication);
               },
+            ),
+            'support': _Section(
+              title: '帮助与支持',
+              children: <Widget>[
+                const Text(
+                  '账号停用和重置密码，请先联系本企业客服主管。席位、套餐，或主管自己无法处理的问题，联系通语技术支持。',
+                ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton.icon(
+                    onPressed: () => openPlatformSupport(
+                      context,
+                      origin: session.api.server,
+                      displayName: supportVisitorLabel(
+                        tenantName: session.tenant?.name ?? '',
+                        role: agent?.role ?? '',
+                        displayName: agent?.displayName ?? '',
+                      ),
+                      subject: '工作台帮助',
+                    ),
+                    icon: const Icon(Icons.headset_mic_outlined, size: 18),
+                    label: const Text('联系通语技术支持'),
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed: () async {
+                      final origin = resolveSupportOrigin(session.api.server);
+                      if (origin.isEmpty) return;
+                      final help = Uri.parse(
+                          '${origin.replaceAll(RegExp(r'/+$'), '')}/website/help.html');
+                      await launchUrl(help,
+                          mode: LaunchMode.externalApplication);
+                    },
+                    child: const Text('查看帮助文档'),
+                  ),
+                ),
+              ],
             ),
           };
           final groups = <List<String>>[
             ['account', 'name', 'inboxes'],
             ['presence'],
-            ['password', 'signout'],
-            ['appearance', 'notifications', 'version']
+            ['signout', 'password'],
+            ['appearance', 'notifications', 'version'],
+            ['support'],
           ];
-          const labels = ['个人资料', '接待状态', '账号安全', '外观与通知'];
+          const labels = ['个人资料', '接待状态', '账号安全', '外观与通知', '帮助与支持'];
           const icons = [
             Icons.person_outline,
             Icons.support_agent,
             Icons.lock_outline,
-            Icons.tune
+            Icons.tune,
+            Icons.headset_mic_outlined,
           ];
           return LayoutBuilder(builder: (context, c) {
             final compact = c.maxWidth < 800;
@@ -490,8 +624,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 ]);
             final content = ListView(
                 key: ValueKey(_settingsTab),
-                padding: EdgeInsets.fromLTRB(
-                    compact ? 14 : 22, compact ? 12 : 16, compact ? 14 : 22, 32),
+                padding: EdgeInsets.fromLTRB(compact ? 14 : 22,
+                    compact ? 12 : 16, compact ? 14 : 22, 32),
                 children: [
                   if (!compact) ...[
                     Row(children: [
@@ -518,8 +652,9 @@ class _SettingsPageState extends State<SettingsPage> {
                                 [
                                   '设置客户看到的名字，查看所属企业与客服入口',
                                   '选择是否接收新的会话分配',
-                                  '更新登录密码，管理本次登录',
-                                  '按你的工作习惯设置界面与提醒'
+                                  '退出只结束本机登录；修改密码会结束所有设备的登录',
+                                  '按你的工作习惯设置界面与提醒',
+                                  '账号问题先找本企业客服主管，其余联系通语技术支持',
                                 ][_settingsTab],
                                 style: theme.textTheme.bodySmall?.copyWith(
                                     color: theme.colorScheme.onSurfaceVariant)),
@@ -532,8 +667,8 @@ class _SettingsPageState extends State<SettingsPage> {
                   if (_settingsTab == 3)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12),
-                      child: PwaPanel(
-                          api: widget.session.api, settingsOnly: true),
+                      child:
+                          PwaPanel(api: widget.session.api, settingsOnly: true),
                     ),
                   for (final i in groups[_settingsTab])
                     Padding(
@@ -569,25 +704,27 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 Expanded(child: content)
               ]);
-            return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Container(
-                  width: 216,
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surface,
-                    border: Border(
-                        right: BorderSide(
-                            color: theme.colorScheme.outlineVariant)),
-                  ),
-                  child: SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(12, 16, 12, 16),
-                      child: navigation)),
-              Expanded(
-                  child: Align(
-                      alignment: Alignment.topLeft,
-                      child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 880),
-                          child: content)))
-            ]);
+            return Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Container(
+                      width: 216,
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surface,
+                        border: Border(
+                            right: BorderSide(
+                                color: theme.colorScheme.outlineVariant)),
+                      ),
+                      child: SingleChildScrollView(
+                          padding: const EdgeInsets.fromLTRB(12, 16, 12, 16),
+                          child: navigation)),
+                  Expanded(
+                      child: Align(
+                          alignment: Alignment.topLeft,
+                          child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 880),
+                              child: content)))
+                ]);
           });
         },
       ),
@@ -605,25 +742,50 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  Future<void> _confirmSignOut(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
+  Future<bool> _confirm({
+    required String title,
+    required String message,
+    required String confirmLabel,
+    bool destructive = false,
+  }) async {
+    final result = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('退出登录'),
-        content: const Text('退出后需要重新输入密码。未读与分配状态保存在服务端。'),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('退出'),
-          ),
-        ],
-      ),
+      builder: (context) {
+        final scheme = Theme.of(context).colorScheme;
+        return AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              style: destructive
+                  ? FilledButton.styleFrom(
+                      backgroundColor: scheme.error,
+                      foregroundColor: scheme.onError,
+                    )
+                  : null,
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(confirmLabel),
+            ),
+          ],
+        );
+      },
     );
-    if (confirmed == true) {
+    return result == true;
+  }
+
+  Future<void> _confirmSignOut() async {
+    final confirmed = await _confirm(
+      title: '退出登录',
+      message: '只结束本机这次登录，其他设备保持登录。'
+          '你的接待状态会变为离线，未结束的会话仍保留在服务端。',
+      confirmLabel: '退出登录',
+      destructive: true,
+    );
+    if (confirmed) {
       await widget.session.logout();
     }
   }
@@ -790,9 +952,7 @@ class _SettingsNavItem extends StatelessWidget {
                         fontSize: 12.5,
                         fontWeight:
                             selected ? FontWeight.w600 : FontWeight.w400,
-                        color: selected
-                            ? scheme.primary
-                            : scheme.onSurface)),
+                        color: selected ? scheme.primary : scheme.onSurface)),
               ),
             ]),
           ),
@@ -830,7 +990,9 @@ class _SettingsTabChip extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-                color: selected ? scheme.primary.withOpacity(.28) : scheme.outlineVariant),
+                color: selected
+                    ? scheme.primary.withOpacity(.28)
+                    : scheme.outlineVariant),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Icon(icon,
@@ -925,6 +1087,49 @@ class _VersionCard extends StatelessWidget {
                 label: const Text('打开下载页'),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SecurityNote extends StatelessWidget {
+  const _SecurityNote({
+    required this.icon,
+    required this.message,
+    this.danger = false,
+  });
+
+  final IconData icon;
+  final String message;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final tone = danger ? scheme.error : scheme.primary;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: tone.withOpacity(.07),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: tone.withOpacity(.22)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: tone),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    height: 1.45,
+                    color: scheme.onSurface,
+                  ),
+            ),
           ),
         ],
       ),

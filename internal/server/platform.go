@@ -260,8 +260,8 @@ func (a *API) platformCreateTenant(w http.ResponseWriter, r *http.Request, _ aut
 		fail(w, 500, "创建套餐失败")
 		return
 	}
-	if _, err := tx.Exec(r.Context(), `insert into agent(id, tenant_id, email, display_name, password_hash, role, status, max_concurrent)
-		values($1,$2,$3,$4,$5,'SUPERVISOR','ACTIVE',0)`, ownerID, tenantID, email, ownerName, hash); err != nil {
+	if _, err := tx.Exec(r.Context(), `insert into agent(id, tenant_id, email, display_name, password_hash, role, status, max_concurrent, must_change_password)
+		values($1,$2,$3,$4,$5,'SUPERVISOR','ACTIVE',0,true)`, ownerID, tenantID, email, ownerName, hash); err != nil {
 		if isUniqueViolation(err) {
 			failCode(w, 409, "EMAIL_TAKEN", "该用户名已被使用")
 			return
@@ -600,7 +600,7 @@ func (a *API) platformResetOwner(w http.ResponseWriter, r *http.Request, _ auth.
 		return
 	}
 	if _, err := tx.Exec(r.Context(), `update agent
-		set password_hash=$3, role='SUPERVISOR', status='ACTIVE', updated_at=now()
+		set password_hash=$3, must_change_password=true, role='SUPERVISOR', status='ACTIVE', updated_at=now()
 		where tenant_id=$1 and id=$2`, id, ownerID, hash); err != nil {
 		a.logger.Error("reset owner failed", "error", err, "tenant", id, "agent", ownerID)
 		fail(w, 500, "重置主管失败")
@@ -745,4 +745,3 @@ func (a *API) platformCreateAgent(w http.ResponseWriter, r *http.Request, p auth
 	p.TenantID = id
 	a.createTenantAgent(w, r, p)
 }
-

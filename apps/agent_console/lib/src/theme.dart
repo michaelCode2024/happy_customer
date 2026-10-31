@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:tongyu_agent_console/src/util/browser_chrome.dart';
 
 /// 通语控制台主题：v2 活力改版（B 高密高效 + 视觉活力）。
 ///
@@ -200,9 +201,9 @@ class RelayTheme {
       useMaterial3: true,
       colorScheme: scheme,
     ).textTheme.apply(
-      fontFamily: _fontFamily.first,
-      fontFamilyFallback: _cjkFallback,
-    );
+          fontFamily: _fontFamily.first,
+          fontFamilyFallback: _cjkFallback,
+        );
 
     final radius = BorderRadius.circular(radiusLg);
 
@@ -271,11 +272,14 @@ class RelayTheme {
       appBarTheme: AppBarTheme(
         toolbarHeight: 54,
         titleSpacing: 16,
-        shape: Border(bottom: BorderSide(color: scheme.outlineVariant.withOpacity(0.85))),
+        shape: Border(
+            bottom: BorderSide(color: scheme.outlineVariant.withOpacity(0.85))),
         scrolledUnderElevation: 0,
         backgroundColor:
             isDark ? const Color(0xFF171B22) : Colors.white.withOpacity(0.92),
         surfaceTintColor: Colors.transparent,
+        systemOverlayStyle: BrowserChrome.overlayFor(
+            isDark ? const Color(0xFF171B22) : Colors.white),
         elevation: 0,
         titleTextStyle: TextStyle(
           color: scheme.onSurface,
@@ -286,8 +290,7 @@ class RelayTheme {
         ),
       ),
       navigationRailTheme: NavigationRailThemeData(
-        backgroundColor:
-            isDark ? const Color(0xFF171B22) : railBackgroundLight,
+        backgroundColor: isDark ? const Color(0xFF171B22) : railBackgroundLight,
         indicatorColor: scheme.primaryContainer,
         selectedIconTheme: IconThemeData(color: scheme.primary, size: 22),
         unselectedIconTheme:
@@ -334,7 +337,8 @@ class RelayTheme {
           fontFamily: _fontFamily.first,
           fontFamilyFallback: _cjkFallback,
         ),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusXl)),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(radiusXl)),
       ),
       tabBarTheme: TabBarThemeData(
         labelColor: scheme.primary,
@@ -362,10 +366,11 @@ class RelayTheme {
         style: ButtonStyle(
           textStyle: WidgetStatePropertyAll(_buttonText(13, FontWeight.w500)),
           shape: WidgetStatePropertyAll(
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusMd)),
+            RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(radiusMd)),
           ),
-          side: WidgetStatePropertyAll(
-              BorderSide(color: scheme.outlineVariant)),
+          side:
+              WidgetStatePropertyAll(BorderSide(color: scheme.outlineVariant)),
         ),
       ),
       visualDensity: VisualDensity.compact,
@@ -426,6 +431,36 @@ class RelayTheme {
         fontFamilyFallback: _cjkFallback,
         fontSize: size,
         fontWeight: weight,
+      );
+
+  /// 下拉框的 style 同样整份替换默认字体。只写字号和颜色时，网页上的中文是方框。
+  static TextStyle uiText({
+    double? fontSize,
+    FontWeight? fontWeight,
+    Color? color,
+    double? height,
+  }) =>
+      TextStyle(
+        fontFamily: _fontFamily.first,
+        fontFamilyFallback: _cjkFallback,
+        fontSize: fontSize,
+        fontWeight: fontWeight,
+        color: color,
+        height: height,
+      );
+
+  /// 代码块用等宽字体排英文；中文不在这套字体里，必须回落到中文字体。
+  static TextStyle codeText({
+    double fontSize = 12,
+    double height = 1.55,
+    Color? color,
+  }) =>
+      TextStyle(
+        fontFamily: 'monospace',
+        fontFamilyFallback: const <String>['SportsChinese', 'ChatEmoji'],
+        fontSize: fontSize,
+        height: height,
+        color: color,
       );
 
   static Color chatCanvas(ColorScheme scheme) =>

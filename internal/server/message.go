@@ -341,6 +341,9 @@ func (a *API) afterMessageCommitted(ctx context.Context, tenantID, conversationI
 		})
 	}
 
+	if senderType == "VISITOR" || assignee != nil {
+		a.nudgePush()
+	}
 	if senderType == "VISITOR" {
 		// AI 不能堵在访客发送热路径上：模型网关可能拖到几十秒，会直接抬高 POST /messages 延迟。
 		// 用 WithoutCancel 保留租户/会话上下文，超时单独封顶，避免请求取消把回复掐掉。
@@ -487,7 +490,7 @@ func (a *API) autoAssign(ctx context.Context, tx pgx.Tx, tenantID, conversationI
 		       where c.assignee_id = ag.id and c.status <> 'RESOLVED'
 		  ) load on true
 		 where ag.tenant_id = $1 and ag.status = 'ACTIVE'
-		   and coalesce(ap.status, 'OFFLINE') = 'ONLINE'
+		   and `+agentOnlineRecently+`
            and not exists(select 1 from reception_timeout rt where rt.agent_id=ag.id and rt.conversation_id=$3)
 		   and (ag.max_concurrent = 0 or load.load < ag.max_concurrent)
 		 order by load.load asc nulls first, load.last_assigned asc nulls first, ag.created_at asc
@@ -594,7 +597,7 @@ func (a *API) roundRobinCandidate(ctx context.Context, tx pgx.Tx, tenantID, inbo
 		       where c.assignee_id = ag.id and c.status <> 'RESOLVED'
 		  ) load on true
 		 where ag.tenant_id = $1 and ag.status = 'ACTIVE'
-		   and coalesce(ap.status, 'OFFLINE') = 'ONLINE'
+		   and `+agentOnlineRecently+`
            and not exists(select 1 from reception_timeout rt where rt.agent_id=ag.id and rt.conversation_id=$3)
 		   and (ag.max_concurrent = 0 or load.load < ag.max_concurrent)
 		 order by ag.created_at asc, ag.id asc`, tenantID, inboxID, conversationID)
@@ -635,7 +638,7 @@ func (a *API) setAssignee(ctx context.Context, tx pgx.Tx, tenantID, conversation
 		return pgx.ErrNoRows
 	}
 	var name string
-	if err := tx.QueryRow(ctx, `select display_name from agent ag where id=$1 and tenant_id=$2 and status='ACTIVE' and exists(select 1 from agent_inbox ai join conversation c on c.inbox_id=ai.inbox_id where ai.agent_id=ag.id and c.id=$3) and exists(select 1 from agent_presence ap where ap.agent_id=ag.id and ap.status='ONLINE') and not exists(select 1 from reception_timeout rt where rt.agent_id=ag.id and rt.conversation_id=$3)`, agentID, tenantID, conversationID).Scan(&name); err != nil {
+	if err := tx.QueryRow(ctx, `select display_name from agent ag where id=$1 and tenant_id=$2 and status='ACTIVE' and exists(select 1 from agent_inbox ai join conversation c on c.inbox_id=ai.inbox_id where ai.agent_id=ag.id and c.id=$3) and exists(select 1 from agent_presence ap where ap.agent_id=ag.id and `+agentOnlineRecently+`) and not exists(select 1 from reception_timeout rt where rt.agent_id=ag.id and rt.conversation_id=$3)`, agentID, tenantID, conversationID).Scan(&name); err != nil {
 		return err
 	}
 	// 入口开关 auto_accept：默认 false，分配后仍要手动点接待；开启则直接写入 accepted_at。

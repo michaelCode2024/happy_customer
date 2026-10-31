@@ -152,7 +152,8 @@ class WorkspacePageHeader extends StatelessWidget {
     ]);
     return Container(
         color: Colors.transparent,
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+        padding: EdgeInsets.fromLTRB(
+            16, 12 + MediaQuery.paddingOf(context).top, 16, 8),
         child: LayoutBuilder(
             builder: (context, box) => box.maxWidth < 660
                 ? Column(
@@ -261,8 +262,8 @@ class WorkspaceCard extends StatelessWidget {
             padding: headerPadding ?? const EdgeInsets.fromLTRB(14, 12, 12, 10),
             decoration: BoxDecoration(
               border: Border(
-                bottom: BorderSide(
-                    color: scheme.outlineVariant.withOpacity(.7)),
+                bottom:
+                    BorderSide(color: scheme.outlineVariant.withOpacity(.7)),
               ),
             ),
             child: Row(
@@ -393,8 +394,7 @@ class WorkspaceKpiCard extends StatelessWidget {
                   const SizedBox(width: 6),
                   Padding(
                     padding: const EdgeInsets.only(bottom: 3),
-                    child: WorkspaceTag(
-                        text: trend!, tone: color, dense: true),
+                    child: WorkspaceTag(text: trend!, tone: color, dense: true),
                   ),
                 ],
               ],
@@ -440,9 +440,8 @@ class WorkspaceKpiCard extends StatelessWidget {
           ),
           Material(
             color: Colors.transparent,
-            child: onTap == null
-                ? content
-                : InkWell(onTap: onTap, child: content),
+            child:
+                onTap == null ? content : InkWell(onTap: onTap, child: content),
           ),
         ],
       ),
@@ -505,8 +504,8 @@ class WorkspaceEmptyState extends StatelessWidget {
     final decoSize = compact ? 72.0 : 110.0;
     return Center(
       child: Padding(
-        padding: EdgeInsets.symmetric(
-            horizontal: 24, vertical: compact ? 16 : 36),
+        padding:
+            EdgeInsets.symmetric(horizontal: 24, vertical: compact ? 16 : 36),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -678,9 +677,7 @@ class WorkspaceListRow extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                      fontSize: 13,
-                      height: 1.4,
-                      fontWeight: FontWeight.w500)),
+                      fontSize: 13, height: 1.4, fontWeight: FontWeight.w500)),
               if (subtitle != null) ...[
                 const SizedBox(height: 1),
                 Text(subtitle!,
@@ -753,8 +750,7 @@ class WorkspaceListCard extends StatelessWidget {
 
 /// 页内分段筛选条。
 class WorkspaceFilterBar extends StatelessWidget {
-  const WorkspaceFilterBar(
-      {super.key, required this.children, this.padding});
+  const WorkspaceFilterBar({super.key, required this.children, this.padding});
   final List<Widget> children;
   final EdgeInsets? padding;
 

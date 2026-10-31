@@ -1,11 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// 网页顶栏/底栏取色。登录页蓝色头部和滚上来的白卡不是同一种底，顶栏跟着当前露出来的颜色走。
 ///
-/// 底栏是同一个道理：iOS 主屏幕的安全区（Home 条那一截）由外层画，
-/// 颜色必须取自真正贴底的那条栏，不能写死页面底色，否则栏和安全区之间会有一条色差。
+/// 底栏同一个道理：Home 条画在贴底栏内部，采样色必须取这栏的颜色，
+/// 不能写死页面底色，否则栏和系统底部之间会有一条色差。
 class BrowserChrome {
   static final ValueNotifier<Color?> top = ValueNotifier<Color?>(null);
+
+  /// 安卓状态栏不铺实色，让页面顶部自己透出来；只按亮度改图标。
+  static SystemUiOverlayStyle overlayFor(Color top) {
+    final lightIcons = top.computeLuminance() < 0.45;
+    return SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: lightIcons ? Brightness.light : Brightness.dark,
+      statusBarBrightness: lightIcons ? Brightness.dark : Brightness.light,
+      systemStatusBarContrastEnforced: false,
+    );
+  }
 
   /// 贴底栏登记的颜色；多处同时存在时按登记序号取最新，卸载后自动回退。
   static final ValueNotifier<Color?> bottom = ValueNotifier<Color?>(null);

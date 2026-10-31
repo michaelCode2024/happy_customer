@@ -1,7 +1,8 @@
 name: tongyu_agent_console
 description: TongYu cross-platform agent and operations console.
 publish_to: none
-version: 0.1.1+2026102801
+# 与 web/pwa-release.json 同一发版号：名称取前三段，+ 后为去掉点的完整号。
+version: 2026.10.31+2026103103
 
 # One codebase, four shapes: the desktop build is what an agent sits in all day,
 # the phone build is for on-call shifts, and the web build is a zero-install
@@ -43,6 +44,13 @@ flutter:
     - family: SportsChinese
       fonts:
         - asset: assets/fonts/NotoSansSC-Regular.otf
+    # 彩色 emoji（选做）：CanvasKit 看不到系统字体，NotoSansSC 也不含 emoji，
+    # 会话里出现的 😀 等会渲染成方框。需要时把 NotoColorEmoji.ttf 放进
+    # assets/fonts/ 并取消下面注释。注意 CanvasKit 对 COLR/CPAL 彩色字体支持有限，
+    # 可能仍降级；后端 SanitizeText 已剔除 PUA/U+FFFD 等“死码点”，是消除方框的主措施。
+    # - family: "Noto Color Emoji"
+    #   fonts:
+    #     - asset: assets/fonts/NotoColorEmoji.ttf
   assets:
     - assets/images/service-illustrations.png
     - assets/images/ai-assistant.png

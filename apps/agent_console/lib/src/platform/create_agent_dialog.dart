@@ -99,7 +99,7 @@ class _CreateAgentDialogState extends State<CreateAgentDialog> {
                           enableSuggestions: false,
                           autocorrect: false,
                           decoration: InputDecoration(
-                              hintText: '至少 8 位',
+                              hintText: '不少于 8 位，首次登录后须尽快修改',
                               suffixIcon: IconButton(
                                   tooltip: _showPassword ? '隐藏密码' : '显示密码',
                                   onPressed: () => setState(

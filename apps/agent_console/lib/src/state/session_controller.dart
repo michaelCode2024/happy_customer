@@ -267,6 +267,7 @@ class SessionController extends ChangeNotifier {
         displayName: current.agent.displayName,
         role: current.agent.role,
         presence: status,
+        mustChangePassword: current.agent.mustChangePassword,
       ),
     );
     _notify();

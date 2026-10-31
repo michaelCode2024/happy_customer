@@ -1,6 +1,6 @@
 /* 安装与更新必须由用户主动触发；更新不刷新未提交的回复。 */
 (function(){
-  let installEvent=null, registration=null, failure='', updating=false, shellReady=false, waitingVersion='', waitingRelease={};
+  let installEvent=null, registration=null, failure='', updating=false, reloading=false, shellReady=false, waitingVersion='', waitingRelease={};
   const ios=()=>/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
   const embedded=()=>/MicroMessenger|QQ\/|FBAN|FBAV|Instagram|Line\//i.test(navigator.userAgent);
   const installed=()=>matchMedia('(display-mode: standalone)').matches||matchMedia('(display-mode: fullscreen)').matches||navigator.standalone===true;
@@ -95,17 +95,34 @@
     setTimeout(()=>channel.port1.close(),2000);
   }
   setInterval(checkShell,3000);checkShell();
-  navigator.serviceWorker?.addEventListener('controllerchange',()=>{if(updating)location.reload();});
+  function reloadForUpdate(){
+    if(reloading)return;
+    reloading=true;
+    location.reload();
+  }
+  navigator.serviceWorker?.addEventListener('controllerchange',()=>{if(updating)reloadForUpdate();});
+  navigator.serviceWorker?.addEventListener('message',event=>{
+    if(event.data?.type==='PWA_FORCE_RELOAD'){updating=true;reloadForUpdate();}
+  });
   window.tongyuPwaStatus=()=>JSON.stringify({supported:!!navigator.serviceWorker&&isSecureContext,offline:!navigator.onLine,
     installed:installed(),canInstall:!!installEvent,ready:shellReady,
     update:!!registration?.waiting,updateVersion:waitingVersion,updateRelease:waitingRelease,error:failure,ios:ios(),embedded:embedded(),android:/Android/i.test(navigator.userAgent)});
   window.tongyuPwaAction=async action=>{
+    if(action==='holdUpdate'){updating=true;return '';}
+    if(action==='releaseUpdate'){if(!reloading)updating=false;return '';}
     if(action==='claimUpdatePrompt'){
-      if(!registration?.waiting||!waitingVersion)return '';
-      const key='tongyu.update.prompt.'+waitingVersion;
-      if(promptedVersions.has(key))return '';
-      try{if(sessionStorage.getItem(key))return '';sessionStorage.setItem(key,'1');}catch(_){}
-      promptedVersions.add(key);return 'show';
+      // 工作台每 2 秒领一次。同一份已下载的壳只弹一次，否则对话框关掉就会马上再开。
+      if(updating||reloading||!registration?.waiting)return '';
+      const version=waitingVersion;
+      if(!version)return '';
+      if(promptedVersions.has(version))return '';
+      const key='tongyu.update.prompt.'+version;
+      try{
+        if(sessionStorage.getItem(key)){promptedVersions.add(version);return '';}
+        sessionStorage.setItem(key,'1');
+      }catch(e){}
+      promptedVersions.add(version);
+      return 'show';
     }
     if(action==='consumeInstallRequest'){
       const url=new URL(location.href);url.searchParams.delete('install');history.replaceState(history.state,'',url);return '';

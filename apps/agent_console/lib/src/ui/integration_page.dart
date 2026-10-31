@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:tongyu_agent_console/src/theme.dart';
 import 'package:tongyu_agent_console/src/ui/console_form_dialog.dart';
 import 'package:tongyu_agent_console/src/util/channel_preview_stub.dart'
     if (dart.library.html) 'package:tongyu_agent_console/src/util/channel_preview_web.dart';
@@ -182,8 +183,7 @@ class _IntegrationPageState extends State<IntegrationPage> {
                   children: [
                     const Text('仅此一次显示，请保存在服务端。关闭后无法再次查看。'),
                     const SizedBox(height: 16),
-                    SelectableText(secret,
-                        style: const TextStyle(fontFamily: 'monospace')),
+                    SelectableText(secret, style: RelayTheme.codeText()),
                   ])),
           actions: [
             TextButton.icon(
@@ -671,11 +671,8 @@ location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent
                     borderRadius: BorderRadius.circular(10)),
                 child: SelectableText(
                     current.$4.isEmpty ? '当前入口暂未提供该渠道的接入内容。' : current.$4,
-                    style: TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 12,
-                        height: 1.7,
-                        color: scheme.onSurface))),
+                    style: RelayTheme.codeText(
+                        fontSize: 12, height: 1.7, color: scheme.onSurface))),
             const SizedBox(height: 12),
             Text('入口标识可以用于前端接入，服务端密钥仅供你的服务器使用。',
                 style: theme.textTheme.bodySmall
@@ -780,8 +777,7 @@ location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent
               border: Border.all(color: theme.colorScheme.outlineVariant),
             ),
             child: SelectableText(value,
-                style: const TextStyle(
-                    fontFamily: 'monospace', fontSize: 11.5, height: 1.55)),
+                style: RelayTheme.codeText(fontSize: 11.5, height: 1.55)),
           ),
         ],
       ));
