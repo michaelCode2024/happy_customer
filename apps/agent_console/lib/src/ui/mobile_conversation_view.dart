@@ -651,7 +651,7 @@ class _MobileConversationCell extends StatelessWidget {
                               ),
                             ),
                             child: const Text(
-                              '已解决',
+                              '已结束',
                               style: TextStyle(
                                 fontSize: 10,
                                 fontWeight: FontWeight.w600,

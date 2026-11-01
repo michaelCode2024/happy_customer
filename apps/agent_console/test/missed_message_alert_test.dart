@@ -14,7 +14,7 @@ void main() {
     final api = TongYuApi(server: 'http://localhost', client: MockClient((r) async {
       Object body;
       if (r.url.path.endsWith('/conversations')) {
-        body = {'items': [{'id':'c1','visitorName':'测试客户','lastSequence':sequence}]};
+        body = {'items': [{'id':'c1','visitorName':'测试客户','assigneeId':'agent-1','lastSequence':sequence}]};
       } else {
         requestedAfter.add(r.url.queryParameters['after']);
         body = {'items': [
@@ -25,7 +25,7 @@ void main() {
       }
       return http.Response.bytes(utf8.encode(jsonEncode(body)), 200);
     }));
-    final controller = WorkbenchController(api:api, visitorAlert:(id,name)=>alerts.add(id));
+    final controller = WorkbenchController(api:api, selfId:'agent-1', visitorAlert:(id,name)=>alerts.add(id));
     addTearDown(controller.dispose);
     addTearDown(api.close);
     await controller.refreshConversations();

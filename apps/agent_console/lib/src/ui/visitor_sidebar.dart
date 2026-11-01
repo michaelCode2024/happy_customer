@@ -527,7 +527,7 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
   static String _statusLabel(String status) => switch (status) {
         'OPEN' => '进行中',
         'PENDING' => '等待中',
-        'RESOLVED' => '已解决',
+        'RESOLVED' => '已结束',
         _ => status,
       };
 }

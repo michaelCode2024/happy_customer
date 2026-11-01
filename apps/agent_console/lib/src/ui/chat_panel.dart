@@ -428,7 +428,7 @@ class _ChatPanelState extends State<ChatPanel> {
       return '该会话由「$name」接待中，请先转派给自己后再回复；内部备注仍可发送。';
     }
     if (conversation.isResolved) {
-      return '会话已解决。发送回复将自动重新打开会话。';
+      return '会话已结束。发送回复将自动重新打开会话。';
     }
     return null;
   }
@@ -1151,7 +1151,7 @@ class _ThreadHeader extends StatelessWidget {
                         const SizedBox(width: 8),
                         if (conversation.isResolved)
                           const _HeaderChip(
-                              label: '已解决', tone: _ChipTone.neutral)
+                              label: '已结束', tone: _ChipTone.neutral)
                         else if (conversation.isUnassigned)
                           const _HeaderChip(label: '待接待', tone: _ChipTone.warn)
                         else if (conversation.needsAcceptance)
@@ -1185,7 +1185,7 @@ class _ThreadHeader extends StatelessWidget {
                   Text(
                     MediaQuery.sizeOf(context).width < 760
                         ? (conversation.isResolved
-                            ? '已解决'
+                            ? '已结束'
                             : conversation.isUnassigned
                                 ? '待接待'
                                 : conversation.needsAcceptance

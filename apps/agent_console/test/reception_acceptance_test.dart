@@ -339,7 +339,7 @@ void main() {
                   picker: _Picker(),
                   showInlineAssist: false))));
       await tester.pumpAndSettle();
-      expect(find.text('已解决'), findsOneWidget);
+      expect(find.text('已结束'), findsOneWidget);
       expect(find.textContaining('重新打开会话'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
