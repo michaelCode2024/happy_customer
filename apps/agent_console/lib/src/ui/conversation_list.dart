@@ -107,51 +107,13 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
                             (QueueFilter.all, '全部'),
                             (QueueFilter.unassigned, '待接待'),
                             (QueueFilter.mine, '我的'),
+                            (QueueFilter.resolved, '已结束'),
                           ])
                             _InboxFilterTab(
                               label: entry.$2,
                               selected: workbench.filter == entry.$1,
                               onTap: () => workbench.setFilter(entry.$1),
                             ),
-                          Semantics(
-                            button: true,
-                            label: '含已解决',
-                            identifier: 'desk.filter.includeResolved',
-                            toggled: workbench.includeResolved,
-                            child: Tooltip(
-                              message: workbench.includeResolved
-                                  ? '列表已含已解决会话，点击可隐藏'
-                                  : '列表不含已解决会话，点击可包含',
-                              child: TextButton(
-                                key: const ValueKey(
-                                    'desk-filter-include-resolved'),
-                                onPressed: () => workbench.setIncludeResolved(
-                                    !workbench.includeResolved),
-                                style: TextButton.styleFrom(
-                                  foregroundColor: workbench.includeResolved
-                                      ? theme.colorScheme.primary
-                                      : theme.colorScheme.onSurfaceVariant,
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 6),
-                                  minimumSize: const Size(0, 28),
-                                  tapTargetSize:
-                                      MaterialTapTargetSize.shrinkWrap,
-                                ),
-                                child: Text(
-                                  '含已解决',
-                                  style: TextStyle(
-                                    fontSize: 11.5,
-                                    fontWeight: FontWeight.w600,
-                                    decoration: workbench.includeResolved
-                                        ? TextDecoration.underline
-                                        : TextDecoration.none,
-                                    decorationColor:
-                                        theme.colorScheme.primary,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
                         ],
                       ),
                     ),
@@ -335,12 +297,15 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
                 QueueFilter.mine => '暂无进行中的会话',
                 QueueFilter.unassigned => '待接待队列是空的',
                 QueueFilter.all => '没有符合条件的会话',
+                QueueFilter.resolved => '还没有已结束的会话',
               },
         message: workbench.search.isNotEmpty
-            ? '搜索仅在当前筛选和客服入口内进行，可切换全部或打开「含已解决」。'
+            ? '搜索仅在当前筛选和客服入口内进行，可切换「全部」或「已结束」。'
             : workbench.filter == QueueFilter.mine
                 ? '新客户进线后会出现在待接待列表。也可以先整理知识库。'
-                : '有新会话时会实时出现在这里。',
+                : workbench.filter == QueueFilter.resolved
+                    ? '标记解决的会话会归档在这里，点开可查看完整记录。'
+                    : '有新会话时会实时出现在这里。',
         actionLabel: canOpenKnowledge ? '打开知识库' : null,
         onAction: canOpenKnowledge ? widget.onOpenKnowledge : null,
       );
@@ -396,7 +361,7 @@ class _ConversationRow extends StatelessWidget {
       else if (conversation.assigneeId != agentId &&
           conversation.assigneeName.isNotEmpty)
         conversation.assigneeName,
-      if (conversation.isResolved) '已解决',
+      if (conversation.isResolved) '已结束',
       preview,
     ].join(' · ');
 
@@ -460,7 +425,9 @@ class _ConversationRow extends StatelessWidget {
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          relativeTime(conversation.lastMessageAt ??
+                          // 归档行看的是「什么时候结束的」，最后一条消息时间已在预览里。
+                          relativeTime(conversation.closedAt ??
+                              conversation.lastMessageAt ??
                               conversation.updatedAt),
                           style: theme.textTheme.labelSmall?.copyWith(
                             color: scheme.onSurfaceVariant,
@@ -491,7 +458,7 @@ class _ConversationRow extends StatelessWidget {
                                   conversation.isUnassigned
                                       ? '待接待'
                                       : conversation.isResolved
-                                          ? '已解决'
+                                          ? '已结束'
                                           : conversation.tags.isNotEmpty
                                               ? conversation.tags.first
                                               : conversationSourceLabel(

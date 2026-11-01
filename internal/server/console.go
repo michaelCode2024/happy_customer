@@ -686,11 +686,16 @@ func (a *API) consoleStatus(w http.ResponseWriter, r *http.Request, p auth.Princ
 		return
 	}
 	if status == "RESOLVED" {
-		if _, err := a.db.Exec(r.Context(), `update conversation
+		res, err := a.db.Exec(r.Context(), `update conversation
 			set status='RESOLVED', closed_at=now(), updated_at=now(), agent_unread=0
-			where id=$1 and tenant_id=$2`, id, p.TenantID); err != nil {
+			where id=$1 and tenant_id=$2 and status <> 'RESOLVED'`, id, p.TenantID)
+		if err != nil {
 			fail(w, 500, "更新状态失败")
 			return
+		}
+		// 重复点「标记解决」不再补一条结束提示。
+		if res.RowsAffected() > 0 {
+			a.appendEndedNotice(r.Context(), p.TenantID, id)
 		}
 		a.bumpDailyStat(r.Context(), p.TenantID, "conversations_closed")
 		a.publish(r.Context(), a.conversationChannels(r.Context(), id), realtime.Event{

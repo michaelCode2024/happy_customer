@@ -15,20 +15,23 @@ import 'package:tongyu_agent_console/src/realtime/console_socket.dart';
 ///
 /// `mine` is the default because it is the answer to "what should I do next?"
 /// for a working agent; `unassigned` is the team's shared intake, and `all` is
-/// for supervisors watching the floor.
-enum QueueFilter { mine, unassigned, all }
+/// for supervisors watching the floor. `resolved` is the archive: the same
+/// slice as `all`, narrowed to closed threads, so an ended conversation is a
+/// first-class tab rather than a footnote toggle nobody finds.
+enum QueueFilter { mine, unassigned, all, resolved }
 
 extension QueueFilterLabel on QueueFilter {
   String get label => switch (this) {
         QueueFilter.mine => '我的',
         QueueFilter.unassigned => '待接待',
         QueueFilter.all => '全部',
+        QueueFilter.resolved => '已结束',
       };
 
   String get wire => switch (this) {
         QueueFilter.mine => 'mine',
         QueueFilter.unassigned => 'reception',
-        QueueFilter.all => 'all',
+        QueueFilter.all || QueueFilter.resolved => 'all',
       };
 }
 
@@ -75,7 +78,6 @@ class WorkbenchController extends ChangeNotifier {
   QueueFilter _filter = QueueFilter.all;
   String? _inboxFilter;
   String _search = '';
-  bool _includeResolved = false;
 
   List<Conversation> _conversations = const <Conversation>[];
   int _queued = 0;
@@ -114,7 +116,6 @@ class WorkbenchController extends ChangeNotifier {
     _filter = QueueFilter.unassigned;
     _inboxFilter = null;
     _search = '';
-    _includeResolved = false;
     _notify();
     await refreshConversations();
   }
@@ -243,8 +244,6 @@ class WorkbenchController extends ChangeNotifier {
   String? get inboxFilter => _inboxFilter;
 
   String get search => _search;
-
-  bool get includeResolved => _includeResolved;
 
   List<Conversation> get conversations => _conversations;
 
@@ -712,7 +711,8 @@ class WorkbenchController extends ChangeNotifier {
         inboxId: _inboxFilter,
         query: _search,
         limit: 50,
-        status: _includeResolved ? 'ALL' : null,
+        // 「已结束」= 全部分片 + 状态收窄；其余分片沿用服务端默认（排除已结束）。
+        status: _filter == QueueFilter.resolved ? 'RESOLVED' : null,
       );
       if (generation != _listGeneration) {
         return;
@@ -832,12 +832,6 @@ class WorkbenchController extends ChangeNotifier {
 
   Future<void> setInboxFilter(String? inboxId) async {
     _inboxFilter = inboxId;
-    _notify();
-    await refreshConversations();
-  }
-
-  Future<void> setIncludeResolved(bool value) async {
-    _includeResolved = value;
     _notify();
     await refreshConversations();
   }

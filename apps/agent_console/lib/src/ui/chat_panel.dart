@@ -1437,15 +1437,15 @@ class _ThreadHeader extends StatelessWidget {
         actions: <Widget>[
           Semantics(
             button: true,
-            label: '查看已解决',
+            label: '查看已结束',
             identifier: 'desk.resolve.viewResolved',
             child: TextButton(
               key: const ValueKey('desk-resolve-view-resolved'),
               onPressed: () {
-                workbench.setIncludeResolved(true);
+                workbench.setFilter(QueueFilter.resolved);
                 dismissResolveFeedback();
               },
-              child: const Text('查看已解决'),
+              child: const Text('查看已结束'),
             ),
           ),
           TextButton(

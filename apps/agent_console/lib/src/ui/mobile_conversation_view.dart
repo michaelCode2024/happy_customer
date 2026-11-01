@@ -202,11 +202,10 @@ class _MobileConversationListViewState
                   onTap: () => workbench.setFilter(QueueFilter.mine),
                 ),
                 const SizedBox(width: 8),
-                _buildToggleChip(
-                  label: '含已解决',
-                  active: workbench.includeResolved,
-                  onTap: () =>
-                      workbench.setIncludeResolved(!workbench.includeResolved),
+                _buildFilterChip(
+                  label: '已结束',
+                  selected: workbench.filter == QueueFilter.resolved,
+                  onTap: () => workbench.setFilter(QueueFilter.resolved),
                 ),
                 if (widget.session.inboxes.length > 1) ...[
                   const SizedBox(width: 8),
@@ -302,61 +301,6 @@ class _MobileConversationListViewState
     );
   }
 
-  Widget _buildToggleChip({
-    required String label,
-    required bool active,
-    required VoidCallback onTap,
-  }) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    return InkWell(
-      onTap: () {
-        HapticFeedback.lightImpact();
-        onTap();
-      },
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-        decoration: BoxDecoration(
-          color: active
-              ? RelayTheme.blueSoft
-              : (isDark
-                  ? theme.colorScheme.surfaceContainerHighest
-                  : const Color(0xFFEDF2F9)),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: active
-                ? RelayTheme.blue.withAlpha(120)
-                : Colors.transparent,
-            width: 1,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              active ? Icons.check_circle_rounded : Icons.filter_alt_outlined,
-              size: 13,
-              color: active ? RelayTheme.blue : RelayTheme.muted,
-            ),
-            const SizedBox(width: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: active ? FontWeight.w600 : FontWeight.w500,
-                color: active
-                    ? RelayTheme.blue
-                    : (isDark ? theme.colorScheme.outline : RelayTheme.muted),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildInboxFilter(
       BuildContext context, WorkbenchController workbench) {
     return PopupMenuButton<String?>(
@@ -437,12 +381,15 @@ class _MobileConversationListViewState
                 QueueFilter.mine => '暂无进行中的会话',
                 QueueFilter.unassigned => '待接待队列已清空',
                 QueueFilter.all => '没有符合条件的会话',
+                QueueFilter.resolved => '还没有已结束的会话',
               },
         message: workbench.search.isNotEmpty
-            ? '可尝试切换搜索词，或开启「含已解决」查看历史会话。'
+            ? '可尝试切换搜索词，或打开「已结束」查看历史会话。'
             : workbench.filter == QueueFilter.mine
                 ? '新客户进线后将出现在待接待列表，接单后即可开始沟通。'
-                : '有新客户接入时会实时通知您。',
+                : workbench.filter == QueueFilter.resolved
+                    ? '标记解决的会话会归档在这里，点开可查看完整记录。'
+                    : '有新客户接入时会实时通知您。',
         actionLabel: canOpenKnowledge ? '查看知识库' : null,
         onAction: canOpenKnowledge ? widget.onOpenKnowledge : null,
       );

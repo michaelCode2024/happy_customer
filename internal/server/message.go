@@ -472,6 +472,36 @@ func (a *API) forkConversation(ctx context.Context, tenantID, conversationID uui
 	return newID, nil
 }
 
+// appendEndedNotice 把「会话已结束」写进消息流。两端原先只在输入框上方给一行小字，
+// 访客很容易当成还在接待；友商（Intercom、腾讯客服）都是在流里留一条系统行。
+// 序列号必须一起递增，否则客户端按 last_sequence 增量拉取会漏掉这条。
+func (a *API) appendEndedNotice(ctx context.Context, tenantID, conversationID uuid.UUID) {
+	var sequence int64
+	if err := a.db.QueryRow(ctx, `
+		update conversation
+		   set last_sequence = last_sequence + 1, updated_at = now()
+		 where id = $1 and tenant_id = $2
+		 returning last_sequence`, conversationID, tenantID).Scan(&sequence); err != nil {
+		a.logger.Error("结束提示取序列号失败", "error", err)
+		return
+	}
+	const content = "客服已结束本次会话。"
+	metadata, _ := json.Marshal(map[string]any{"ended": true})
+	id := uuid.New()
+	if _, err := a.db.Exec(ctx, `
+		insert into message(id, tenant_id, conversation_id, sender_type, sequence, message_type, content, metadata, created_at)
+		values($1,$2,$3,'SYSTEM',$4,'EVENT',$5,$6,now())`,
+		id, tenantID, conversationID, sequence, content, metadata); err != nil {
+		a.logger.Error("结束提示写入失败", "error", err)
+		return
+	}
+	a.publish(ctx, a.conversationChannels(ctx, conversationID), realtime.Event{
+		Type: "message.created", TenantID: tenantID.String(), ConversationID: conversationID.String(),
+		Data: messageView{ID: id, ConversationID: conversationID, SenderType: "SYSTEM",
+			Sequence: sequence, MessageType: "EVENT", Content: content, Metadata: metadata, CreatedAt: nowUTC()},
+	})
+}
+
 // 幂等标识不能把其他发送者的消息（尤其是内部备注）当成访客重试返回。
 func sameMessageRetry(existing messageView, in messageInput) bool {
 	if existing.SenderType != in.SenderType || existing.Private != in.Private {

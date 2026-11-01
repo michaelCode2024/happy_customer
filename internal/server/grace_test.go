@@ -2,13 +2,16 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tongyu/tongyu/internal/auth"
 	"github.com/tongyu/tongyu/internal/platform/database"
 	"github.com/tongyu/tongyu/internal/realtime"
 	"github.com/tongyu/tongyu/internal/webhook"
@@ -136,6 +139,24 @@ func TestInboxReopenGraceForksToLobby(t *testing.T) {
 	}
 	if parentSequence != pointerSeq {
 		t.Fatalf("pointer must advance the conversation cursor: last_sequence=%d message=%d", parentSequence, pointerSeq)
+	}
+
+	// 分流出的新会话没有接待人，绑定该入口的每个客服都能在「待接待」看到它。
+	second := uuid.New()
+	exec(`insert into agent(id,tenant_id,email,display_name,role,status,password_hash) values($1,$2,$3,$3,'AGENT','ACTIVE','x')`, second, tenant, second.String())
+	exec(`insert into agent_inbox values($1,$2)`, second, inbox)
+	for _, agent := range []uuid.UUID{first, second} {
+		w := httptest.NewRecorder()
+		a.consoleConversations(w, httptest.NewRequest("GET", "/?filter=reception", nil), auth.Principal{TenantID: tenant, AgentID: agent})
+		var body struct {
+			Items []conversationView `json:"items"`
+		}
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &body) != nil {
+			t.Fatalf("reception queue: status=%d body=%s", w.Code, w.Body)
+		}
+		if len(body.Items) != 1 || body.Items[0].ID != forked.ConversationID {
+			t.Fatalf("every inbox agent must see the forked conversation in the lobby: %s", w.Body)
+		}
 	}
 
 	// 旧客户端把后续消息和重试仍发到已结束的原会话：复用刚分流出的进行中会话，

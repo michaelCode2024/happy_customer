@@ -5,7 +5,7 @@ import type { ChannelPresentation, ChannelItem, InboxInfo } from "./types.js";
 // reconciliation by clientMessageId) explicit.
 
 import { ApiError, VisitorApi } from './api.js';
-import type { ResolvedOptions } from './config.js';
+import { windowTitle, type ResolvedOptions } from './config.js';
 import { VisitorSocket, type SocketStatus } from './socket.js';
 import {
   toChatMessage,
@@ -74,7 +74,7 @@ function localId(): string {
 }
 
 /** 超过入口宽限期的已结束会话不再复活，访客再发言改走自动新建会话进大厅。 */
-function shouldForkAfterGrace(conversation: Conversation | undefined, graceMinutes: number | undefined): boolean {
+export function shouldForkAfterGrace(conversation: Conversation | undefined, graceMinutes: number | undefined): boolean {
   if (!conversation || conversation.status !== 'RESOLVED') {
     return false;
   }
@@ -1135,8 +1135,9 @@ export class ChatStore {
                     lastMessageAt: isNewest ? message.createdAt : item.lastMessageAt,
                     // A private note never reaches a visitor socket; the check
                     // is defensive, because a note must not un-resolve a
-                    // conversation the visitor sees as closed either.
-                    status: item.status === 'RESOLVED' && !message.private ? 'OPEN' : item.status,
+                    // conversation the visitor sees as closed either. 系统事件
+                    // （结束提示、分配/转接灰字）同理，否则刚结束的线程会画成重新打开。
+                    status: item.status === 'RESOLVED' && !message.private && message.senderType !== 'SYSTEM' ? 'OPEN' : item.status,
                   }
                 : item,
             ),
@@ -1164,14 +1165,11 @@ export class ChatStore {
               conversationId,
               senderType: 'AGENT',
               // 流式占位跟嵌入入口走，避免访客看到产品内部「AI 助手」。
-              senderName:
-                this.#state.automation?.channelTitle?.trim() ||
-                (this.#options.title?.trim() &&
-                this.#options.title.trim() !== '通语客服' &&
-                this.#options.title.trim() !== '语聊客服'
-                  ? this.#options.title.trim()
-                  : '') ||
-                '在线客服',
+              senderName: windowTitle(
+                this.#options.title,
+                this.#state.automation?.channelTitle,
+                this.#options.embedded,
+              ),
               sequence: 0,
               messageType: 'TEXT',
               content: token,

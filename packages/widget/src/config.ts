@@ -87,6 +87,25 @@ export interface WidgetBridge {
   getVisitor?: () => { externalId?: string; identityToken?: string; displayName?: string; email?: string; phone?: string } | undefined;
 }
 
+const PRODUCT_WINDOW_TITLES = new Set(['通语客服', '语聊客服']);
+
+/**
+ * 嵌入页顶部名称。宿主用 title 指定时优先于入口里的聊天窗口名称。
+ * 未指定时，嵌入页回落到入口名称，再没有则显示「在线客服」。
+ */
+export function windowTitle(
+  hostTitle: string | undefined,
+  channelTitle: string | undefined,
+  embedded: boolean,
+): string {
+  const host = hostTitle?.trim() ?? '';
+  if (host && !PRODUCT_WINDOW_TITLES.has(host)) return host;
+  const channel = channelTitle?.trim() ?? '';
+  if (channel) return channel;
+  if (embedded) return '在线客服';
+  return host || '通语客服';
+}
+
 export const DEFAULTS = {
   title: '通语客服',
   subtitle: '通语为您服务',

@@ -716,6 +716,7 @@ class Conversation {
     required this.assigneeName,
     this.acceptedAt,
     this.assignmentExpiresAt,
+    this.closedAt,
     required this.priority,
     required this.source,
     required this.lastSequence,
@@ -739,6 +740,7 @@ class Conversation {
         assigneeName: asString(json['assigneeName']),
         acceptedAt: asDate(json['acceptedAt']),
         assignmentExpiresAt: asDate(json['assignmentExpiresAt']),
+        closedAt: asDate(json['closedAt']),
         priority: asInt(json['priority']),
         source: asString(json['source']),
         lastSequence: asInt(json['lastSequence']),
@@ -765,6 +767,9 @@ class Conversation {
   final String assigneeName;
   final DateTime? acceptedAt;
   final DateTime? assignmentExpiresAt;
+
+  /// 标记解决的时间；未结束为 null。列表用它说清「什么时候结束的」。
+  final DateTime? closedAt;
   bool get needsAcceptance =>
       !isUnassigned && acceptedAt == null && assignmentExpiresAt != null;
 

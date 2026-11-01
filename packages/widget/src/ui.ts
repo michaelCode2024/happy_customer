@@ -5,8 +5,8 @@ import type { ChannelItem } from "./types.js";
 // interrupted and the caret never jumps.
 
 import { requestMicrophone, collectRecordingChunks } from './recording.js';
-import type { ResolvedOptions } from './config.js';
-import type { ChatStore, Snapshot } from './store.js';
+import { windowTitle, type ResolvedOptions } from './config.js';
+import { shouldForkAfterGrace, type ChatStore, type Snapshot } from './store.js';
 import type { ChatMessage, SearchHit } from './types.js';
 
 const ICONS = {
@@ -212,6 +212,7 @@ export class WidgetView {
   #input?: HTMLTextAreaElement;
   #messagesNode?: HTMLDivElement;
   #typingNode?: HTMLDivElement;
+  #endedNode?: HTMLDivElement;
   #listNode?: HTMLDivElement;
   #replyBar?: HTMLDivElement;
   #searchBar?: HTMLDivElement;
@@ -399,7 +400,7 @@ export class WidgetView {
         <div class="rd-header-main">
           <span class="rd-avatar">${this.#brandImg(ICONS.chat, true)}</span>
           <div class="rd-heading">
-            <strong>${escapeHtml(this.#options.embedded && this.#options.title === '通语客服' ? '在线客服' : this.#options.title)}</strong>
+            <strong>${escapeHtml(this.#windowTitle())}</strong>
             <span class="rd-service-subtitle">${escapeHtml(this.#options.subtitle)}</span>
             <span class="rd-subtitle"></span>
           </div>
@@ -430,6 +431,7 @@ export class WidgetView {
         </div>
       </div>
       <div class="rd-typing" hidden><span></span><span></span><span></span><em>对方正在输入…</em></div>
+      <div class="rd-ended" hidden></div>
       <form class="rd-composer">
         <div class="rd-reply" hidden>
           <span class="rd-reply-icon">${ICONS.quote}</span>
@@ -511,6 +513,7 @@ export class WidgetView {
     this.#input = panel.querySelector('.rd-input') as HTMLTextAreaElement;
     this.#messagesNode = panel.querySelector('.rd-messages') as HTMLDivElement;
     this.#typingNode = panel.querySelector('.rd-typing') as HTMLDivElement;
+    this.#endedNode = panel.querySelector('.rd-ended') as HTMLDivElement;
     this.#listNode = panel.querySelector('.rd-list') as HTMLDivElement;
     this.#replyBar = panel.querySelector('.rd-reply') as HTMLDivElement;
     this.#searchBar = panel.querySelector('.rd-searchbar') as HTMLDivElement;
@@ -805,7 +808,7 @@ export class WidgetView {
     subtitle.textContent = this.#subtitle(snapshot);
     const serviceSubtitle = panel.querySelector('.rd-service-subtitle') as HTMLElement;
     serviceSubtitle.textContent = snapshot.automation?.channelSubtitle || this.#options.subtitle;
-    subtitle.classList.toggle('is-online', snapshot.agentsOnline > 0);
+    subtitle.classList.toggle('is-online', snapshot.agentsOnline > 0 && snapshot.conversations.find((item) => item.id === snapshot.activeId)?.status !== 'RESOLVED');
 
     const back = panel.querySelector('.rd-back') as HTMLElement;
     const showList = snapshot.conversations.length > 1;
@@ -823,6 +826,7 @@ export class WidgetView {
     this.#renderResults(snapshot);
     this.#renderPinned(snapshot);
     this.#syncFooter(snapshot);
+    this.#syncEndedNotice(snapshot);
     const composer = this.#composer as HTMLFormElement;
     composer.hidden = showList && !snapshot.activeId;
     const uploadStatus = composer.querySelector('.rd-upload-status') as HTMLElement;
@@ -843,6 +847,10 @@ export class WidgetView {
     if (snapshot.connection !== 'OPEN') {
       return '正在重连…';
     }
+    // 会话结束时先说状态，在线/离线只是客服侧信息，不能盖住「已结束」。
+    if (snapshot.conversations.find((item) => item.id === snapshot.activeId)?.status === 'RESOLVED') {
+      return '已结束';
+    }
     if (snapshot.agentsOnline > 0) {
       return '在线';
     }
@@ -861,12 +869,13 @@ export class WidgetView {
           const title = conversation.subject?.trim() || conversation.lastMessagePreview?.trim() || '新会话';
           const active = conversation.id === snapshot.activeId ? ' is-active' : '';
           const unread = conversation.visitorUnread > 0 ? `<span class="rd-dot">${conversation.visitorUnread}</span>` : '';
+          const status = conversation.status === 'RESOLVED' ? '<span class="rd-tag">已结束</span>' : '';
           return `<button type="button" class="rd-item${active}" data-conversation="${escapeAttr(conversation.id)}">
             <span class="rd-item-main">
               <strong>${escapeHtml(title)}</strong>
               <small>${escapeHtml(conversation.lastMessagePreview ?? '')}</small>
             </span>
-            <span class="rd-item-meta">${unread}<time>${escapeHtml(conversation.lastMessageAt ? timeLabel(conversation.lastMessageAt) : '')}</time></span>
+            <span class="rd-item-meta">${unread}${status}<time>${escapeHtml(conversation.lastMessageAt ? timeLabel(conversation.lastMessageAt) : '')}</time></span>
           </button>`;
         })
         .join('');
@@ -903,10 +912,7 @@ export class WidgetView {
   }
 
   #welcomeHtml(snapshot: Snapshot): string {
-    // 欢迎标题跟渠道名走，避免 H5 已改渠道标题却仍写死「通语客服」。
-    const brand =
-      snapshot.automation?.channelTitle ||
-      (this.#options.embedded && this.#options.title === '通语客服' ? '在线客服' : this.#options.title);
+    const brand = this.#windowTitle(snapshot.automation?.channelTitle);
     return `<div class="rd-empty">
       <span class="rd-avatar lg">${this.#brandImg(ICONS.headset, false)}</span>
       <div class="rd-welcome-body"><strong>您好，欢迎来到${escapeHtml(brand)}！</strong><p>${escapeHtml(snapshot.automation?.openReply || snapshot.welcomeMessage || '我们很高兴为您服务，请问有什么可以帮您？')}</p>${this.#welcomeSuggestions(snapshot)}</div>
@@ -935,8 +941,9 @@ export class WidgetView {
     if(!panel){panel=document.createElement('div');panel.className='rd-channel';this.#messagesNode?.after(panel);}
     const c=snapshot.automation;if(!c){panel.hidden=true;return;}
     const title=this.#root.querySelector<HTMLElement>('.rd-heading strong');
-    if(title)title.textContent=c.channelTitle || (this.#options.embedded && this.#options.title === '通语客服' ? '在线客服' : this.#options.title);
-    if(c.channelTitle)this.#root.querySelector('.rd-panel')?.setAttribute('aria-label',c.channelTitle);
+    const heading = this.#windowTitle(c.channelTitle);
+    if(title)title.textContent=heading;
+    this.#root.querySelector('.rd-panel')?.setAttribute('aria-label', heading);
     const items=[...(c.menuItems??[]),...(c.quickLinks??[]),...(c.diversionLinks??[])];
     panel.innerHTML=`<div class="rd-channel-row">${items.map(i=>this.#channelItemHtml(i)).join('')}</div>`;
     // 欢迎页已有引导问题/卡片时，底部再铺一层相同 chips 会重复；有消息后再显示渠道入口。
@@ -1561,6 +1568,24 @@ export class WidgetView {
     });
   }
 
+  /** 已结束会话要在输入框上方说清楚「再发言会去哪」，访客才不会以为没人接待。 */
+  #syncEndedNotice(snapshot: Snapshot): void {
+    const node = this.#endedNode;
+    if (!node) {
+      return;
+    }
+    const active = snapshot.conversations.find((item) => item.id === snapshot.activeId);
+    if (!active || active.status !== 'RESOLVED') {
+      node.hidden = true;
+      node.textContent = '';
+      return;
+    }
+    node.hidden = false;
+    node.textContent = shouldForkAfterGrace(active, snapshot.reopenGraceMinutes)
+      ? '本次咨询已结束，继续发言会开启新咨询，进入公共队列由在线客服接待。'
+      : '本次咨询已结束，继续发言将重新由原客服接待。';
+  }
+
   #canRecord(): boolean {
     return typeof MediaRecorder !== 'undefined' && typeof navigator.mediaDevices?.getUserMedia === 'function';
   }
@@ -2099,15 +2124,16 @@ export class WidgetView {
     );
   }
 
-  /** 嵌入方对外名称：渠道标题 → 入口标题 →「在线客服」。 */
+  /** 嵌入页顶部名称。宿主 title 优先于入口聊天窗口名称。 */
+  #windowTitle(channelTitle?: string): string {
+    return windowTitle(this.#options.title, channelTitle, this.#options.embedded);
+  }
+
+  /** 嵌入方对外名称：窗口名 →「在线客服」。 */
   #embedSenderName(snapshot: Snapshot): string {
-    const channel = snapshot.automation?.channelTitle?.trim() || '';
-    if (channel && !this.#isProductSenderName(channel)) {
-      return channel;
-    }
-    const title = this.#options.title?.trim() || '';
-    if (title && !this.#isProductSenderName(title)) {
-      return title;
+    const name = this.#windowTitle(snapshot.automation?.channelTitle);
+    if (name && !this.#isProductSenderName(name)) {
+      return name;
     }
     return '在线客服';
   }
@@ -2393,6 +2419,9 @@ ${this.#options.embedded ? `
 .rd-item-main small { color: ${light ? '#7a8091' : '#9aa0ad'}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 210px; }
 .rd-item-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: 11px; color: ${light ? '#939aab' : '#8b91a0'}; }
 .rd-dot { min-width: 18px; height: 18px; border-radius: 999px; background: #ff4d4f; color: #fff; font: 600 11px/18px system-ui; text-align: center; padding: 0 5px; }
+.rd-tag { align-self: flex-end; padding: 1px 7px; border-radius: 999px; font: 500 11px/16px var(--rd-font); color: ${light ? '#8a909e' : '#9aa0ad'}; background: ${light ? '#eef1f6' : '#2b303a'}; }
+.rd-ended { flex-shrink: 0; padding: 7px 16px; font-size: 12px; line-height: 1.4; color: ${light ? '#8a5a12' : '#f0c98a'}; background: ${light ? '#fff7e8' : '#2a2418'}; }
+.rd-ended[hidden] { display: none; }
 /* 单行输入栏格局对齐微信：左语音、中输入框、右「+」；有文字时「+」换成「发送」。配色仍走企业主色与主题。 */
 .rd-composer { display: flex; flex-direction: column; border-top: 1px solid ${light ? '#e9edf3' : '#303848'}; background: ${light ? '#ffffff' : '#1e1f24'}; }
 .rd-composer[hidden] { display: none; }
@@ -2452,7 +2481,7 @@ ${this.#options.embedded ? `
   font: 500 16px/1 var(--rd-font); cursor: pointer; user-select: none; -webkit-user-select: none;
   -webkit-touch-callout: none; touch-action: none; overscroll-behavior: none;
 }
-.rd-composer.is-holding .rd-hold { background: #95ec69; border-color: #95ec69; color: #111; }
+.rd-composer.is-holding .rd-hold { background: var(--rd-accent, ${accent}); border-color: var(--rd-accent, ${accent}); color: var(--rd-accent-ink, ${accentInk}); }
 .rd-composer.is-silent .rd-hold { background: #ffb020; border-color: #ffb020; color: #111; }
 .rd-composer.is-cancel .rd-hold { background: #fa5151; border-color: #fa5151; color: #fff; }
 .rd-voice-mask {
@@ -2461,15 +2490,15 @@ ${this.#options.embedded ? `
 }
 .rd-voice-mask[hidden] { display: none; }
 .rd-voice-card {
-  width: 160px; height: 88px; border-radius: 14px; background: #95ec69; color: #fff;
+  width: 160px; height: 88px; border-radius: 14px; background: var(--rd-accent, ${accent}); color: var(--rd-accent-ink, ${accentInk});
   display: flex; align-items: center; justify-content: center;
 }
-.rd-voice-mask.is-silent .rd-voice-card { background: #ffb020; }
-.rd-voice-mask.is-cancel .rd-voice-card { background: #fa5151; }
+.rd-voice-mask.is-silent .rd-voice-card { background: #ffb020; color: #111; }
+.rd-voice-mask.is-cancel .rd-voice-card { background: #fa5151; color: #fff; }
 .rd-voice-mask.is-silent .rd-voice-waves i { animation: none; transform: scaleY(.35); }
 .rd-voice-waves { display: flex; align-items: center; justify-content: center; gap: 3px; height: 36px; }
 .rd-voice-waves i {
-  display: block; width: 3px; height: 16px; border-radius: 2px; background: #fff; transform-origin: center;
+  display: block; width: 3px; height: 16px; border-radius: 2px; background: currentColor; transform-origin: center;
   animation: rd-wave .9s ease-in-out infinite;
 }
 .rd-voice-waves i:nth-child(2), .rd-voice-waves i:nth-child(8) { animation-delay: .1s; }
@@ -2478,9 +2507,9 @@ ${this.#options.embedded ? `
 .rd-voice-waves i:nth-child(5) { animation-delay: .4s; }
 .rd-voice-mask.is-live .rd-voice-waves i { animation: none; }
 @keyframes rd-wave { 0%, 100% { transform: scaleY(.35); } 50% { transform: scaleY(1.7); } }
-.rd-voice-cancel { display: inline-flex; color: #fff; }
+.rd-voice-cancel { display: inline-flex; color: inherit; }
 .rd-voice-cancel svg { width: 28px; height: 28px; }
-.rd-voice-count { font-size: 42px; font-weight: 500; line-height: 1; color: #fff; }
+.rd-voice-count { font-size: 42px; font-weight: 500; line-height: 1; color: inherit; }
 .rd-voice-tip { margin: 16px 0 4px; color: #fff; font-size: 16px; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,.35); }
 .rd-voice-toast {
   position: absolute; left: 50%; top: 42%; z-index: 45; transform: translate(-50%, -50%);
