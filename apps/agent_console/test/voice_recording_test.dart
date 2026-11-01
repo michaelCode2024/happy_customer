@@ -98,8 +98,7 @@ class _DeniedRecorder extends VoiceRecorder {
   Future<void> start() async => throw StateError('请允许使用麦克风后重试');
 
   @override
-  Future<RecordedVoice> stop() async =>
-      throw StateError('没有正在录制的语音');
+  Future<RecordedVoice> stop() async => throw StateError('没有正在录制的语音');
 
   @override
   void cancel() {}

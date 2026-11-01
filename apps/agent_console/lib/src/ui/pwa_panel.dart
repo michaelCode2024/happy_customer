@@ -352,23 +352,28 @@ class _PwaPanelState extends State<PwaPanel> {
               border: Border(bottom: BorderSide(color: Color(0xFFD3E0FD))),
             ),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-                children: [
-                  const Icon(Icons.auto_awesome, size: 16, color: Color(0xFF3263FF)),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      '通语工作台新版本已就绪，保存草稿后即可立即应用',
-                      style: TextStyle(fontSize: 13, color: Color(0xFF0C1D40), fontWeight: FontWeight.w500),
-                    ),
+            child: Row(children: [
+              const Icon(Icons.auto_awesome,
+                  size: 16, color: Color(0xFF3263FF)),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  '通语工作台新版本已就绪，保存草稿后即可立即应用',
+                  style: TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFF0C1D40),
+                      fontWeight: FontWeight.w500),
+                ),
+              ),
+              TextButton(
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF3263FF),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   ),
-                  TextButton(
-                      style: TextButton.styleFrom(
-                        foregroundColor: const Color(0xFF3263FF),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                      ),
-                      onPressed: _confirmUpdate,
-                      child: const Text('立即更新', style: TextStyle(fontWeight: FontWeight.w600))),
-                ])));
+                  onPressed: _confirmUpdate,
+                  child: const Text('立即更新',
+                      style: TextStyle(fontWeight: FontWeight.w600))),
+            ])));
   }
 }

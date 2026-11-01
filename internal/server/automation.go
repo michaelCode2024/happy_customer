@@ -14,7 +14,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tongyu/tongyu/internal/auth"
-	"github.com/tongyu/tongyu/internal/realtime"
 )
 
 type automationRule struct {
@@ -191,26 +190,35 @@ func keywordMatch(content string, keywords []string, mode string) bool {
 	}
 	return false
 }
+
+// automationAnswer 决定一条访客消息该由谁回、回什么。
+// 优先级：菜单动作 → 转人工关键词 → 关键词规则 → 离线回复 → 收到消息回复 → 系统兜底。
+// 返回的 answer 在 handoff 时就是「正在转接」的系统通知文案。
 func automationAnswer(c automationConfig, q messageView, assigned, paused, online bool) (string, string, bool) {
 	var meta struct {
 		MenuID string `json:"menuId"`
 	}
 	_ = json.Unmarshal(q.Metadata, &meta)
+	// 菜单动作只按 id 校验：菜单内容是随入口配置全量下发给访客的，标题随时可能被改，
+	// 用标题二次比对只会让改名/删除后仍留在页面上的旧按钮变成哑弹。
 	if meta.MenuID != "" {
 		for _, items := range [][]channelItem{c.MenuItems, c.QuickLinks, c.Cards, c.DiversionLinks} {
 			for _, i := range items {
-				if i.ID == meta.MenuID && q.Content == i.Title {
-					if i.Action == "HANDOFF" {
-						return c.HandoffMessage, "handoff", true
-					}
-					if i.Action == "REPLY" {
-						return i.Value, "menu:" + i.ID, false
-					}
+				if i.ID != meta.MenuID {
+					continue
+				}
+				switch i.Action {
+				case "HANDOFF":
+					return c.HandoffMessage, "handoff", true
+				case "REPLY":
+					return i.Value, "menu:" + i.ID, false
 				}
 			}
 		}
 	}
-	if c.Enabled && keywordMatch(q.Content, c.HandoffKeywords, "CONTAINS") {
+	// 转人工是交接动作而不是机器人话术：自动回复关掉时也应该生效，
+	// 与自定义菜单里的「转人工」保持一致。
+	if keywordMatch(q.Content, c.HandoffKeywords, "CONTAINS") {
 		return c.HandoffMessage, "handoff", true
 	}
 	if !c.Enabled || paused || (c.RespectAgent && assigned) || q.MessageType != "TEXT" {
@@ -223,8 +231,14 @@ func automationAnswer(c automationConfig, q messageView, assigned, paused, onlin
 			return rule.Reply, "keyword:" + rule.ID, false
 		}
 	}
-	if !online && c.OfflineReply != "" {
-		return c.OfflineReply, "offline", false
+	// 系统兜底只在该场景没有专属文案时补位，避免被「收到消息回复」整段遮蔽。
+	if !online {
+		if c.OfflineReply != "" {
+			return c.OfflineReply, "offline", false
+		}
+		if c.SystemReply != "" {
+			return c.SystemReply, "system", false
+		}
 	}
 	if c.ReceivedReply != "" {
 		return c.ReceivedReply, "received", false
@@ -258,6 +272,14 @@ func (a *API) maybeAutomationReply(ctx context.Context, tenantID, conversationID
 	if err != nil || result.RowsAffected() == 0 {
 		return true
 	}
+	// 转人工提示就是「正在转接」那条系统通知，不再额外发一条机器人消息，
+	// 否则访客会连收两条意思重复的提示。
+	if handoff {
+		if _, _, err := a.completeHandoff(ctx, tenantID, conversationID, answer); err != nil {
+			_, _ = a.db.Exec(ctx, `delete from automation_delivery where conversation_id=$1 and question_id=$2`, conversationID, q.ID)
+		}
+		return true
+	}
 	// 访客侧展示名跟嵌入入口走：渠道标题 → 入口名称，不用产品品牌名。
 	senderName := strings.TrimSpace(c.ChannelTitle)
 	if senderName == "" {
@@ -266,24 +288,12 @@ func (a *API) maybeAutomationReply(ctx context.Context, tenantID, conversationID
 	if senderName == "" {
 		senderName = "在线客服"
 	}
-	meta := map[string]any{"automation": true, "rule": rule, "handoff": handoff, "senderName": senderName}
-	if handoff {
-		if _, _, err := a.completeHandoff(ctx, tenantID, conversationID); err != nil {
-			_, _ = a.db.Exec(ctx, `delete from automation_delivery where conversation_id=$1 and question_id=$2`, conversationID, q.ID)
-		}
-		return true
-	}
+	meta := map[string]any{"automation": true, "rule": rule, "handoff": false, "senderName": senderName}
 
-	_, err = a.appendMessage(ctx, tenantID, conversationID, messageInput{AutomationOnly: !handoff && !strings.HasPrefix(rule, "menu:"), AutomationRespectAgent: c.RespectAgent, SenderType: "SYSTEM", MessageType: "TEXT", Content: answer, ClientMessageID: "auto:" + q.ID.String(), Metadata: meta})
+	_, err = a.appendMessage(ctx, tenantID, conversationID, messageInput{AutomationOnly: !strings.HasPrefix(rule, "menu:"), AutomationRespectAgent: c.RespectAgent, SenderType: "SYSTEM", MessageType: "TEXT", Content: answer, ClientMessageID: "auto:" + q.ID.String(), Metadata: meta})
 	if err != nil {
 		_, _ = a.db.Exec(ctx, `delete from automation_delivery where conversation_id=$1 and question_id=$2`, conversationID, q.ID)
 		return true
-	}
-	if handoff {
-		a.publish(ctx, a.conversationChannels(ctx, conversationID), realtime.Event{
-			Type: "conversation.handoff", TenantID: tenantID.String(), ConversationID: conversationID.String(),
-			Data: map[string]any{"message": answer, "reason": "AUTOMATION"},
-		})
 	}
 	return true
 }

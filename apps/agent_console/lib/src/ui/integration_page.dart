@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:tongyu_agent_console/src/theme.dart';
+import 'package:tongyu_agent_console/src/ui/code_block.dart';
 import 'package:tongyu_agent_console/src/ui/console_form_dialog.dart';
 import 'package:tongyu_agent_console/src/util/channel_preview_stub.dart'
     if (dart.library.html) 'package:tongyu_agent_console/src/util/channel_preview_web.dart';
@@ -388,13 +389,13 @@ class _IntegrationPageState extends State<IntegrationPage> {
         body(
             '企业版可用。在「服务端密钥」创建写入权限 APIKey，保存在你的后端。后端从登录会话读取客户 ID，申请 5 分钟身份票据；不要让浏览器自行指定客户 ID。'),
         const SizedBox(height: 12),
-        _valueCard('后端申请客户身份票据',
+        _codeCard('后端申请客户身份票据',
             '''POST ${widget.api.server}/api/v1/open/visitor-identity
 X-TongYu-Key: <仅保存在你的后端的 APIKey>
 Content-Type: application/json
 
 {"inboxKey":"<客服入口公钥>","externalId":"<当前登录客户ID>","displayName":"<客户昵称>"}'''),
-        _valueCard(
+        _codeCard(
             '你的前端加载组件', '''// /api/customer-chat-identity 由你的后端实现，并校验当前客户登录状态。
 const identity = await fetch('/api/customer-chat-identity').then(r => r.json());
 window.TongYuSettings = {
@@ -404,27 +405,27 @@ window.TongYuSettings = {
 };
 const script = document.createElement('script');
 script.src = '${widget.api.server}/widget.js';
-document.head.appendChild(script);'''),
+document.head.appendChild(script);''', language: CodeLanguage.javascript),
         step('3. 用你的用户进服务群'),
         body(
             '客服建好「客户服务群」后，你的后端可用 APIKey 按 externalId 批量加人，再签发 identityToken 打开群页：'),
         const SizedBox(height: 12),
-        _valueCard('按用户 ID 加入服务群',
+        _codeCard('按用户 ID 加入服务群',
             '''POST ${widget.api.server}/api/v1/open/groups/<groupId>/members
 X-TongYu-Key: <APIKey>
 {"members":[{"externalId":"<客户ID>","displayName":"<昵称>"}]}'''),
-        _valueCard('打开已入群用户的群页',
+        _codeCard('打开已入群用户的群页',
             '''${widget.api.server}/groups.html?groupId=<groupId>&identityToken=<identityToken>'''),
       ] else if (_canGroups) ...[
         // 旗舰/专业版：群聊与 open members 已开，但没有 identityToken；用 member-token 对齐开放 API。
         body(
             '当前套餐已支持服务群与开放 API 加人，但不含「登录客户身份票据」。私聊组件仍用匿名接入；要把你们系统的用户 ID 进服务群，请走下方 member-token（企业版才可签发 identityToken）。'),
         const SizedBox(height: 12),
-        _valueCard('按用户 ID 加入服务群',
+        _codeCard('按用户 ID 加入服务群',
             '''POST ${widget.api.server}/api/v1/open/groups/<groupId>/members
 X-TongYu-Key: <仅保存在你的后端的 APIKey>
 {"members":[{"externalId":"<客户ID>","displayName":"<昵称>"}]}'''),
-        _valueCard('签发群会话并打开群页', '''// 你的后端校验本站登录后调用：
+        _codeCard('签发群会话并打开群页', '''// 你的后端校验本站登录后调用：
 // POST /api/v1/open/groups/<groupId>/member-token
 // {"externalId":"<客户ID>"} → { token, visitorId, groupId }
 const groupId = '<groupId>';
@@ -440,7 +441,7 @@ sessionStorage.setItem(
     actorKind: 'widget'
   })
 );
-location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent(groupId);'''),
+location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent(groupId);''', language: CodeLanguage.javascript),
       ] else
         Container(
           width: double.infinity,
@@ -501,13 +502,7 @@ location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent
           _channelSection(theme),
           const SizedBox(height: 22),
           _contentSection(theme),
-          const SizedBox(height: 18),
-          // iframe 是网站内嵌的另一种方式，不应混入 H5 和 App 的接入说明。
-          if (_selectedChannel == 0 &&
-              asString(_snippet!['iframeHtml']).isNotEmpty)
-            _valueCard('网站内嵌 iframe 片段（可选）', asString(_snippet!['iframeHtml'])),
-          if (asString(_snippet!['openApiBase']).isNotEmpty)
-            _valueCard('开放 API 根路径', asString(_snippet!['openApiBase'])),
+          ..._otherWays(),
         ],
       ],
     ]);
@@ -560,11 +555,17 @@ location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent
                 ...h5Uri.queryParameters,
                 'source': 'APP',
               }).toString();
+    // 每个渠道有没有真的产生过会话，由后端按 conversation.source 汇总。
+    final activity = (_snippet!['channelActivity'] as Map?) ?? const {};
+    bool live(String source) => asString(activity[source]).isNotEmpty;
     return [
-      _Channel('网站组件', '将聊天窗口嵌入你的网站', Icons.language_rounded, script, h5),
-      _Channel('H5 链接', '发送链接，即可发起在线咨询', Icons.link_rounded, h5, h5),
-      _Channel('App WebView', '在 App 中打开客服页面', Icons.phone_android_rounded, app,
-          app),
+      _Channel('网站组件', '将聊天窗口嵌入你的网站', Icons.language_rounded, script, h5,
+          active: live('WEB')),
+      _Channel('H5 链接', '发送链接，即可发起在线咨询', Icons.link_rounded, h5, h5,
+          active: live('H5')),
+      _Channel(
+          'App WebView', '在 App 中打开客服页面', Icons.phone_android_rounded, app, app,
+          active: live('APP')),
     ];
   }
 
@@ -626,6 +627,22 @@ location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent
                               ? scheme.primary
                               : scheme.onSurfaceVariant),
                       const Spacer(),
+                      if (channel.active) ...[
+                        Container(
+                          width: 5,
+                          height: 5,
+                          decoration: const BoxDecoration(
+                              color: RelayTheme.success,
+                              shape: BoxShape.circle),
+                        ),
+                        const SizedBox(width: 4),
+                        Text('已接入',
+                            style: RelayTheme.uiText(
+                                fontSize: 10.5,
+                                height: 1.3,
+                                color: RelayTheme.success)),
+                        const SizedBox(width: 6),
+                      ],
                       if (selected)
                         Icon(Icons.check_rounded,
                             size: 15, color: scheme.primary)
@@ -662,26 +679,21 @@ location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent
     final current = _channels()[_selectedChannel];
     final isScript = _selectedChannel == 0;
     final description = isScript
-        ? '将以下代码添加到网站页面，由组件管理访客会话。'
+        ? '粘到 </body> 之前，或任意布局模板的页脚。无需构建工具，不阻塞首屏。'
         : _selectedChannel == 1
             ? '复制链接用于 H5 页面跳转或分享，客户打开后即可咨询。'
             : '在 App 的 WebView 中加载以下链接，source=APP 用于标识 App 会话来源。';
-    final actions = <Widget>[
-      OutlinedButton.icon(
-          onPressed:
-              current.content.isEmpty ? null : () => _copy(current.content),
-          icon: const Icon(Icons.copy_rounded, size: 15),
-          label: Text(isScript ? '复制安装代码' : '复制链接')),
-      FilledButton.icon(
-          onPressed: current.preview.isEmpty
-              ? null
-              : () {
-                  if (!openChannelPreview(current.preview))
-                    _notice('请在网页版打开渠道预览');
-                },
-          icon: const Icon(Icons.open_in_new, size: 15),
-          label: const Text('预览效果')),
-    ];
+    final inboxKey = asString(_snippet?['inboxKey']);
+    final preview = OutlinedButton.icon(
+        onPressed: current.preview.isEmpty
+            ? null
+            : () {
+                if (!openChannelPreview(current.preview)) {
+                  _notice('请在网页版打开渠道预览');
+                }
+              },
+        icon: const Icon(Icons.open_in_new, size: 15),
+        label: const Text('预览效果'));
     final heading = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -702,35 +714,157 @@ location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 heading,
-                const SizedBox(height: 10),
-                Wrap(spacing: 8, runSpacing: 8, children: actions),
+                const SizedBox(height: 8),
+                Align(alignment: Alignment.centerLeft, child: preview),
               ]);
         }
-        return Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+        return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(child: heading),
           const SizedBox(width: 16),
-          Wrap(spacing: 8, children: actions),
+          preview,
         ]);
       }),
-      const SizedBox(height: 12),
-      Container(
-        width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
-        decoration: BoxDecoration(
-          color: scheme.surface,
-          borderRadius: BorderRadius.circular(RelayTheme.radiusMd),
-          border: Border.all(color: scheme.outlineVariant),
+      const SizedBox(height: 11),
+      // 复制不再是标题行里的按钮：它落在代码块自己的工具栏上，就在要复制的东西旁边。
+      if (isScript)
+        ConsoleCodeBlock(
+          variants: _scriptVariants(),
+          emphasis: inboxKey.isEmpty ? const [] : [inboxKey],
+          copyLabel: '安装代码',
+        )
+      else
+        ConsoleCodeBlock(
+          code: current.content,
+          language: CodeLanguage.plain,
+          copyLabel: '链接',
+          showLineNumbers: false,
         ),
-        child: SelectableText(
-            current.content.isEmpty ? '当前入口暂未提供该渠道的接入内容。' : current.content,
-            style: RelayTheme.codeText(
-                fontSize: 12, height: 1.75, color: scheme.onSurface)),
-      ),
-      const SizedBox(height: 10),
+      const SizedBox(height: 9),
+      _accessStatus(theme),
+      const SizedBox(height: 8),
       Text('入口标识可以用于前端接入，服务端密钥仅供你的服务器使用。',
           style: RelayTheme.uiText(
               fontSize: 11, height: 1.5, color: scheme.onSurfaceVariant)),
     ]);
+  }
+
+  /// 安装代码的三种贴法。三份都是能直接跑的：HTML 靠 data-* 自动挂载，
+  /// JavaScript 走 `window.TongYu.mount`，React 在 effect 里注入脚本。
+  List<CodeVariant> _scriptVariants() {
+    final snippet = _snippet ?? const <String, dynamic>{};
+    final script = asString(snippet['script']);
+    final scriptUrl = asString(snippet['scriptUrl']);
+    final inboxKey = asString(snippet['inboxKey']);
+    final endpoint = scriptUrl.endsWith('/widget.js')
+        ? scriptUrl.substring(0, scriptUrl.length - '/widget.js'.length)
+        : widget.api.server;
+    return [
+      CodeVariant(
+        label: 'HTML',
+        // 落点写进代码第一行：注释跟着复制一起走，用户粘完还记得贴哪儿。
+        code: script.isEmpty
+            ? ''
+            : '<!-- 通语客服：粘到 </body> 之前 -->\n$script',
+        language: CodeLanguage.html,
+      ),
+      CodeVariant(
+        label: 'JavaScript',
+        code: '''// widget.js 已加载时，用挂载 API 自己控制出现时机
+window.TongYu.mount({
+  endpoint: '$endpoint',
+  inboxKey: '$inboxKey'
+});''',
+        language: CodeLanguage.javascript,
+      ),
+      CodeVariant(
+        label: 'React',
+        code: '''// 在 useEffect 里注入脚本，卸载时清掉
+useEffect(() => {
+  const script = document.createElement('script');
+  script.src = '$scriptUrl';
+  script.defer = true;
+  script.dataset.endpoint = '$endpoint';
+  script.dataset.inboxKey = '$inboxKey';
+  document.body.appendChild(script);
+  return () => script.remove();
+}, []);''',
+        language: CodeLanguage.javascript,
+      ),
+    ];
+  }
+
+  /// 接入状态条。`lastVisitorAt` 来自访客表：组件一打开就会 upsert 访客，
+  /// 所以这里能比「有没有会话」更早告诉用户代码是不是真的生效了。
+  Widget _accessStatus(ThemeData theme) {
+    final scheme = theme.colorScheme;
+    final at = DateTime.tryParse(asString(_snippet?['lastVisitorAt']))?.toLocal();
+    final live = at != null;
+    return Row(children: [
+      Container(
+        width: 5,
+        height: 5,
+        decoration: BoxDecoration(
+            color: live ? RelayTheme.success : scheme.outline,
+            shape: BoxShape.circle),
+      ),
+      const SizedBox(width: 6),
+      Expanded(
+        child: Text(
+          live ? '${_ago(at)}有访客通过此入口接入' : '尚未检测到接入，装好后点这里确认',
+          style: RelayTheme.uiText(
+              fontSize: 11, height: 1.4, color: scheme.onSurfaceVariant),
+        ),
+      ),
+      TextButton(
+        onPressed: _loading ? null : _load,
+        style: TextButton.styleFrom(
+          minimumSize: const Size(0, 26),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+        child: Text(live ? '重新检测' : '检测接入',
+            style: RelayTheme.uiText(fontSize: 11)),
+      ),
+    ]);
+  }
+
+  static String _ago(DateTime at) {
+    final diff = DateTime.now().difference(at);
+    if (diff.inMinutes < 1) return '刚刚';
+    if (diff.inMinutes < 60) return '${diff.inMinutes} 分钟前';
+    if (diff.inHours < 24) return '${diff.inHours} 小时前';
+    return '${diff.inDays} 天前';
+  }
+
+  /// iframe 与开放 API 是同一件事的次要贴法，收进折叠区，不让它们和安装代码
+  /// 平铺争视觉权重。
+  List<Widget> _otherWays() {
+    final iframeHtml = asString(_snippet?['iframeHtml']);
+    final openApi = asString(_snippet?['openApiBase']);
+    final showIframe = _selectedChannel == 0 && iframeHtml.isNotEmpty;
+    final children = <Widget>[
+      if (showIframe)
+        ConsoleCodeBlock(
+            code: iframeHtml,
+            language: CodeLanguage.html,
+            copyLabel: 'iframe 片段'),
+      if (openApi.isNotEmpty)
+        ConsoleCodeBlock(
+            code: openApi,
+            language: CodeLanguage.plain,
+            showLineNumbers: false,
+            copyLabel: 'API 根路径'),
+    ];
+    if (children.isEmpty) return const [];
+    final summary = [
+      if (showIframe) 'iframe 内嵌',
+      if (openApi.isNotEmpty) '开放 API',
+    ].join(' · ');
+    return [
+      const SizedBox(height: 18),
+      _Collapsible(
+          title: '其他接入方式', summary: summary, children: children),
+    ];
   }
 
   Widget _hookTab(ThemeData theme) =>
@@ -808,6 +942,27 @@ location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent
                   )),
           ]),
       ]);
+
+  /// 指南里的代码：标签在上，深色代码块在下。和「接入内容」共用同一套呈现，
+  /// 免得同一页里代码有两种长相。
+  Widget _codeCard(String label, String code,
+      {CodeLanguage language = CodeLanguage.plain}) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Text(label,
+              style: RelayTheme.uiText(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: scheme.onSurfaceVariant)),
+        ),
+        ConsoleCodeBlock(code: code, language: language, copyLabel: '代码'),
+      ]),
+    );
+  }
 
   /// 值块：标签 + 等宽值 + 内联复制，三者收在同一个表面里。
   ///
@@ -956,11 +1111,78 @@ location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent
 /// 一个接入渠道的展示信息：标题、说明、图标，以及要复制的内容和要预览的地址。
 class _Channel {
   const _Channel(
-      this.title, this.description, this.icon, this.content, this.preview);
+      this.title, this.description, this.icon, this.content, this.preview,
+      {this.active = false});
 
   final String title;
   final String description;
   final IconData icon;
   final String content;
   final String preview;
+
+  /// 该渠道是否已经产生过真实会话，决定卡片上要不要挂「已接入」。
+  final bool active;
+}
+
+/// 折叠区：一行标题，右侧挂摘要，展开才露出次要内容。
+class _Collapsible extends StatefulWidget {
+  const _Collapsible({
+    required this.title,
+    required this.summary,
+    required this.children,
+  });
+
+  final String title;
+  final String summary;
+  final List<Widget> children;
+
+  @override
+  State<_Collapsible> createState() => _CollapsibleState();
+}
+
+class _CollapsibleState extends State<_Collapsible> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final radius = BorderRadius.circular(RelayTheme.radiusMd);
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Material(
+        color: scheme.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: radius,
+          side: BorderSide(color: scheme.outlineVariant),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => setState(() => _open = !_open),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+            child: Row(children: [
+              Text(widget.title,
+                  style: RelayTheme.uiText(
+                      fontSize: 12, fontWeight: FontWeight.w600)),
+              const Spacer(),
+              if (!_open)
+                Text(widget.summary,
+                    style: RelayTheme.uiText(
+                        fontSize: 11, color: scheme.onSurfaceVariant)),
+              const SizedBox(width: 8),
+              AnimatedRotation(
+                turns: _open ? 0.5 : 0,
+                duration: const Duration(milliseconds: 180),
+                child: Icon(Icons.expand_more_rounded,
+                    size: 16, color: scheme.onSurfaceVariant),
+              ),
+            ]),
+          ),
+        ),
+      ),
+      if (_open) ...[
+        const SizedBox(height: 10),
+        ...widget.children,
+      ],
+    ]);
+  }
 }

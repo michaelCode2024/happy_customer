@@ -15,6 +15,22 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// iframe 与开放 API 收在折叠区里，展开状态会跨渠道切换保留，
+  /// 所以先看开放 API 是否可见再决定要不要点。
+  Future<void> openOtherWays(WidgetTester tester) async {
+    if (find
+        .text('https://chat.example.com/api/v1/open')
+        .evaluate()
+        .isNotEmpty) {
+      return;
+    }
+    await Scrollable.ensureVisible(tester.element(find.text('其他接入方式')),
+        alignment: 0.5);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('其他接入方式'));
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('entry selector loads the corresponding installation snippet',
       (tester) async {
     final api = TongYuApi(
@@ -71,18 +87,25 @@ void main() {
     await tester.tap(find.text('商城').last);
     await settleRequests(tester);
     expect(find.text('site-two'), findsOneWidget);
-    expect(find.text('<script>two</script>'), findsOneWidget);
-    expect(find.text('网站内嵌 iframe 片段（可选）'), findsOneWidget);
-    await Scrollable.ensureVisible(tester.element(find.text('H5 链接')), alignment: 0.5);
+    // 安装代码第一行是落点注释，跟着复制一起走。
+    expect(find.textContaining('<script>two</script>'), findsOneWidget);
+    expect(find.textContaining('粘到 </body> 之前'), findsWidgets);
+    expect(find.text('其他接入方式'), findsOneWidget);
+    await openOtherWays(tester);
+    expect(find.textContaining('<iframe src='), findsOneWidget);
+    expect(find.text('https://chat.example.com/api/v1/open'), findsOneWidget);
+    await Scrollable.ensureVisible(tester.element(find.text('H5 链接')),
+        alignment: 0.5);
     await tester.pumpAndSettle();
     await tester.tap(find.text('H5 链接'));
     await settleRequests(tester);
     expect(find.text('H5 链接 · 访问链接'), findsOneWidget);
-    expect(find.text('复制链接'), findsOneWidget);
     expect(find.text('https://chat.example.com/h5/site-two'), findsOneWidget);
-    expect(find.text('<script>two</script>'), findsNothing);
-    expect(find.text('网站内嵌 iframe 片段（可选）'), findsNothing);
-    await Scrollable.ensureVisible(tester.element(find.text('App WebView')), alignment: 0.5);
+    expect(find.textContaining('<script>two</script>'), findsNothing);
+    // iframe 是网站组件专属的贴法，切到 H5 后不该留在折叠区里。
+    expect(find.textContaining('<iframe src='), findsNothing);
+    await Scrollable.ensureVisible(tester.element(find.text('App WebView')),
+        alignment: 0.5);
     await tester.pumpAndSettle();
     await tester.tap(find.text('App WebView'));
     await settleRequests(tester);
@@ -90,14 +113,15 @@ void main() {
     expect(find.text('https://chat.example.com/h5/site-two?source=APP'),
         findsOneWidget);
     expect(find.text('https://chat.example.com/h5/site-two'), findsNothing);
-    expect(find.text('网站内嵌 iframe 片段（可选）'), findsNothing);
+    expect(find.textContaining('<iframe src='), findsNothing);
     await Scrollable.ensureVisible(tester.element(find.text('网站组件')),
         alignment: 0.5);
     await tester.pumpAndSettle();
     await tester.tap(find.text('网站组件'));
     await settleRequests(tester);
-    expect(find.text('<script>two</script>'), findsOneWidget);
-    expect(find.text('网站内嵌 iframe 片段（可选）'), findsOneWidget);
+    expect(find.textContaining('<script>two</script>'), findsOneWidget);
+    await openOtherWays(tester);
+    expect(find.textContaining('<iframe src='), findsOneWidget);
     expect(find.text('https://chat.example.com/api/v1/open'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -301,5 +325,166 @@ void main() {
     expect(find.textContaining('member-token'), findsWidgets);
     expect(find.textContaining('tongyu-group-'), findsOneWidget);
     expect(find.textContaining('visitor-identity'), findsNothing);
+  });
+
+  testWidgets('安装代码可在 HTML / JavaScript / React 之间切换', (tester) async {
+    final api = TongYuApi(
+      server: 'https://chat.example.com',
+      client: MockClient((request) async {
+        final data = switch (request.url.path) {
+          '/api/v1/console/entitlements' => {
+              'plan': 'ENTERPRISE',
+              'features': {
+                'integrations': true,
+                'identity': true,
+                'groups': true,
+              },
+            },
+          '/api/v1/admin/inboxes' => {
+              'items': [
+                {'id': 'one', 'name': '官网'}
+              ]
+            },
+          '/api/v1/admin/inboxes/one/snippet' => {
+              'inboxKey': 'site-one',
+              'script':
+                  '<script src="https://chat.example.com/widget.js" data-inbox-key="site-one"></script>',
+              'scriptUrl': 'https://chat.example.com/widget.js',
+              'iframe': 'https://chat.example.com/h5/site-one',
+              'iframeHtml':
+                  '<iframe src="https://chat.example.com/h5/site-one"></iframe>',
+              'openApiBase': 'https://chat.example.com/api/v1/open',
+            },
+          '/api/v1/admin/api-keys' => {'items': []},
+          '/api/v1/admin/webhooks' => {'items': [], 'availableEvents': []},
+          _ => throw StateError('unexpected ${request.url.path}'),
+        };
+        return http.Response.bytes(utf8.encode(jsonEncode(data)), 200);
+      }),
+    )..token = 'test-session';
+    addTearDown(api.close);
+    await tester.pumpWidget(MaterialApp(home: IntegrationPage(api: api)));
+    await settleRequests(tester);
+    await tester.tap(find.text('接入渠道'));
+    await settleRequests(tester);
+
+    // 默认落在 HTML：靠 data-* 自动挂载，落点注释在第一行。
+    expect(find.textContaining('粘到 </body> 之前'), findsWidgets);
+    expect(find.textContaining('window.TongYu.mount'), findsNothing);
+
+    await tester.ensureVisible(find.text('JavaScript'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('JavaScript'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('window.TongYu.mount'), findsOneWidget);
+    expect(find.textContaining('inboxKey: \'site-one\''), findsOneWidget);
+    expect(find.textContaining('<script'), findsNothing);
+
+    await tester.tap(find.text('React'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('useEffect'), findsOneWidget);
+    expect(find.textContaining('window.TongYu.mount'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('接入状态与渠道徽标读接口返回的接入数据', (tester) async {
+    final recent =
+        DateTime.now().toUtc().subtract(const Duration(minutes: 3));
+    final api = TongYuApi(
+      server: 'https://chat.example.com',
+      client: MockClient((request) async {
+        final data = switch (request.url.path) {
+          '/api/v1/console/entitlements' => {
+              'plan': 'ENTERPRISE',
+              'features': {
+                'integrations': true,
+                'identity': true,
+                'groups': true,
+              },
+            },
+          '/api/v1/admin/inboxes' => {
+              'items': [
+                {'id': 'one', 'name': '官网'}
+              ]
+            },
+          '/api/v1/admin/inboxes/one/snippet' => {
+              'inboxKey': 'site-one',
+              'script':
+                  '<script src="https://chat.example.com/widget.js"></script>',
+              'scriptUrl': 'https://chat.example.com/widget.js',
+              'iframe': 'https://chat.example.com/h5/site-one',
+              'iframeHtml':
+                  '<iframe src="https://chat.example.com/h5/site-one"></iframe>',
+              'openApiBase': 'https://chat.example.com/api/v1/open',
+              'lastVisitorAt': recent.toIso8601String(),
+              // 只有 WEB 与 H5 真的产生过会话，App 没有。
+              'channelActivity': {
+                'WEB': recent.toIso8601String(),
+                'H5': recent.toIso8601String(),
+              },
+            },
+          '/api/v1/admin/api-keys' => {'items': []},
+          '/api/v1/admin/webhooks' => {'items': [], 'availableEvents': []},
+          _ => throw StateError('unexpected ${request.url.path}'),
+        };
+        return http.Response.bytes(utf8.encode(jsonEncode(data)), 200);
+      }),
+    )..token = 'test-session';
+    addTearDown(api.close);
+    await tester.pumpWidget(MaterialApp(home: IntegrationPage(api: api)));
+    await settleRequests(tester);
+    await tester.tap(find.text('接入渠道'));
+    await settleRequests(tester);
+
+    expect(find.textContaining('分钟前有访客通过此入口接入'), findsOneWidget);
+    expect(find.text('重新检测'), findsOneWidget);
+    expect(find.text('已接入'), findsNWidgets(2));
+  });
+
+  testWidgets('没有访客记录时状态条提示尚未接入', (tester) async {
+    final api = TongYuApi(
+      server: 'https://chat.example.com',
+      client: MockClient((request) async {
+        final data = switch (request.url.path) {
+          '/api/v1/console/entitlements' => {
+              'plan': 'ENTERPRISE',
+              'features': {
+                'integrations': true,
+                'identity': true,
+                'groups': true,
+              },
+            },
+          '/api/v1/admin/inboxes' => {
+              'items': [
+                {'id': 'one', 'name': '官网'}
+              ]
+            },
+          '/api/v1/admin/inboxes/one/snippet' => {
+              'inboxKey': 'site-one',
+              'script':
+                  '<script src="https://chat.example.com/widget.js"></script>',
+              'scriptUrl': 'https://chat.example.com/widget.js',
+              'iframe': 'https://chat.example.com/h5/site-one',
+              'iframeHtml': '',
+              'openApiBase': '',
+              'lastVisitorAt': null,
+              'channelActivity': <String, String>{},
+            },
+          '/api/v1/admin/api-keys' => {'items': []},
+          '/api/v1/admin/webhooks' => {'items': [], 'availableEvents': []},
+          _ => throw StateError('unexpected ${request.url.path}'),
+        };
+        return http.Response.bytes(utf8.encode(jsonEncode(data)), 200);
+      }),
+    )..token = 'test-session';
+    addTearDown(api.close);
+    await tester.pumpWidget(MaterialApp(home: IntegrationPage(api: api)));
+    await settleRequests(tester);
+    await tester.tap(find.text('接入渠道'));
+    await settleRequests(tester);
+
+    expect(find.text('尚未检测到接入，装好后点这里确认'), findsOneWidget);
+    expect(find.text('检测接入'), findsOneWidget);
+    expect(find.text('已接入'), findsNothing);
   });
 }

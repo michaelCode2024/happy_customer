@@ -67,7 +67,9 @@ class _StatsPageState extends State<StatsPage> {
     final theme = Theme.of(context);
     final overview = _overview;
     return Scaffold(
-      backgroundColor: Theme.of(context).brightness == Brightness.dark ? Theme.of(context).scaffoldBackgroundColor : const Color(0xFFEEF2FB),
+      backgroundColor: Theme.of(context).brightness == Brightness.dark
+          ? Theme.of(context).scaffoldBackgroundColor
+          : const Color(0xFFEEF2FB),
       appBar: WorkspaceAppBar(
         title: '数据统计',
         description: '了解会话趋势、响应效率和团队工作量',
@@ -154,8 +156,8 @@ class _StatsPageState extends State<StatsPage> {
   Widget _cardGrid(BuildContext context, StatsOverview overview) {
     // 调度台只留核心 KPI；其余量在趋势表 / 排行里看，避免一排分析卡片。
     final cards = <_Metric>[
-      _Metric('进行中', '${overview.openConversations}', Icons.chat_bubble_outline_rounded,
-          const Color(0xFF3263FF)),
+      _Metric('进行中', '${overview.openConversations}',
+          Icons.chat_bubble_outline_rounded, const Color(0xFF3263FF)),
       _Metric('待分配', '${overview.queued}', Icons.inbox_outlined,
           const Color(0xFFF97316)),
       _Metric('在线坐席', '${overview.onlineAgents}', Icons.people_outline_rounded,
@@ -179,8 +181,7 @@ class _StatsPageState extends State<StatsPage> {
                 ? 3
                 : 2;
         const gap = 12.0;
-        final width =
-            (constraints.maxWidth - (columns - 1) * gap) / columns;
+        final width = (constraints.maxWidth - (columns - 1) * gap) / columns;
         return Wrap(
           spacing: gap,
           runSpacing: gap,

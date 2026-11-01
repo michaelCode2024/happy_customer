@@ -28,8 +28,10 @@ class AiAssistPanel extends StatefulWidget {
   final String conversationId;
   final List<ChatMessage> messages;
   final ValueChanged<AssistResult> onAdopt;
+
   /// 无控制器时用的静态草稿（单测 / 侧栏兜底）。
   final String draftText;
+
   /// 输入区控制器：润色读实时草稿，避免每键重建整条助手。
   final TextEditingController? draftController;
   final bool writingOnly;
@@ -82,8 +84,8 @@ class _AiAssistPanelState extends State<AiAssistPanel> {
       _activeTask = null;
       return;
     }
-    final messagesChanged = _messageVersion(oldWidget.messages) !=
-        _messageVersion(widget.messages);
+    final messagesChanged =
+        _messageVersion(oldWidget.messages) != _messageVersion(widget.messages);
     // 消息变了：旧建议已失效。草稿键入不整条清空，避免收起条高度来回跳。
     if (messagesChanged) {
       _result = null;
@@ -229,9 +231,7 @@ class _AiAssistPanelState extends State<AiAssistPanel> {
                       ),
                     ),
                   Icon(
-                    _open
-                        ? Icons.keyboard_arrow_up
-                        : Icons.keyboard_arrow_down,
+                    _open ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
                     size: 18,
                     color: scheme.onSurfaceVariant,
                   ),

@@ -9,6 +9,34 @@ import { windowTitle, type ResolvedOptions } from './config.js';
 import { shouldForkAfterGrace, type ChatStore, type Snapshot } from './store.js';
 import type { ChatMessage, SearchHit } from './types.js';
 
+type WelcomeSnapshot = Pick<Snapshot, 'messages' | 'loadingThread' | 'conversations' | 'activeId'>;
+
+/** 欢迎页只在确实没有历史时出现；加载中不能闪默认话术。 */
+export function welcomeVisible(snapshot: WelcomeSnapshot): boolean {
+  if (snapshot.messages.length > 0 || snapshot.loadingThread) {
+    return false;
+  }
+  const active = snapshot.conversations.find((item) => item.id === snapshot.activeId);
+  // 会话列表已知道有消息序号，历史还在路上：继续等，不画欢迎语。
+  return !(active && (active.lastSequence ?? 0) > 0);
+}
+
+/**
+ * 底部渠道条（智能菜单 / 快捷方式 / 智能引流）的可见性。
+ * 欢迎页已经渲染引导问题或图文卡片时不再重复铺一层 chips；否则必须显示——
+ * 只配菜单、不配引导问题的入口，首屏会一个入口都没有。
+ */
+export function channelBarVisible(
+  snapshot: WelcomeSnapshot & Pick<Snapshot, 'automation'>,
+  itemCount: number,
+): boolean {
+  if (itemCount === 0) return false;
+  if (snapshot.conversations.length > 1 && !snapshot.activeId) return false;
+  const c = snapshot.automation;
+  const welcomeHasActions = Boolean(c && ((c.guideQuestions?.length ?? 0) > 0 || (c.cards?.length ?? 0) > 0));
+  return !(welcomeVisible(snapshot) && welcomeHasActions);
+}
+
 const ICONS = {
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M7 12h10"/></svg>',
   smile: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M7.5 14a5 5 0 0 0 9 0"/><circle cx="8.5" cy="9" r=".7"/><circle cx="15.5" cy="9" r=".7"/></svg>',
@@ -921,15 +949,7 @@ export class WidgetView {
 
   /** 有历史时不要再插欢迎语；加载中用占位，避免刷新闪默认客服话术。 */
   #shouldShowWelcome(snapshot: Snapshot): boolean {
-    if (snapshot.messages.length > 0 || snapshot.loadingThread) {
-      return false;
-    }
-    const active = snapshot.conversations.find((item) => item.id === snapshot.activeId);
-    // 会话列表已知道有消息序号，历史还在路上：继续等，不画欢迎语。
-    if (active && (active.lastSequence ?? 0) > 0) {
-      return false;
-    }
-    return true;
+    return welcomeVisible(snapshot);
   }
 
   #threadLoadingHtml(): string {
@@ -946,11 +966,9 @@ export class WidgetView {
     this.#root.querySelector('.rd-panel')?.setAttribute('aria-label', heading);
     const items=[...(c.menuItems??[]),...(c.quickLinks??[]),...(c.diversionLinks??[])];
     panel.innerHTML=`<div class="rd-channel-row">${items.map(i=>this.#channelItemHtml(i)).join('')}</div>`;
-    // 欢迎页已有引导问题/卡片时，底部再铺一层相同 chips 会重复；有消息后再显示渠道入口。
-    panel.hidden =
-      items.length === 0 ||
-      (snapshot.conversations.length > 1 && !snapshot.activeId) ||
-      this.#shouldShowWelcome(snapshot);
+    // 欢迎页已有引导问题/卡片时，底部再铺一层相同 chips 会重复；没有这些入口时必须显示，
+    // 否则菜单类配置在首屏等于不存在。
+    panel.hidden = !channelBarVisible(snapshot, items.length);
     this.#bindChannelActions(panel,snapshot);
   }
 

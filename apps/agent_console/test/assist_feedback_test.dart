@@ -12,14 +12,19 @@ void main() {
     var fail = true;
     final actions = <String>[];
     AssistResult? adopted;
-    final api = TongYuApi(server: 'http://localhost', client: MockClient((r) async {
-      expect(r.url.path, '/api/v1/console/assist/a1/feedback');
-      actions.add(jsonDecode(r.body)['action'] as String);
-      return http.Response('{}', fail ? 500 : 200);
-    }));
-    const result = AssistResult(task: 'SUGGEST', text: '准备网站域名', interactionId: 'a1', available: true);
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: AssistFeedbackActions(api: api,
-      result: result, onAdopt: (r) => adopted = r))));
+    final api = TongYuApi(
+        server: 'http://localhost',
+        client: MockClient((r) async {
+          expect(r.url.path, '/api/v1/console/assist/a1/feedback');
+          actions.add(jsonDecode(r.body)['action'] as String);
+          return http.Response('{}', fail ? 500 : 200);
+        }));
+    const result = AssistResult(
+        task: 'SUGGEST', text: '准备网站域名', interactionId: 'a1', available: true);
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: AssistFeedbackActions(
+                api: api, result: result, onAdopt: (r) => adopted = r))));
     await tester.tap(find.text('插入输入框'));
     await tester.pumpAndSettle();
     expect(adopted, isNull);
@@ -34,6 +39,6 @@ void main() {
     await tester.tap(find.text('需改进'));
     await tester.pumpAndSettle();
     expect(find.text('已反馈：需改进'), findsOneWidget);
-    expect(actions, ['ADOPT','ADOPT','HELPFUL','NEEDS_WORK']);
+    expect(actions, ['ADOPT', 'ADOPT', 'HELPFUL', 'NEEDS_WORK']);
   });
 }

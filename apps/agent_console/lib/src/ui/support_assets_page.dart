@@ -288,6 +288,7 @@ class _SupportAssetsPageState extends State<SupportAssetsPage> {
                                 const SizedBox(height: 6),
                                 Text(
                                     '客服反馈：有用 ${_feedback['helpful'] ?? 0} · 需改进 ${_feedback['needsWork'] ?? 0}。插入和发送均不代表问题已解决。'),
+                                const SizedBox(height: 8),
                                 SwitchListTile(
                                     title: const Text('查看已补充知识的问题'),
                                     value: _showResolved,
@@ -298,6 +299,8 @@ class _SupportAssetsPageState extends State<SupportAssetsPage> {
                                 if (_gaps.isEmpty) const Text('当前列表暂无问题。'),
                                 for (final gap in _gaps)
                                   Card(
+                                      // 卡片主题 margin 为 0，列表卡片必须自己留间距。
+                                      margin: const EdgeInsets.only(bottom: 10),
                                       child: ListTile(
                                           title:
                                               Text(asString(gap['question'])),
@@ -387,9 +390,11 @@ class _AssetEditorState extends State<_AssetEditor> {
                   child: SingleChildScrollView(
                       child: Column(mainAxisSize: MainAxisSize.min, children: [
                     if (_error != null)
-                      Text(_error!,
-                          style: TextStyle(
-                              color: Theme.of(context).colorScheme.error)),
+                      Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: Text(_error!,
+                              style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error))),
                     TextFormField(
                         controller: _title,
                         decoration: InputDecoration(

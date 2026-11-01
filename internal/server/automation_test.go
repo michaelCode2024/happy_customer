@@ -43,14 +43,50 @@ func TestAutomationPrecedenceAndHandoff(t *testing.T) {
 	if reply != "9:00–18:00" {
 		t.Fatal("explicit menu ignored")
 	}
-	reply, _, _ = automationAnswer(c, messageView{Content: "forged", Metadata: raw, MessageType: "TEXT"}, true, true, true)
+	// 后台把标题改成「营业时间」后，访客手里的旧按钮内容仍是旧标题，
+	// 必须继续按 id 命中，否则点下去变成哑弹。
+	c.MenuItems[0].Title = "营业时间"
+	reply, _, _ = automationAnswer(c, messageView{Content: "服务时间", Metadata: raw, MessageType: "TEXT"}, true, true, true)
+	if reply != "9:00–18:00" {
+		t.Fatal("renamed menu broke stale button")
+	}
+	// 但客户端不能凭空指定一个不存在的菜单动作。
+	forged, _ := json.Marshal(map[string]string{"menuId": "not-exist"})
+	reply, _, _ = automationAnswer(c, messageView{Content: "服务时间", Metadata: forged, MessageType: "TEXT"}, true, true, true)
 	if reply != "" {
-		t.Fatal("forged menu accepted")
+		t.Fatal("unknown menu id accepted")
 	}
 	c.Enabled = false
 	reply, _, _ = automationAnswer(c, messageView{Content: "退款", MessageType: "TEXT"}, false, false, true)
 	if reply != "" {
 		t.Fatal("disabled bot replied")
+	}
+	// 转人工是交接动作而不是机器人话术，关掉自动回复也应该生效。
+	reply, rule, handoff := automationAnswer(c, messageView{Content: "请转人工", MessageType: "TEXT"}, false, false, true)
+	if reply != c.HandoffMessage || rule != "handoff" || !handoff {
+		t.Fatalf("disabled automation dropped handoff keyword: %q %q %v", reply, rule, handoff)
+	}
+}
+
+// 系统兜底只在对应场景没填文案时补位，不能被「收到消息回复」整段遮蔽。
+func TestAutomationSystemReplyFillsMissingCopy(t *testing.T) {
+	c := defaultAutomation()
+	c.Enabled = true
+	c.SystemReply = "系统兜底"
+	c.ReceivedReply = "收到你的消息"
+	if reply, rule, _ := automationAnswer(c, messageView{MessageType: "TEXT", Content: "问题"}, false, false, false); reply != "系统兜底" || rule != "system" {
+		t.Fatalf("offline without offline reply should use system fallback: %q %q", reply, rule)
+	}
+	if reply, rule, _ := automationAnswer(c, messageView{MessageType: "TEXT", Content: "问题"}, false, false, true); reply != "收到你的消息" || rule != "received" {
+		t.Fatalf("online should keep received reply: %q %q", reply, rule)
+	}
+	c.ReceivedReply = ""
+	if reply, rule, _ := automationAnswer(c, messageView{MessageType: "TEXT", Content: "问题"}, false, false, true); reply != "系统兜底" || rule != "system" {
+		t.Fatalf("online without received reply should use system fallback: %q %q", reply, rule)
+	}
+	c.OfflineReply = "离线专属"
+	if reply, rule, _ := automationAnswer(c, messageView{MessageType: "TEXT", Content: "问题"}, false, false, false); reply != "离线专属" || rule != "offline" {
+		t.Fatalf("offline reply must win over system fallback: %q %q", reply, rule)
 	}
 }
 func TestAutomationRejectsUnsafeAndAmbiguousMenu(t *testing.T) {
@@ -114,6 +150,7 @@ func TestAutomationDatabaseDelivery(t *testing.T) {
 	c.Enabled = true
 	c.CooldownSeconds = 3600
 	c.ReceivedReply = "收到你的咨询"
+	c.HandoffMessage = "自定义转接提示"
 	raw, _ := json.Marshal(c)
 	run(`insert into inbox_automation(inbox_id,tenant_id,config) values($1,$2,$3)`, inbox, tenant, raw)
 	if len(a.publicAutomation(ctx, inbox)) == 0 {
@@ -143,6 +180,14 @@ func TestAutomationDatabaseDelivery(t *testing.T) {
 	pool.QueryRow(ctx, `select bot_paused from conversation where id=$1`, conversation).Scan(&paused)
 	if !paused {
 		t.Fatal("handoff did not pause bot")
+	}
+	// 配置的转人工提示必须就是访客看到的那条转接通知，不能退化成固定文案。
+	var transferNotice string
+	if err := pool.QueryRow(ctx, `select content from message where conversation_id=$1 and metadata->>'receptionState'='TRANSFERRING' order by sequence limit 1`, conversation).Scan(&transferNotice); err != nil {
+		t.Fatalf("transferring notice missing: %v", err)
+	}
+	if transferNotice != c.HandoffMessage {
+		t.Fatalf("configured handoff notice not delivered: %q", transferNotice)
 	}
 	pool.QueryRow(ctx, `select count(*) from message where conversation_id=$1`, conversation).Scan(&count)
 	if count != 3 {

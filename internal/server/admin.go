@@ -665,14 +665,39 @@ func (a *API) adminSnippet(w http.ResponseWriter, r *http.Request, p auth.Princi
 	// 宿主项目用 iframe 嵌 H5：宽高由父页控制；parentOrigin 限制 postMessage 目标。
 	iframeTag := `<iframe src="` + html.EscapeString(h5URL) + `?parentOrigin=*"` +
 		` title="通语客服" style="border:0;width:100%;height:100%;min-height:520px" allow="microphone;clipboard-write"></iframe>`
+	// 接入状态。visitor.last_seen_at 是「有人来过」的信号：组件一打开就会 upsert
+	// 访客，不必等到发消息，所以它比会话时间更早反映接入是否生效。
+	// conversation.source 用来区分哪些渠道真的发起过会话，供渠道卡显示「已接入」。
+	var lastVisitorAt *time.Time
+	if err := a.db.QueryRow(r.Context(),
+		`select max(last_seen_at) from visitor where tenant_id=$1 and inbox_id=$2`,
+		p.TenantID, id).Scan(&lastVisitorAt); err != nil {
+		lastVisitorAt = nil
+	}
+	channelActivity := map[string]string{}
+	if rows, err := a.db.Query(r.Context(),
+		`select source, max(created_at) from conversation
+		  where tenant_id=$1 and inbox_id=$2 group by source`,
+		p.TenantID, id); err == nil {
+		for rows.Next() {
+			var source string
+			var at time.Time
+			if rows.Scan(&source, &at) == nil {
+				channelActivity[source] = at.UTC().Format(time.RFC3339)
+			}
+		}
+		rows.Close()
+	}
 	respond(w, 200, map[string]any{
-		"inboxKey":    publicKey,
-		"script":      snippet,
-		"scriptUrl":   base + "/widget.js",
-		"iframe":      h5URL,
-		"appUrl":      h5URL + "?source=APP",
-		"iframeHtml":  iframeTag,
-		"openApiBase": base + "/api/v1/open",
+		"inboxKey":        publicKey,
+		"script":          snippet,
+		"scriptUrl":       base + "/widget.js",
+		"iframe":          h5URL,
+		"appUrl":          h5URL + "?source=APP",
+		"iframeHtml":      iframeTag,
+		"openApiBase":     base + "/api/v1/open",
+		"lastVisitorAt":   lastVisitorAt,
+		"channelActivity": channelActivity,
 		"hostNotes": []string{
 			"网站脚本：把 script 贴进页面即可",
 			"业务系统 iframe：用 iframeHtml，或自行指向 iframe URL 并监听 window.message（source=tongyu）",

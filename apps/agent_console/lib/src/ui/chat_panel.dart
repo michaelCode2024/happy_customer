@@ -72,6 +72,43 @@ class _ChatPanelState extends State<ChatPanel> {
   String? _uploadError;
   final Map<String, int> _voiceDurations = {};
 
+  /// 标记解决后的小提示：挂在窗口右上角的浮层里，几秒后自动消失。
+  /// 走 root overlay 而不是会话区，是为了不挤占布局、也不盖住聊天内容。
+  OverlayEntry? _resolveToastEntry;
+
+  void _showResolveToast() {
+    _dismissResolveToast();
+    final overlay = Overlay.maybeOf(context, rootOverlay: true);
+    if (overlay == null) return;
+    late final OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (overlayContext) => Positioned(
+        top: MediaQuery.paddingOf(overlayContext).top + 12,
+        right: 16,
+        child: _ResolveToastCard(
+          onViewResolved: () =>
+              widget.workbench.setFilter(QueueFilter.resolved),
+          onClosed: () {
+            if (!identical(_resolveToastEntry, entry)) return;
+            _resolveToastEntry = null;
+            entry.remove();
+            entry.dispose();
+          },
+        ),
+      ),
+    );
+    _resolveToastEntry = entry;
+    overlay.insert(entry);
+  }
+
+  void _dismissResolveToast() {
+    final entry = _resolveToastEntry;
+    if (entry == null) return;
+    _resolveToastEntry = null;
+    entry.remove();
+    entry.dispose();
+  }
+
   Future<void> _attachVoice(RecordedVoice voice) async {
     final conversationId = widget.workbench.selectedId;
     if (conversationId == null) throw StateError('请先选择会话');
@@ -202,6 +239,12 @@ class _ChatPanelState extends State<ChatPanel> {
   @override
   void dispose() {
     _readTimer?.cancel();
+    final toast = _resolveToastEntry;
+    _resolveToastEntry = null;
+    if (toast != null) {
+      toast.remove();
+      toast.dispose();
+    }
     if (_draftLoaded && _draftConversationId != null) {
       unawaited(widget.workbench.api.saveDraft(
           _draftConversationId!, _composer.text,
@@ -786,6 +829,7 @@ class _ChatPanelState extends State<ChatPanel> {
               onBack: widget.onBack,
               onOpenAssist: _mobileAi ? _showMobileAssist : null,
               onToggleSearch: _toggleSearch,
+              onResolved: _showResolveToast,
             ),
             if (_searchOpen)
               _SearchBar(
@@ -1071,6 +1115,7 @@ class _ThreadHeader extends StatelessWidget {
     this.onOpenProfile,
     this.onBack,
     this.onOpenAssist,
+    this.onResolved,
   });
 
   final Conversation conversation;
@@ -1080,6 +1125,9 @@ class _ThreadHeader extends StatelessWidget {
   final VoidCallback? onOpenProfile;
   final VoidCallback? onBack;
   final VoidCallback? onOpenAssist;
+
+  /// 标记解决成功后回调，用于在会话区浮一条小提示。
+  final VoidCallback? onResolved;
 
   @override
   Widget build(BuildContext context) {
@@ -1414,57 +1462,12 @@ class _ThreadHeader extends StatelessWidget {
     if (!context.mounted) {
       return;
     }
-    final messenger = ScaffoldMessenger.of(context);
-    // 顶栏反馈避开右下角等待卡片；本轮标记只关掉自己的条，避免 6 秒后误关下一次反馈。
-    messenger.hideCurrentSnackBar();
-    messenger.clearMaterialBanners();
-    workbench.setSuppressReceptionFab(true);
-    var pending = true;
-
-    void dismissResolveFeedback() {
-      if (!pending) return;
-      pending = false;
-      messenger.hideCurrentMaterialBanner();
-      workbench.setSuppressReceptionFab(false);
-    }
-
-    messenger.clearMaterialBanners();
-    messenger.showMaterialBanner(
-      MaterialBanner(
-        key: const ValueKey('desk-resolve-feedback-banner'),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        content: const Text('已标记解决'),
-        actions: <Widget>[
-          Semantics(
-            button: true,
-            label: '查看已结束',
-            identifier: 'desk.resolve.viewResolved',
-            child: TextButton(
-              key: const ValueKey('desk-resolve-view-resolved'),
-              onPressed: () {
-                workbench.setFilter(QueueFilter.resolved);
-                dismissResolveFeedback();
-              },
-              child: const Text('查看已结束'),
-            ),
-          ),
-          TextButton(
-            key: const ValueKey('desk-resolve-feedback-dismiss'),
-            onPressed: dismissResolveFeedback,
-            child: const Text('关闭'),
-          ),
-        ],
-      ),
-    );
-    Future<void>.delayed(const Duration(seconds: 6), () {
-      if (!pending) return;
-      if (!context.mounted) {
-        pending = false;
-        workbench.setSuppressReceptionFab(false);
-        return;
-      }
-      dismissResolveFeedback();
-    });
+    // 反馈不再用顶栏横幅：横幅会把整个工作区往下挤一格。改由会话区里
+    // 浮一张小提示卡（见 _ResolveToastCard），不占布局位置。
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..clearMaterialBanners();
+    onResolved?.call();
   }
 
   Future<void> _showTransfer(BuildContext context) async {
@@ -1482,6 +1485,151 @@ class _ThreadHeader extends StatelessWidget {
     await showDialog<void>(
       context: context,
       builder: (context) => _TagDialog(workbench: workbench),
+    );
+  }
+}
+
+/// 操作成功的轻提示。做成右上角浮起的小胶囊而不是顶栏横幅：横幅会把整块
+/// 工作区往下挤，而这里只需要一句话加一个「去看看」的入口。
+/// 计时与淡出都自己管，动画放完再回调 [onClosed] 让调用方摘掉浮层。
+class _ResolveToastCard extends StatefulWidget {
+  const _ResolveToastCard({
+    required this.onViewResolved,
+    required this.onClosed,
+  });
+
+  /// 点了「查看已结束」。
+  final VoidCallback onViewResolved;
+
+  /// 淡出结束，浮层可以移除了。
+  final VoidCallback onClosed;
+
+  @override
+  State<_ResolveToastCard> createState() => _ResolveToastCardState();
+}
+
+class _ResolveToastCardState extends State<_ResolveToastCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 180),
+  );
+  late final CurvedAnimation _curve =
+      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic);
+  late final Animation<Offset> _slide =
+      Tween<Offset>(begin: const Offset(0, -0.35), end: Offset.zero)
+          .animate(_curve);
+  Timer? _timer;
+  bool _closing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.forward();
+    _timer = Timer(const Duration(seconds: 5), _close);
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _curve.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _close() async {
+    if (_closing) return;
+    _closing = true;
+    _timer?.cancel();
+    await _controller.reverse();
+    if (mounted) widget.onClosed();
+  }
+
+  void _viewResolved() {
+    widget.onViewResolved();
+    unawaited(_close());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 320),
+      child: FadeTransition(
+        opacity: _curve,
+        child: SlideTransition(
+          position: _slide,
+          child: Material(
+            key: const ValueKey('desk-resolve-toast'),
+            color: scheme.surface,
+            elevation: 6,
+            shadowColor: Colors.black.withOpacity(.18),
+            shape: StadiumBorder(
+              side: BorderSide(color: scheme.outlineVariant),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 5, 4, 5),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  const Icon(
+                    Icons.check_circle_rounded,
+                    size: 16,
+                    color: Color(0xFF12B76A),
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      '已标记解决',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w500,
+                        color: scheme.onSurface,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  Semantics(
+                    button: true,
+                    label: '查看已结束',
+                    identifier: 'desk.resolve.viewResolved',
+                    child: TextButton(
+                      key: const ValueKey('desk-resolve-view-resolved'),
+                      onPressed: _viewResolved,
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(0, 30),
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        foregroundColor: scheme.primary,
+                        textStyle: theme.textTheme.bodySmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      child: const Text('查看已结束'),
+                    ),
+                  ),
+                  IconButton(
+                    key: const ValueKey('desk-resolve-toast-dismiss'),
+                    onPressed: () => unawaited(_close()),
+                    tooltip: '关闭',
+                    iconSize: 15,
+                    padding: EdgeInsets.zero,
+                    visualDensity: VisualDensity.compact,
+                    constraints:
+                        const BoxConstraints(minWidth: 28, minHeight: 28),
+                    icon: Icon(
+                      Icons.close_rounded,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

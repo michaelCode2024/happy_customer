@@ -70,6 +70,7 @@ void main() {
     // 选中会话后才能吃事件；这里用 select 会打 API，改为验证公开 getter 初始值。
     expect(workbench.visitorLastReadSequence, 0);
     expect(workbench.visitorLastDeliveredSequence, 0);
-    expect(workbench.receiptFor(agentMessage(sequence: 3)), MessageReceipt.unread);
+    expect(
+        workbench.receiptFor(agentMessage(sequence: 3)), MessageReceipt.unread);
   });
 }

@@ -736,21 +736,27 @@ class _MemberDialogState extends State<_MemberDialog> {
                           if (widget.inboxes.isEmpty)
                             const Text('请先创建客服入口，再分配给成员。'),
                           for (final i in widget.inboxes)
-                            CheckboxListTile(
-                                contentPadding: EdgeInsets.zero,
-                                title: Text(asString(i['name'])),
-                                value: _selected.contains(i['id']),
-                                onChanged: (v) => setState(() {
-                                      v == true
-                                          ? _selected.add(asString(i['id']))
-                                          : _selected.remove(i['id']);
-                                    })),
+                            Padding(
+                                // contentPadding 清零后逐行复选会贴在一起。
+                                padding: const EdgeInsets.only(bottom: 6),
+                                child: CheckboxListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    title: Text(asString(i['name'])),
+                                    value: _selected.contains(i['id']),
+                                    onChanged: (v) => setState(() {
+                                          v == true
+                                              ? _selected.add(asString(i['id']))
+                                              : _selected.remove(i['id']);
+                                        }))),
                           if (widget.member != null)
-                            SwitchListTile(
-                                contentPadding: EdgeInsets.zero,
-                                title: const Text('启用账号'),
-                                value: _active,
-                                onChanged: (v) => setState(() => _active = v)),
+                            Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: SwitchListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    title: const Text('启用账号'),
+                                    value: _active,
+                                    onChanged: (v) =>
+                                        setState(() => _active = v))),
                           if (widget.member == null)
                             const Text('系统将生成初始密码，仅显示一次。成员首次登录后须尽快修改密码。'),
                         ])))),
@@ -904,6 +910,7 @@ class _InboxDialogState extends State<_InboxDialog> {
                                   _auto = v;
                                   if (!v) _autoAccept = false;
                                 })),
+                        const SizedBox(height: 6),
                         SwitchListTile(
                             contentPadding: EdgeInsets.zero,
                             title: const Text('分配后自动接单'),
@@ -982,6 +989,7 @@ class _InboxDialogState extends State<_InboxDialog> {
                                     value: 'FIXED', child: Text('指定成员'))
                               ],
                               onChanged: (v) => setState(() => _strategy = v!)),
+                          const SizedBox(height: 16),
                           TextFormField(
                               controller: _acceptanceTimeout,
                               keyboardType: TextInputType.number,

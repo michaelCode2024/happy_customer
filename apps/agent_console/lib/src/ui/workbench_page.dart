@@ -796,7 +796,8 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
             );
             final body = Column(children: [
               // 居中引导卡只在浏览器、且确实缺权限或推送时弹一次；横幅继续做持续提醒。
-              if (!isHostedConsole) AlertEnableCardHost(api: widget.session.api),
+              if (!isHostedConsole)
+                AlertEnableCardHost(api: widget.session.api),
               if (!isHostedConsole) AlertEnableBanner(api: widget.session.api),
               if (!isHostedConsole)
                 PwaPanel(

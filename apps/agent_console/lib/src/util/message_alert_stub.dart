@@ -176,8 +176,8 @@ class _BatteryOptimizationCardState extends State<_BatteryOptimizationCard> {
           decoration: BoxDecoration(
             color: theme.colorScheme.primary.withOpacity(.07),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-                color: theme.colorScheme.primary.withOpacity(.22)),
+            border:
+                Border.all(color: theme.colorScheme.primary.withOpacity(.22)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -192,8 +192,7 @@ class _BatteryOptimizationCardState extends State<_BatteryOptimizationCard> {
                     child: Text(
                       '长时间息屏后收不到提醒？多半是系统把通语后台「冻」了。'
                       '把它设为电池优化「不受限制」，本机轮询提醒才会持续及时。',
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(height: 1.45),
+                      style: theme.textTheme.bodySmall?.copyWith(height: 1.45),
                     ),
                   ),
                 ],
@@ -210,7 +209,9 @@ class _BatteryOptimizationCardState extends State<_BatteryOptimizationCard> {
                     : FilledButton.tonalIcon(
                         onPressed: _open,
                         icon: Icon(
-                          exempt ? Icons.check_circle_outline : Icons.open_in_new_outlined,
+                          exempt
+                              ? Icons.check_circle_outline
+                              : Icons.open_in_new_outlined,
                           size: 16,
                         ),
                         label: Text(exempt ? '已设为不受限制' : '去设置：允许后台运行'),

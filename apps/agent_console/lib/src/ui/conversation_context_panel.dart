@@ -81,7 +81,8 @@ class _ConversationContextPanelState extends State<ConversationContextPanel> {
             for (var i = 0; i < 2; i++)
               Expanded(
                   child: InkWell(
-                key: ValueKey(i == 0 ? 'context-tab-profile' : 'context-tab-ai'),
+                key:
+                    ValueKey(i == 0 ? 'context-tab-profile' : 'context-tab-ai'),
                 onTap: () => _switchTab(i),
                 child: Container(
                   alignment: Alignment.center,

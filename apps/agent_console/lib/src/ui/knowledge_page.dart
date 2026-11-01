@@ -293,7 +293,9 @@ class _KnowledgePageState extends State<KnowledgePage> {
     final theme = Theme.of(context);
     final canEdit = widget.session.agent?.canManageKnowledge ?? false;
     return Scaffold(
-        backgroundColor: Theme.of(context).brightness == Brightness.dark ? Theme.of(context).scaffoldBackgroundColor : const Color(0xFFEEF2FB),
+        backgroundColor: Theme.of(context).brightness == Brightness.dark
+            ? Theme.of(context).scaffoldBackgroundColor
+            : const Color(0xFFEEF2FB),
         body: LayoutBuilder(builder: (context, viewport) {
           final content =
               Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -543,8 +545,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
   }) {
     final scheme = theme.colorScheme;
     return Material(
-      color:
-          selected ? scheme.primary.withValues(alpha: 0.1) : scheme.surface,
+      color: selected ? scheme.primary.withValues(alpha: 0.1) : scheme.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
         side: BorderSide(
@@ -583,8 +584,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
                   style: TextStyle(
                     fontSize: 10.5,
                     fontWeight: FontWeight.w600,
-                    color:
-                        selected ? scheme.primary : scheme.onSurfaceVariant,
+                    color: selected ? scheme.primary : scheme.onSurfaceVariant,
                   ),
                 ),
               ),
@@ -662,8 +662,8 @@ class _KnowledgePageState extends State<KnowledgePage> {
                 hintText: '搜索标题或内容',
                 hintStyle: TextStyle(
                   fontSize: 12,
-                  color: theme.colorScheme.onSurfaceVariant
-                      .withValues(alpha: 0.7),
+                  color:
+                      theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
                 ),
                 prefixIcon: const Icon(Icons.search_rounded, size: 15),
                 prefixIconConstraints:
@@ -713,13 +713,10 @@ class _KnowledgePageState extends State<KnowledgePage> {
                     icon: const Icon(Icons.arrow_drop_down, size: 18),
                     items: const [
                       DropdownMenuItem(value: '', child: Text('全部状态')),
-                      DropdownMenuItem(
-                          value: 'ACTIVE', child: Text('已启用')),
-                      DropdownMenuItem(
-                          value: 'DISABLED', child: Text('已停用')),
+                      DropdownMenuItem(value: 'ACTIVE', child: Text('已启用')),
+                      DropdownMenuItem(value: 'DISABLED', child: Text('已停用')),
                     ],
-                    onChanged: (v) =>
-                        setState(() => _statusFilter = v ?? ''),
+                    onChanged: (v) => setState(() => _statusFilter = v ?? ''),
                   ),
                 ),
               ),
@@ -739,8 +736,8 @@ class _KnowledgePageState extends State<KnowledgePage> {
                 color: theme.colorScheme.surface,
                 border: Border(
                   bottom: BorderSide(
-                    color: theme.colorScheme.outlineVariant
-                        .withValues(alpha: 0.7),
+                    color:
+                        theme.colorScheme.outlineVariant.withValues(alpha: 0.7),
                   ),
                 ),
               ),
@@ -789,14 +786,16 @@ class _KnowledgePageState extends State<KnowledgePage> {
                         : ListView.separated(
                             padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
                             itemCount: _visibleEntries.length,
-                            separatorBuilder: (_, __) =>
-                                Divider(height: 1, color: theme.colorScheme.outlineVariant.withOpacity(.7)),
+                            separatorBuilder: (_, __) => Divider(
+                                height: 1,
+                                color: theme.colorScheme.outlineVariant
+                                    .withOpacity(.7)),
                             itemBuilder: (context, index) {
                               final entry = _visibleEntries[index];
                               final expanded = _expandedEntry == entry.id;
                               return Padding(
-                                  padding: const EdgeInsets.fromLTRB(
-                                      10, 10, 10, 8),
+                                  padding:
+                                      const EdgeInsets.fromLTRB(10, 10, 10, 8),
                                   child: Column(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
@@ -812,8 +811,8 @@ class _KnowledgePageState extends State<KnowledgePage> {
                                                 width: 26,
                                                 height: 26,
                                                 decoration: BoxDecoration(
-                                                    color: theme.colorScheme
-                                                        .primary
+                                                    color: theme
+                                                        .colorScheme.primary
                                                         .withOpacity(.07),
                                                     borderRadius:
                                                         BorderRadius.circular(
@@ -828,10 +827,10 @@ class _KnowledgePageState extends State<KnowledgePage> {
                                               Expanded(
                                                   child: Text(entry.title,
                                                       maxLines: 1,
-                                                      overflow: TextOverflow
-                                                          .ellipsis,
-                                                      style: theme.textTheme
-                                                          .titleSmall
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                      style: theme
+                                                          .textTheme.titleSmall
                                                           ?.copyWith(
                                                               fontSize: 13))),
                                               WorkspaceTag(
@@ -846,8 +845,10 @@ class _KnowledgePageState extends State<KnowledgePage> {
                                               const SizedBox(width: 4),
                                               Icon(
                                                   expanded
-                                                      ? Icons.expand_less_rounded
-                                                      : Icons.expand_more_rounded,
+                                                      ? Icons
+                                                          .expand_less_rounded
+                                                      : Icons
+                                                          .expand_more_rounded,
                                                   size: 18,
                                                   color: theme.colorScheme
                                                       .onSurfaceVariant)
@@ -863,17 +864,16 @@ class _KnowledgePageState extends State<KnowledgePage> {
                                                 Text(
                                                     _categoryLabel(
                                                         entry.categoryId),
-                                                    style: theme.textTheme
-                                                        .labelSmall
+                                                    style: theme
+                                                        .textTheme.labelSmall
                                                         ?.copyWith(
                                                             fontSize: 10.5,
                                                             color: theme
                                                                 .colorScheme
                                                                 .onSurfaceVariant)),
-                                                Text(
-                                                    '检索命中 ${entry.hitCount} 次',
-                                                    style: theme.textTheme
-                                                        .labelSmall
+                                                Text('检索命中 ${entry.hitCount} 次',
+                                                    style: theme
+                                                        .textTheme.labelSmall
                                                         ?.copyWith(
                                                             fontSize: 10.5,
                                                             color: theme
@@ -882,8 +882,8 @@ class _KnowledgePageState extends State<KnowledgePage> {
                                                 if (entry.updatedAt != null)
                                                   Text(
                                                       '更新 ${entry.updatedAt!.toLocal().toString().split(' ').first}',
-                                                      style: theme.textTheme
-                                                          .labelSmall
+                                                      style: theme
+                                                          .textTheme.labelSmall
                                                           ?.copyWith(
                                                               fontSize: 10.5,
                                                               color: theme
@@ -923,31 +923,32 @@ class _KnowledgePageState extends State<KnowledgePage> {
                                           Padding(
                                             padding:
                                                 const EdgeInsets.only(left: 35),
-                                            child: entry.questionExamples.isEmpty
-                                                ? const Text('尚未填写相似问法，建议补充客户常用表达。',
+                                            child: entry
+                                                    .questionExamples.isEmpty
+                                                ? const Text(
+                                                    '尚未填写相似问法，建议补充客户常用表达。',
                                                     style: TextStyle(
                                                         fontSize: 12,
-                                                        color: Color(
-                                                            0xFF6B7A90)))
+                                                        color:
+                                                            Color(0xFF6B7A90)))
                                                 : Wrap(
                                                     spacing: 5,
                                                     runSpacing: 5,
                                                     children: [
-                                                      for (final q
-                                                          in entry
-                                                              .questionExamples)
-                                                        ActionChip(
-                                                            visualDensity:
-                                                                VisualDensity
-                                                                    .compact,
-                                                            label: Text(q,
-                                                                style: const TextStyle(
-                                                                    fontSize:
-                                                                        11)),
-                                                            onPressed: () =>
-                                                                _fillQuestion(
-                                                                    q))
-                                                    ]),
+                                                        for (final q in entry
+                                                            .questionExamples)
+                                                          ActionChip(
+                                                              visualDensity:
+                                                                  VisualDensity
+                                                                      .compact,
+                                                              label: Text(q,
+                                                                  style: const TextStyle(
+                                                                      fontSize:
+                                                                          11)),
+                                                              onPressed: () =>
+                                                                  _fillQuestion(
+                                                                      q))
+                                                      ]),
                                           )
                                         ],
                                         Wrap(spacing: 6, children: [

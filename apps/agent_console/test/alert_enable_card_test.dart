@@ -14,16 +14,14 @@ void main() {
 
     test('浏览器已拒绝时只能引导去系统设置', () {
       expect(
-        alertCardStage(
-            permission: 'denied', pushChecked: false, pushOff: true),
+        alertCardStage(permission: 'denied', pushChecked: false, pushOff: true),
         AlertCardStage.openSettings,
       );
     });
 
     test('已允许但推送没订上时提示再允许一次', () {
       expect(
-        alertCardStage(
-            permission: 'granted', pushChecked: true, pushOff: true),
+        alertCardStage(permission: 'granted', pushChecked: true, pushOff: true),
         AlertCardStage.finishPush,
       );
     });

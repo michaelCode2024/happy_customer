@@ -385,9 +385,11 @@ class _AlertEnableCardHostState extends State<AlertEnableCardHost> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(c, false), child: const Text('稍后')),
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('稍后')),
           FilledButton(
-            onPressed: () => Navigator.pop(c, notificationPermission == 'granted'),
+            onPressed: () =>
+                Navigator.pop(c, notificationPermission == 'granted'),
             child: const Text('重新检查'),
           ),
         ],

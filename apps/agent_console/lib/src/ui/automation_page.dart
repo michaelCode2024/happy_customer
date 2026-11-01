@@ -256,7 +256,7 @@ class _AutomationPageState extends State<AutomationPage> {
           _description(
               '系统客服处理无人在线和普通兜底两个场景。优先顺序：转人工 → 关键词 → 离线回复 → 收到消息回复 → 系统兜底。'),
           _field('offlineReply', '无人在线时的回复'),
-          _field('systemReply', '系统兜底回复')
+          _field('systemReply', '系统兜底回复', hint: '上面两个场景没填文案时由它补位，填了专属文案则不生效')
         ]);
       case 4:
         return Column(children: [
@@ -272,18 +272,21 @@ class _AutomationPageState extends State<AutomationPage> {
             help: '与渠道的自定义菜单共用同一份数据，支持回复、链接和转人工。');
       case 7:
         return Column(children: [
-          _description('触发后停止机器人回复，并保留原有客服分配结果；未分配会话进入客服待接队列。'),
+          _description(
+              '触发后停止机器人回复，并保留原有客服分配结果；未分配会话进入客服待接队列。转人工不受「启用自动回复」开关限制。'),
           _field('handoffKeywords', '转人工关键词', list: true, hint: '每行一个关键词，包含匹配'),
-          _field('handoffMessage', '转人工提示')
+          _field('handoffMessage', '转人工提示', hint: '访客触发转人工时收到的转接提示')
         ]);
       default:
         return Column(children: [
           SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('启用自动回复'),
-              subtitle: const Text('关闭后关键词和自动兜底停止，自定义菜单仍可使用'),
+              subtitle: const Text('关闭后关键词与自动回复停止；转人工关键词和自定义菜单仍可用'),
               value: _config['enabled'] == true,
               onChanged: (v) => _change('enabled', v)),
+          // contentPadding 清零后两个开关会贴在一起，这里补一点行距。
+          const SizedBox(height: 6),
           SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('人工接管后停止自动回复'),
@@ -325,6 +328,7 @@ class _AutomationPageState extends State<AutomationPage> {
             padding: EdgeInsets.all(32), child: Text('还没有规则，添加后可自动回答常见问题。')),
       for (final rule in rules)
         Card(
+            margin: const EdgeInsets.only(bottom: 12),
             child: ListTile(
                 leading: Switch(
                     value: rule['enabled'] == true,
@@ -365,45 +369,46 @@ class _AutomationPageState extends State<AutomationPage> {
                     content: SizedBox(
                         width: 500,
                         child: SingleChildScrollView(
-                            child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                              TextField(
-                                  controller: title,
-                                  decoration:
-                                      const InputDecoration(labelText: '规则名称')),
-                              TextField(
-                                  controller: words,
-                                  minLines: 2,
-                                  maxLines: 4,
-                                  decoration: const InputDecoration(
-                                      labelText: '关键词，每行一个')),
-                              DropdownButtonFormField<String>(
-                                  value: mode,
-                                  items: const [
-                                    DropdownMenuItem(
-                                        value: 'CONTAINS', child: Text('包含匹配')),
-                                    DropdownMenuItem(
-                                        value: 'EXACT', child: Text('完全匹配'))
-                                  ],
-                                  onChanged: (v) => set(() => mode = v!),
-                                  decoration:
-                                      const InputDecoration(labelText: '匹配方式')),
-                              TextField(
-                                  controller: reply,
-                                  minLines: 3,
-                                  maxLines: 6,
-                                  decoration:
-                                      const InputDecoration(labelText: '回复内容')),
-                              TextField(
-                                  controller: priority,
-                                  keyboardType: TextInputType.number,
-                                  decoration: const InputDecoration(
-                                      labelText: '优先级，越大越优先')),
-                              if (error != null)
-                                Text(error!,
-                                    style: const TextStyle(color: Colors.red))
-                            ]))),
+                            child: _DialogFields([
+                          TextField(
+                              controller: title,
+                              decoration:
+                                  const InputDecoration(labelText: '规则名称')),
+                          TextField(
+                              controller: words,
+                              minLines: 2,
+                              maxLines: 4,
+                              decoration:
+                                  const InputDecoration(labelText: '关键词，每行一个')),
+                          DropdownButtonFormField<String>(
+                              value: mode,
+                              isExpanded: true,
+                              style: Theme.of(ctx).textTheme.bodyMedium,
+                              items: const [
+                                DropdownMenuItem(
+                                    value: 'CONTAINS', child: Text('包含匹配')),
+                                DropdownMenuItem(
+                                    value: 'EXACT', child: Text('完全匹配'))
+                              ],
+                              onChanged: (v) => set(() => mode = v!),
+                              decoration:
+                                  const InputDecoration(labelText: '匹配方式')),
+                          TextField(
+                              controller: reply,
+                              minLines: 3,
+                              maxLines: 6,
+                              decoration:
+                                  const InputDecoration(labelText: '回复内容')),
+                          TextField(
+                              controller: priority,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                  labelText: '优先级，越大越优先')),
+                          if (error != null)
+                            Text(error!,
+                                style: TextStyle(
+                                    color: Theme.of(ctx).colorScheme.error))
+                        ]))),
                     actions: [
                       TextButton(
                           onPressed: () => Navigator.pop(ctx),
@@ -517,6 +522,8 @@ class _AutomationPageState extends State<AutomationPage> {
         const Padding(padding: EdgeInsets.all(32), child: Text('还没有配置内容')),
       for (final item in items)
         Card(
+            // 卡片主题的 margin 是 0，列表卡片必须自己留间距。
+            margin: const EdgeInsets.only(bottom: 12),
             child: ListTile(
                 leading: Icon(item['action'] == 'HANDOFF'
                     ? Icons.support_agent
@@ -526,6 +533,7 @@ class _AutomationPageState extends State<AutomationPage> {
                 title: Text(asString(item['title'])),
                 subtitle: Text(
                     '${item['action'] == 'HANDOFF' ? '转人工' : item['action'] == 'LINK' ? '跳转链接' : '自动回复'} · ${item['value'] ?? ''}${cards ? '\n${item['description'] ?? ''}' : ''}'),
+                isThreeLine: cards,
                 onTap: () => _editItem(key, cards: cards, existing: item),
                 trailing: IconButton(
                     tooltip: '删除',
@@ -555,51 +563,52 @@ class _AutomationPageState extends State<AutomationPage> {
                     content: SizedBox(
                         width: 500,
                         child: SingleChildScrollView(
-                            child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                              TextField(
-                                  controller: title,
-                                  decoration:
-                                      const InputDecoration(labelText: '标题')),
-                              if (cards) ...[
-                                TextField(
-                                    controller: description,
-                                    minLines: 2,
-                                    maxLines: 4,
-                                    decoration: const InputDecoration(
-                                        labelText: '卡片说明')),
-                                TextField(
-                                    controller: image,
-                                    decoration: const InputDecoration(
-                                        labelText: '图片地址（http/https，可选）'))
+                            child: _DialogFields([
+                          TextField(
+                              controller: title,
+                              decoration:
+                                  const InputDecoration(labelText: '标题')),
+                          if (cards) ...[
+                            TextField(
+                                controller: description,
+                                minLines: 2,
+                                maxLines: 4,
+                                decoration:
+                                    const InputDecoration(labelText: '卡片说明')),
+                            TextField(
+                                controller: image,
+                                decoration: const InputDecoration(
+                                    labelText: '图片地址（http/https，可选）'))
+                          ],
+                          DropdownButtonFormField<String>(
+                              value: action,
+                              isExpanded: true,
+                              // 下拉框默认 16 号正文，和旁边 13 号输入框不成一套。
+                              style: Theme.of(ctx).textTheme.bodyMedium,
+                              items: const [
+                                DropdownMenuItem(
+                                    value: 'REPLY', child: Text('回复内容')),
+                                DropdownMenuItem(
+                                    value: 'LINK', child: Text('打开链接')),
+                                DropdownMenuItem(
+                                    value: 'HANDOFF', child: Text('转人工客服'))
                               ],
-                              DropdownButtonFormField<String>(
-                                  value: action,
-                                  items: const [
-                                    DropdownMenuItem(
-                                        value: 'REPLY', child: Text('回复内容')),
-                                    DropdownMenuItem(
-                                        value: 'LINK', child: Text('打开链接')),
-                                    DropdownMenuItem(
-                                        value: 'HANDOFF', child: Text('转人工客服'))
-                                  ],
-                                  onChanged: (v) => set(() => action = v!),
-                                  decoration:
-                                      const InputDecoration(labelText: '点击动作')),
-                              if (action != 'HANDOFF')
-                                TextField(
-                                    controller: value,
-                                    minLines: 2,
-                                    maxLines: 4,
-                                    decoration: InputDecoration(
-                                        labelText: action == 'LINK'
-                                            ? '链接地址'
-                                            : '回复内容')),
-                              if (error != null)
-                                Text(error!,
-                                    style: const TextStyle(color: Colors.red))
-                            ]))),
+                              onChanged: (v) => set(() => action = v!),
+                              decoration:
+                                  const InputDecoration(labelText: '点击动作')),
+                          if (action != 'HANDOFF')
+                            TextField(
+                                controller: value,
+                                minLines: 2,
+                                maxLines: 4,
+                                decoration: InputDecoration(
+                                    labelText:
+                                        action == 'LINK' ? '链接地址' : '回复内容')),
+                          if (error != null)
+                            Text(error!,
+                                style: TextStyle(
+                                    color: Theme.of(ctx).colorScheme.error))
+                        ]))),
                     actions: [
                       TextButton(
                           onPressed: () => Navigator.pop(ctx),
@@ -750,19 +759,59 @@ class _AutomationPageState extends State<AutomationPage> {
         ]),
         if (_messages.isEmpty)
           const Padding(padding: EdgeInsets.all(32), child: Text('此渠道还没有访客会话')),
-        for (final m in _messages)
-          Card(
-              child: ListTile(
-                  leading: const Icon(Icons.person_outline),
-                  onTap: () => _viewMessages(m),
-                  trailing: const Icon(Icons.chevron_right),
-                  title: Text(asString(m['visitorName']).isEmpty
-                      ? '访客'
-                      : asString(m['visitorName'])),
-                  subtitle: Text(
-                      '${m['lastMessagePreview'] ?? ''}\n${m['source']} · ${asString(m['assigneeName']).isEmpty ? '待分配' : asString(m['assigneeName'])} · ${m['status'] == 'RESOLVED' ? '已结束' : '进行中'}'),
-                  isThreeLine: true))
+        for (final m in _messages) _messageCard(m)
       ]);
+
+  /// 会话行：访客、摘要、来源分三层，卡片之间留出间距。
+  ///
+  /// 原来用 isThreeLine 的 ListTile，行高由主题的 dense/compact 定死，
+  /// 三行字挤在一个窄条里；这里改成自己排版，间距可控也不会溢出。
+  Widget _messageCard(Map<String, dynamic> m) {
+    final theme = Theme.of(context);
+    final name = asString(m['visitorName']);
+    final preview = asString(m['lastMessagePreview']);
+    final meta =
+        '${m['source']} · ${asString(m['assigneeName']).isEmpty ? '待分配' : asString(m['assigneeName'])} · ${m['status'] == 'RESOLVED' ? '已结束' : '进行中'}';
+    return Card(
+        // 卡片主题的 margin 是 0，列表里必须自己留间距，否则卡片会连成一整块。
+        margin: const EdgeInsets.only(bottom: 12),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+            onTap: () => _viewMessages(m),
+            child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+                child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.person_outline,
+                          size: 18, color: theme.colorScheme.onSurfaceVariant),
+                      const SizedBox(width: 12),
+                      Expanded(
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                            Text(name.isEmpty ? '访客' : name,
+                                style: theme.textTheme.titleSmall),
+                            if (preview.isNotEmpty)
+                              Padding(
+                                  padding: const EdgeInsets.only(top: 6),
+                                  child: Text(preview,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.bodySmall)),
+                            Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Text(meta,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                        color: theme
+                                            .colorScheme.onSurfaceVariant)))
+                          ])),
+                      const SizedBox(width: 8),
+                      Icon(Icons.chevron_right,
+                          size: 18, color: theme.colorScheme.onSurfaceVariant)
+                    ]))));
+  }
+
   @override
   Widget build(BuildContext context) =>
       LayoutBuilder(builder: (context, constraints) {
@@ -921,6 +970,25 @@ class _AutomationPageState extends State<AutomationPage> {
                         ]))
                   ]));
       });
+}
+
+/// 弹窗表单的字段列：字段之间统一留 16 的间距。
+///
+/// 输入框自带白底填充和描边，直接挨着排会连成一片，浮动标签还会压到上一个框上；
+/// 弹窗里的字段一律走这个列，不要手写没有间距的 Column。
+class _DialogFields extends StatelessWidget {
+  const _DialogFields(this.children);
+  final List<Widget> children;
+  @override
+  Widget build(BuildContext context) => Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (var i = 0; i < children.length; i++) ...[
+              if (i > 0) const SizedBox(height: 16),
+              children[i]
+            ]
+          ]);
 }
 
 class _ChannelMessagesDialog extends StatefulWidget {

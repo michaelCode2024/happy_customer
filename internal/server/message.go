@@ -708,7 +708,9 @@ func (a *API) autoAssign(ctx context.Context, tx pgx.Tx, tenantID, conversationI
 
 // completeHandoff 暂停机器人并按路由规则分配客服。
 // 可重复调用：已暂停时仍会尝试补分配；分配与接单使用独立状态通知。
-func (a *API) completeHandoff(ctx context.Context, tenantID, conversationID uuid.UUID) (*uuid.UUID, string, error) {
+// notice 是「正在转接」这条提示的文案，来自入口的转人工设置或 AI 转接话术；
+// 留空时用默认文案，重复转人工的「已在接待中」提示不受它影响。
+func (a *API) completeHandoff(ctx context.Context, tenantID, conversationID uuid.UUID, notice string) (*uuid.UUID, string, error) {
 	tx, err := a.db.Begin(ctx)
 	if err != nil {
 		return nil, "", err
@@ -743,7 +745,11 @@ func (a *API) completeHandoff(ctx context.Context, tenantID, conversationID uuid
 		}
 	}
 	if !paused {
-		if err := receptionNotice(ctx, tx, tenantID, conversationID, "正在为您转接人工客服。", "TRANSFERRING"); err != nil {
+		content := strings.TrimSpace(notice)
+		if content == "" {
+			content = "正在为您转接人工客服。"
+		}
+		if err := receptionNotice(ctx, tx, tenantID, conversationID, content, "TRANSFERRING"); err != nil {
 			return nil, "", err
 		}
 		if _, err := tx.Exec(ctx, `update conversation set bot_paused = true, handoff_requested_at=coalesce(handoff_requested_at,now()), updated_at = now() where id = $1`, conversationID); err != nil {
@@ -1318,7 +1324,7 @@ func (a *API) maybeAIReply(ctx context.Context, tenantID, conversationID uuid.UU
 
 	finish, quotaErr := a.reserveAIQuota(ctx, tenantID)
 	if quotaErr != nil {
-		_, _, _ = a.completeHandoff(ctx, tenantID, conversationID)
+		_, _, _ = a.completeHandoff(ctx, tenantID, conversationID, "")
 		return
 	}
 	success := false
@@ -1385,7 +1391,7 @@ func (a *API) storeAIHandoff(ctx context.Context, tenantID, conversationID uuid.
 	}
 	a.bumpDailyStat(ctx, tenantID, "ai_handoff")
 	// AI 低置信度转人工以前只落一句提示、不暂停机器人也不分配，访客会一直停在「请稍候」。
-	if _, _, err := a.completeHandoff(ctx, tenantID, conversationID); err != nil {
+	if _, _, err := a.completeHandoff(ctx, tenantID, conversationID, handoffMessage); err != nil {
 		a.logger.Warn("ai handoff failed", "error", err)
 	}
 }

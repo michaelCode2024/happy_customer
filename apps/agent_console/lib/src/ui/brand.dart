@@ -483,7 +483,8 @@ class ConsoleIconRail extends StatelessWidget {
                                 clipBehavior: Clip.none,
                                 children: [
                                   Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
                                       children: [
                                         Icon(items[i].icon,
                                             size: 17,
@@ -522,8 +523,9 @@ class ConsoleIconRail extends StatelessWidget {
                                                     BorderRadius.circular(9),
                                                 boxShadow: [
                                                   BoxShadow(
-                                                    color: const Color(0xFFE64980)
-                                                        .withOpacity(0.28),
+                                                    color:
+                                                        const Color(0xFFE64980)
+                                                            .withOpacity(0.28),
                                                     blurRadius: 8,
                                                     offset: const Offset(0, 3),
                                                   ),
@@ -535,7 +537,8 @@ class ConsoleIconRail extends StatelessWidget {
                                                 style: const TextStyle(
                                                     color: Colors.white,
                                                     fontSize: 9,
-                                                    fontWeight: FontWeight.w600)))),
+                                                    fontWeight:
+                                                        FontWeight.w600)))),
                                 ],
                               ),
                             ),

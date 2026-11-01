@@ -52,8 +52,7 @@ Future<String> enableBackgroundPush(TongYuApi api) async {
   }
   try {
     return await const MethodChannel('tongyu/alerts').invokeMethod<String>(
-            'enableBackground',
-            {'server': api.server, 'token': api.token}) ??
+            'enableBackground', {'server': api.server, 'token': api.token}) ??
         '安卓本机消息提醒已开启（进程内轮询，非云推送）';
   } catch (_) {
     return '后台提醒未开启，请允许系统通知权限后重试';

@@ -2,7 +2,7 @@ name: tongyu_agent_console
 description: TongYu cross-platform agent and operations console.
 publish_to: none
 # 与 web/pwa-release.json 同一发版号：名称取前三段，+ 后为去掉点的完整号。
-version: 2026.11.01+2026110101
+version: 2026.11.01+2026110102
 
 # One codebase, four shapes: the desktop build is what an agent sits in all day,
 # the phone build is for on-call shifts, and the web build is a zero-install

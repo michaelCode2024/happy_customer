@@ -86,7 +86,7 @@ func TestReceptionAcceptanceAndTimeout(t *testing.T) {
 	if configured != 27 {
 		t.Fatal("omitted timeout must preserve existing configuration")
 	}
-	owner, _, err := a.completeHandoff(ctx, tenant, conversation)
+	owner, _, err := a.completeHandoff(ctx, tenant, conversation, "")
 	if err != nil || owner == nil {
 		t.Fatalf("handoff: %v %v", owner, err)
 	}
@@ -233,7 +233,7 @@ func TestInboxAutoAcceptOnAssign(t *testing.T) {
 		}
 	}()
 	a := &API{db: db, logger: slog.Default(), bus: realtime.NewBus(db, realtime.NewHub(slog.Default()), slog.Default()), webhooks: webhook.NewDispatcher(db, 3, slog.Default())}
-	owner, msg, err := a.completeHandoff(ctx, tenant, conversation)
+	owner, msg, err := a.completeHandoff(ctx, tenant, conversation, "")
 	if err != nil || owner == nil || *owner != agent {
 		t.Fatalf("handoff: owner=%v err=%v", owner, err)
 	}

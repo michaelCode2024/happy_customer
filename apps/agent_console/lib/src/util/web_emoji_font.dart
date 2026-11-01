@@ -40,8 +40,8 @@ Future<void> ensureWebEmojiFont() async {
       throw StateError('表情字体为空');
     }
     final loader = FontLoader('ChatEmoji')
-      ..addFont(Future<ByteData>.value(
-          ByteData.sublistView(response.bodyBytes)));
+      ..addFont(
+          Future<ByteData>.value(ByteData.sublistView(response.bodyBytes)));
     await loader.load();
     _webEmojiFontFailCount = 0;
     webEmojiFontReady.value = true;

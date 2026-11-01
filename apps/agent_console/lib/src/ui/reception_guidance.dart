@@ -22,14 +22,10 @@ class ReceptionGuidance extends StatelessWidget {
     final notice = workbench.receptionNotice;
     final waiting = workbench.receptionWaiting;
     // Build the label explicitly so web semantics never drop the digit.
-    final waitingLabel =
-        '有 ${waiting.toString()} 位客户正在等待接待';
-    // 同一时刻只留一条接待提示：有等待人数时用顶栏，右下角卡片让开；
-    // 标记解决的反馈条出现时也先藏起卡片，避免挡住会话操作。
+    final waitingLabel = '有 ${waiting.toString()} 位客户正在等待接待';
+    // 同一时刻只留一条接待提示：有等待人数时用顶栏，右下角卡片让开。
     final showTopBanner = waiting > 0;
-    final showArrivalCard = notice != null &&
-        !showTopBanner &&
-        !workbench.suppressReceptionFab;
+    final showArrivalCard = notice != null && !showTopBanner;
     final size = MediaQuery.sizeOf(context);
     // 卡片落在偏下区域，避免盖住会话标题栏上的操作。
     final cardBottom = (size.height * 0.08).clamp(12.0, 48.0);
@@ -56,7 +52,8 @@ class ReceptionGuidance extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(waitingLabel,
-                              key: ValueKey<String>('reception-waiting-count-$waiting'),
+                              key: ValueKey<String>(
+                                  'reception-waiting-count-$waiting'),
                               semanticsLabel: waitingLabel,
                               style: TextStyle(
                                   fontWeight: FontWeight.w700,
@@ -125,8 +122,7 @@ class ReceptionGuidance extends StatelessWidget {
                                       tooltip: '关闭接待提醒',
                                       onPressed:
                                           workbench.dismissReceptionNotice,
-                                      icon:
-                                          const Icon(Icons.close, size: 18)),
+                                      icon: const Icon(Icons.close, size: 18)),
                                 ]),
                                 Text(notice.title,
                                     maxLines: 1,
@@ -154,7 +150,6 @@ class ReceptionGuidance extends StatelessWidget {
             )),
     ]);
   }
-
 }
 
 /// 待接待底部操作坞：单行文案 + 写备注 / 开始接待，替代高大卡与禁用输入区。
@@ -208,9 +203,7 @@ class ReceptionAction extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  waitingAccept
-                      ? '确认后即可回复客户；内部备注可先写'
-                      : '开始接待后即可回复；内部备注可先写',
+                  waitingAccept ? '确认后即可回复客户；内部备注可先写' : '开始接待后即可回复；内部备注可先写',
                   style: TextStyle(
                     fontSize: 11.5,
                     height: 1.35,

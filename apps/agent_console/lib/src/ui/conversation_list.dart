@@ -25,6 +25,7 @@ class ConversationListPanel extends StatefulWidget {
 
   final WorkbenchController workbench;
   final SessionController session;
+
   /// 空态「打开知识库」：仅在有真实工作台分区时传入。
   final VoidCallback? onOpenKnowledge;
 
@@ -162,13 +163,11 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
                       style: const TextStyle(fontSize: 12),
                       decoration: InputDecoration(
                         isDense: true,
-                        contentPadding:
-                            const EdgeInsets.symmetric(vertical: 6),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 6),
                         hintText: '搜索客户、内容',
-                        prefixIcon:
-                            const Icon(Icons.search_rounded, size: 16),
-                        prefixIconConstraints: const BoxConstraints(
-                            minWidth: 30, minHeight: 30),
+                        prefixIcon: const Icon(Icons.search_rounded, size: 16),
+                        prefixIconConstraints:
+                            const BoxConstraints(minWidth: 30, minHeight: 30),
                         filled: true,
                         fillColor: theme.colorScheme.surfaceContainerLow,
                         border: OutlineInputBorder(
@@ -214,12 +213,11 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
                         isExpanded: true,
                         decoration: const InputDecoration(
                           isDense: true,
-                          prefixIcon:
-                              Icon(Icons.inbox_outlined, size: 16),
-                          prefixIconConstraints: BoxConstraints(
-                              minWidth: 28, minHeight: 28),
-                          contentPadding: EdgeInsets.symmetric(
-                              horizontal: 4, vertical: 4),
+                          prefixIcon: Icon(Icons.inbox_outlined, size: 16),
+                          prefixIconConstraints:
+                              BoxConstraints(minWidth: 28, minHeight: 28),
+                          contentPadding:
+                              EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                         ),
                         items: <DropdownMenuItem<String?>>[
                           const DropdownMenuItem<String?>(
@@ -238,8 +236,7 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
                               ),
                             ),
                         ],
-                        onChanged: (value) =>
-                            workbench.setInboxFilter(value),
+                        onChanged: (value) => workbench.setInboxFilter(value),
                       ),
                     ),
                   ],

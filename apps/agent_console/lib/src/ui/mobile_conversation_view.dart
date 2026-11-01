@@ -288,9 +288,7 @@ class _MobileConversationListViewState
                   style: TextStyle(
                     fontSize: 10.5,
                     fontWeight: FontWeight.w700,
-                    color: selected
-                        ? RelayTheme.blue
-                        : Colors.white,
+                    color: selected ? RelayTheme.blue : Colors.white,
                   ),
                 ),
               ),
@@ -322,13 +320,14 @@ class _MobileConversationListViewState
             Text(
               workbench.inboxFilter != null
                   ? (widget.session.inboxes
-                          .firstWhere((i) => i.id == workbench.inboxFilter,
-                              orElse: () => widget.session.inboxes.first)
-                          .name)
+                      .firstWhere((i) => i.id == workbench.inboxFilter,
+                          orElse: () => widget.session.inboxes.first)
+                      .name)
                   : '入口筛选',
               style: const TextStyle(fontSize: 12, color: RelayTheme.muted),
             ),
-            const Icon(Icons.arrow_drop_down, size: 16, color: RelayTheme.muted),
+            const Icon(Icons.arrow_drop_down,
+                size: 16, color: RelayTheme.muted),
           ],
         ),
       ),
@@ -346,8 +345,7 @@ class _MobileConversationListViewState
     );
   }
 
-  Widget _buildListBody(
-      BuildContext context, WorkbenchController workbench) {
+  Widget _buildListBody(BuildContext context, WorkbenchController workbench) {
     if (workbench.loadingList && workbench.conversations.isEmpty) {
       return const Center(
         child: CircularProgressIndicator(
@@ -834,7 +832,8 @@ class _MobileConversationCell extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: Text(
                   conversation.title,
                   style: const TextStyle(

@@ -553,7 +553,7 @@ func (a *API) widgetHandoff(w http.ResponseWriter, r *http.Request, p auth.Princ
 	if !ok {
 		return
 	}
-	if _, _, err := a.completeHandoff(r.Context(), p.TenantID, id); err != nil {
+	if _, _, err := a.completeHandoff(r.Context(), p.TenantID, id, ""); err != nil {
 		fail(w, 500, "转接人工失败")
 		return
 	}
