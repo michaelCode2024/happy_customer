@@ -137,6 +137,19 @@ void main() {
         contains('😀'));
   });
 
+  testWidgets('聊天记录是手机端唯一搜索入口，与访客端一致', (tester) async {
+    await pumpPhone(tester);
+    expect(find.byTooltip('搜索会话内容'), findsNothing);
+    await tester.tap(find.byTooltip('展开工具'));
+    await tester.pumpAndSettle();
+    expect(find.text('聊天记录'), findsOneWidget);
+    await tester.ensureVisible(find.text('聊天记录'));
+    await tester.tap(find.text('聊天记录'));
+    await tester.pumpAndSettle();
+    expect(find.text('搜索本会话的消息'), findsOneWidget);
+    expect(find.byTooltip('关闭搜索'), findsOneWidget);
+  });
+
   testWidgets('语音模式换成 44 高按住说话，右侧仍是「+」', (tester) async {
     await pumpPhone(tester);
     await tester.tap(find.byTooltip('语音'));

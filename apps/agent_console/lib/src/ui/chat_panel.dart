@@ -960,6 +960,11 @@ class _ChatPanelState extends State<ChatPanel> {
                   conversation.publicReplyBlockReason(workbench.selfId) != null,
               aiOpen: false,
               aiPanel: null,
+              onOpenSearch: () {
+                if (!_searchOpen) {
+                  _toggleSearch();
+                }
+              },
               onChanged: _onComposerChanged,
               onToggleNote: (value) => setState(() {
                 _noteMode = value;
@@ -1323,16 +1328,12 @@ class _ThreadHeader extends StatelessWidget {
                     _showTags(context);
                   case 'copy':
                     copyToClipboard(context, conversation.id, '会话 ID');
-                  case 'search':
-                    onToggleSearch();
                 }
               },
               itemBuilder: (context) => <PopupMenuEntry<String>>[
                 if (MediaQuery.sizeOf(context).width < 760 &&
                     onOpenProfile != null)
                   const PopupMenuItem(value: 'profile', child: Text('客户资料')),
-                if (MediaQuery.sizeOf(context).width < 760)
-                  const PopupMenuItem(value: 'search', child: Text('搜索会话内容')),
                 if (!conversation.isResolved)
                   const PopupMenuItem<String>(
                     key: ValueKey('desk-menu-resolve'),
@@ -3290,6 +3291,7 @@ class _Composer extends StatefulWidget {
     this.lockPublicReply = false,
     this.aiOpen = false,
     this.aiPanel,
+    this.onOpenSearch,
     required this.onChanged,
     required this.onToggleNote,
     required this.onPickImage,
@@ -3326,6 +3328,9 @@ class _Composer extends StatefulWidget {
   /// AI 芯片是否展开；面板由父级传入，嵌在模式行下方。
   final bool aiOpen;
   final Widget? aiPanel;
+
+  /// 移动端「+」面板里的「聊天记录」入口；桌面端搜索仍走标题栏图标。
+  final VoidCallback? onOpenSearch;
 
   final ValueChanged<String> onChanged;
   final ValueChanged<bool> onToggleNote;
@@ -4133,6 +4138,14 @@ class _MobileComposerState extends State<_MobileComposer> {
                         accent: RelayTheme.blueDeep,
                         soft: RelayTheme.blueSoft,
                       ),
+                      if (c.onOpenSearch != null)
+                        tool(Icons.search, '聊天记录', () {
+                          setState(() {
+                            _tools = false;
+                            _voiceMode = false;
+                          });
+                          c.onOpenSearch!();
+                        }, accent: RelayTheme.muted, soft: RelayTheme.blueSoft),
                     ];
                     return Wrap(
                       spacing: gap,

@@ -405,7 +405,6 @@ export class WidgetView {
           </div>
         </div>
         <div class="rd-header-actions">
-          <button type="button" class="rd-icon rd-search-toggle" title="搜索聊天记录">${ICONS.search}</button>
           <button type="button" class="rd-icon rd-back" title="返回会话列表" hidden>${ICONS.back}</button>
           ${this.#options.embedded ? `<button type="button" class="rd-icon rd-page-back" title="返回" aria-label="返回">${ICONS.back}</button>` : `<button type="button" class="rd-icon rd-minimize" title="最小化" aria-label="最小化">${ICONS.minimize}</button><button type="button" class="rd-icon rd-close" title="收起" aria-label="关闭">${ICONS.close}</button>`}
         </div>
@@ -704,12 +703,6 @@ export class WidgetView {
     }, { passive: false });
 
     let searchTimer: ReturnType<typeof setTimeout> | undefined;
-    (panel.querySelector('.rd-search-toggle') as HTMLButtonElement).addEventListener('click', () => {
-      this.#searchOpen = true;
-      this.#syncSearchBar();
-      if (this.#lastSnapshot) this.#renderResults(this.#lastSnapshot);
-      this.#searchInput?.focus();
-    });
     (panel.querySelector('.rd-search-close') as HTMLButtonElement).addEventListener('click', () => {
       if (searchTimer) clearTimeout(searchTimer);
       this.#searchOpen = false;
