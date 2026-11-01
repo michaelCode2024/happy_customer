@@ -66,6 +66,8 @@ type inboxContext struct {
 	FontFamily   *string
 	BubbleRadius *int
 	CustomCSS    *string
+	// ReopenGrace 是入口级结束宽限期（分钟），访客端据此决定超时限后新开会话。
+	ReopenGrace int
 }
 
 func (a *API) loadInbox(ctx handlerContext, publicKey string) (inboxContext, error) {
@@ -78,7 +80,8 @@ func (a *API) loadInbox(ctx handlerContext, publicKey string) (inboxContext, err
 		          join agent ag on ag.id = ap.agent_id
 		          join agent_inbox ai on ai.agent_id = ag.id
 		         where ai.inbox_id = i.id and `+agentOnlineRecently+` and ag.status = 'ACTIVE'),
-		       i.logo_url, i.avatar_url, i.font_family, i.bubble_radius, i.custom_css
+		       i.logo_url, i.avatar_url, i.font_family, i.bubble_radius, i.custom_css,
+		       coalesce(i.reopen_grace_minutes, 1440)
 		  from inbox i
 		  left join ai_setting s on s.inbox_id = i.id
 		  left join lateral (
@@ -87,7 +90,8 @@ func (a *API) loadInbox(ctx handlerContext, publicKey string) (inboxContext, err
 		 where i.public_key = $1 and i.status = 'ACTIVE'`, publicKey).
 		Scan(&inbox.ID, &inbox.TenantID, &inbox.Name, &inbox.WelcomeMessage, &inbox.OfflineMessage,
 			&inbox.PublicKey, &inbox.AIEnabled, &inbox.AIHandoff, &inbox.WorkingHours, &inbox.AgentsAvailable,
-			&inbox.LogoURL, &inbox.AvatarURL, &inbox.FontFamily, &inbox.BubbleRadius, &inbox.CustomCSS)
+			&inbox.LogoURL, &inbox.AvatarURL, &inbox.FontFamily, &inbox.BubbleRadius, &inbox.CustomCSS,
+			&inbox.ReopenGrace)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return inbox, errors.New("客服入口不存在或已停用")
 	}

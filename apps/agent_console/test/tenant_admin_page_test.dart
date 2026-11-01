@@ -57,10 +57,8 @@ void main() {
     expect(find.textContaining('剩余 8'), findsOneWidget);
     await tester.tap(find.text('添加成员').first);
     await tester.pumpAndSettle();
-    await tester.enterText(
-        find.widgetWithText(TextFormField, '成员姓名'), '客服三号');
-    await tester.enterText(
-        find.widgetWithText(TextFormField, '登录用户名'), 'kf3');
+    await tester.enterText(find.widgetWithText(TextFormField, '成员姓名'), '客服三号');
+    await tester.enterText(find.widgetWithText(TextFormField, '登录用户名'), 'kf3');
     final inboxTile = find.byType(CheckboxListTile);
     await tester.ensureVisible(inboxTile);
     await tester.tap(inboxTile, warnIfMissed: false);
@@ -80,7 +78,11 @@ void main() {
         client: MockClient((request) async {
           if (request.method == 'PATCH') {
             expect(request.url.path, '/api/v1/admin/inboxes/inbox1');
-            expect((jsonDecode(request.body) as Map)['routing']['acceptanceTimeoutSeconds'], 27);
+            expect(
+                (jsonDecode(request.body) as Map)['routing']
+                    ['acceptanceTimeoutSeconds'],
+                27);
+            expect((jsonDecode(request.body) as Map)['reopenGraceMinutes'], 30);
             saves++;
             return http.Response(saves == 1 ? '{"error":"保存测试失败"}' : '{}',
                 saves == 1 ? 400 : 200);
@@ -95,6 +97,7 @@ void main() {
             '/api/v1/admin/inboxes/inbox1' => {
                 'id': 'inbox1',
                 'name': '网站客服',
+                'reopenGraceMinutes': 30,
                 'routing': {'strategy': 'LOAD_BALANCED', 'fixedAgentId': ''}
               },
             '/api/v1/admin/subscription' => {
@@ -130,6 +133,14 @@ void main() {
     expect(saves, 0);
     expect(find.text('请输入10到600之间的整数'), findsOneWidget);
     await tester.enterText(find.widgetWithText(TextFormField, '接单超时（秒）'), '27');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, '再次咨询的宽限期（分钟）'), '10081');
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(saves, 0, reason: '超出范围的宽限期不应提交');
+    expect(find.text('请输入0到10080之间的整数'), findsOneWidget);
+    await tester.enterText(
+        find.widgetWithText(TextFormField, '再次咨询的宽限期（分钟）'), '30');
     await tester.tap(find.text('保存'));
     await tester.pumpAndSettle();
     expect(find.text('配置客服入口'), findsOneWidget);

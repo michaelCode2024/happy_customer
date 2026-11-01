@@ -66,6 +66,8 @@ type conversationView struct {
 	Status              string     `json:"status"`
 	AssigneeID          *uuid.UUID `json:"assigneeId,omitempty"`
 	AssigneeName        string     `json:"assigneeName,omitempty"`
+	ClosedAt            *time.Time `json:"closedAt,omitempty"`
+	ReopenGraceMinutes  *int       `json:"reopenGraceMinutes,omitempty"`
 	Priority            int16      `json:"priority"`
 	Source              string     `json:"source"`
 	LastSequence        int64      `json:"lastSequence"`
@@ -214,7 +216,7 @@ func (a *API) widgetBootstrap(w http.ResponseWriter, r *http.Request) {
 		"token":       token,
 		"expiresIn":   int(a.cfg.WidgetTokenTTL.Seconds()),
 		"inbox": map[string]any{"id": inbox.ID, "name": inbox.Name, "welcomeMessage": inbox.WelcomeMessage, "offlineMessage": inbox.OfflineMessage, "automation": a.publicAutomation(r.Context(), inbox.ID),
-			"logoUrl": inbox.LogoURL, "avatarUrl": inbox.AvatarURL, "fontFamily": inbox.FontFamily, "bubbleRadius": inbox.BubbleRadius, "customCss": inbox.CustomCSS},
+			"logoUrl": inbox.LogoURL, "avatarUrl": inbox.AvatarURL, "fontFamily": inbox.FontFamily, "bubbleRadius": inbox.BubbleRadius, "customCss": inbox.CustomCSS, "reopenGraceMinutes": inbox.ReopenGrace},
 		"aiEnabled":         inbox.AIEnabled && a.tenantHasFeature(r.Context(), inbox.TenantID, "ai") && a.ai.Available() && a.cfg.AI.AutoReplyEnabled,
 		"agentsOnline":      inbox.AgentsAvailable,
 		"openConversations": openConversations,
@@ -291,9 +293,11 @@ func (a *API) listConversations(w http.ResponseWriter, r *http.Request, p auth.P
 		select c.id, c.tenant_id, c.inbox_id, c.visitor_id, coalesce(c.subject,''), c.status, c.assignee_id,
 		       coalesce(ag.display_name,''), c.priority, c.source, c.last_sequence,
 		       coalesce(c.last_message_preview,''), c.last_message_at, c.agent_unread, c.visitor_unread,
-		       coalesce(v.display_name,''), c.created_at, c.updated_at, c.accepted_at, c.assignment_expires_at
+		       coalesce(v.display_name,''), c.created_at, c.updated_at, c.accepted_at, c.assignment_expires_at,
+		       c.closed_at, i.reopen_grace_minutes
 		  from conversation c
 		  join visitor v on v.id = c.visitor_id
+		  join inbox i on i.id = c.inbox_id
 		  left join agent ag on ag.id = c.assignee_id
 		 where c.tenant_id=$1 and c.inbox_id=$2 and c.visitor_id=$3
 		 order by coalesce(c.last_message_at, c.created_at) desc
@@ -316,17 +320,17 @@ func (a *API) listConversations(w http.ResponseWriter, r *http.Request, p auth.P
 	var aiEnabled bool
 	var welcome, offline string
 	var css, logo, avatar, font string
-	var radius int
+	var radius, reopenGrace int
 	if err := a.db.QueryRow(r.Context(), `select coalesce(i.welcome_message,''), coalesce(i.offline_message,''), coalesce(s.enabled,false),
 	 (select count(*)::int from agent_presence ap join agent ag on ag.id=ap.agent_id join agent_inbox ai on ai.agent_id=ag.id where ai.inbox_id=i.id and ag.status='ACTIVE' and `+agentOnlineRecently+`)
-	 ,coalesce(i.custom_css,''),coalesce(i.logo_url,''),coalesce(i.avatar_url,''),coalesce(i.font_family,''),coalesce(i.bubble_radius,12)
-	 from inbox i left join ai_setting s on s.inbox_id=i.id where i.id=$1 and i.tenant_id=$2 and i.status='ACTIVE'`, p.InboxID, p.TenantID).Scan(&welcome, &offline, &aiEnabled, &online, &css, &logo, &avatar, &font, &radius); err != nil {
+	 ,coalesce(i.custom_css,''),coalesce(i.logo_url,''),coalesce(i.avatar_url,''),coalesce(i.font_family,''),coalesce(i.bubble_radius,12),coalesce(i.reopen_grace_minutes,1440)
+	 from inbox i left join ai_setting s on s.inbox_id=i.id where i.id=$1 and i.tenant_id=$2 and i.status='ACTIVE'`, p.InboxID, p.TenantID).Scan(&welcome, &offline, &aiEnabled, &online, &css, &logo, &avatar, &font, &radius, &reopenGrace); err != nil {
 		fail(w, 404, "客服入口已停用")
 		return
 	}
 	// 恢复匿名历史及长连接重连时仍读取最新渠道皮肤，不能只在首次bootstrap应用。
 	respond(w, 200, map[string]any{"items": items, "agentsOnline": online, "aiEnabled": aiEnabled && a.tenantHasFeature(r.Context(), p.TenantID, "ai") && a.ai.Available() && a.cfg.AI.AutoReplyEnabled, "welcomeMessage": welcome, "offlineMessage": offline, "automation": a.publicAutomation(r.Context(), p.InboxID),
-		"inbox": map[string]any{"customCss": css, "logoUrl": logo, "avatarUrl": avatar, "fontFamily": font, "bubbleRadius": radius}})
+		"inbox": map[string]any{"customCss": css, "logoUrl": logo, "avatarUrl": avatar, "fontFamily": font, "bubbleRadius": radius, "reopenGraceMinutes": reopenGrace}})
 }
 
 func (a *API) getConversation(w http.ResponseWriter, r *http.Request, p auth.Principal) {

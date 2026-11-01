@@ -183,6 +183,7 @@ func (a *API) adminInboxes(w http.ResponseWriter, r *http.Request, p auth.Princi
 		select i.id, i.name, i.public_key, i.status, i.auto_assign, coalesce(i.auto_accept,false), i.updated_at,
 		       coalesce(i.allowed_domains, '{}'), coalesce(i.welcome_message,''), coalesce(i.offline_message,''),
 		       coalesce(s.enabled,false), coalesce(s.confidence_threshold, 0.35),
+		       coalesce(i.reopen_grace_minutes, 1440),
 		       (select count(*)::int from agent_inbox ai where ai.inbox_id = i.id),
 		       (select count(*)::int from conversation c where c.inbox_id = i.id and c.status <> 'RESOLVED')
 		  from inbox i
@@ -203,16 +204,17 @@ func (a *API) adminInboxes(w http.ResponseWriter, r *http.Request, p auth.Princi
 		var domains []string
 		var welcome, offline string
 		var threshold float64
-		var agentCount, openCount int
+		var agentCount, openCount, reopenGrace int
 		if err := rows.Scan(&id, &name, &publicKey, &status, &autoAssign, &autoAccept, &updatedAt, &domains, &welcome, &offline,
-			&aiEnabled, &threshold, &agentCount, &openCount); err != nil {
+			&aiEnabled, &threshold, &reopenGrace, &agentCount, &openCount); err != nil {
 			fail(w, 500, "查询客服入口失败")
 			return
 		}
 		items = append(items, map[string]any{
 			"id": id, "name": name, "publicKey": publicKey, "status": status,
 			"autoAssign": autoAssign, "autoAccept": autoAccept,
-			"allowedDomains": domains, "welcomeMessage": welcome, "offlineMessage": offline,
+			"reopenGraceMinutes": reopenGrace,
+			"allowedDomains":     domains, "welcomeMessage": welcome, "offlineMessage": offline,
 			"aiEnabled": aiEnabled, "confidenceThreshold": threshold,
 			"agentCount": agentCount, "openConversations": openCount, "updatedAt": updatedAt,
 		})
@@ -234,17 +236,18 @@ func (a *API) adminInbox(w http.ResponseWriter, r *http.Request, p auth.Principa
 	var handoff string
 	var threshold float64
 	var logoUrl, avatarUrl, fontFamily, customCss *string
-	var bubbleRadius *int
+	var bubbleRadius, reopenGrace *int
 	err := a.db.QueryRow(r.Context(), `
 		select i.name, i.public_key, i.status, i.auto_assign, coalesce(i.auto_accept,false), i.allowed_domains, i.welcome_message,
 		       i.offline_message, i.created_at, i.updated_at,
 		       coalesce(s.enabled,false), coalesce(s.handoff_message,'正在为你转接人工客服，请稍候。'),
 		       coalesce(s.confidence_threshold, 0.35),
-		       i.logo_url, i.avatar_url, i.font_family, i.bubble_radius, i.custom_css
+		       i.logo_url, i.avatar_url, i.font_family, i.bubble_radius, i.custom_css,
+		       coalesce(i.reopen_grace_minutes, 1440)
 		  from inbox i left join ai_setting s on s.inbox_id = i.id
 		 where i.id = $1 and i.tenant_id = $2`, id, p.TenantID).
 		Scan(&name, &publicKey, &status, &autoAssign, &autoAccept, &domains, &welcome, &offline, &createdAt, &updatedAt,
-			&aiEnabled, &handoff, &threshold, &logoUrl, &avatarUrl, &fontFamily, &bubbleRadius, &customCss)
+			&aiEnabled, &handoff, &threshold, &logoUrl, &avatarUrl, &fontFamily, &bubbleRadius, &customCss, &reopenGrace)
 	if err != nil {
 		fail(w, 404, "客服入口不存在")
 		return
@@ -258,7 +261,8 @@ func (a *API) adminInbox(w http.ResponseWriter, r *http.Request, p auth.Principa
 	respond(w, 200, map[string]any{
 		"id": id, "name": name, "publicKey": publicKey, "status": status,
 		"autoAssign": autoAssign, "autoAccept": autoAccept,
-		"allowedDomains": domains, "welcomeMessage": welcome, "offlineMessage": offline,
+		"reopenGraceMinutes": reopenGrace,
+		"allowedDomains":     domains, "welcomeMessage": welcome, "offlineMessage": offline,
 		"aiEnabled": aiEnabled, "handoffMessage": handoff, "confidenceThreshold": threshold,
 		"logoUrl": logoUrl, "avatarUrl": avatarUrl, "fontFamily": fontFamily, "bubbleRadius": bubbleRadius, "customCss": customCss,
 		"routing":     map[string]any{"strategy": strategy, "fixedAgentId": fixedAgent, "maxConcurrent": maxConcurrent, "acceptanceTimeoutSeconds": acceptanceTimeout},
@@ -279,6 +283,7 @@ func (a *API) adminCreateInbox(w http.ResponseWriter, r *http.Request, p auth.Pr
 		OfflineMessage string   `json:"offlineMessage"`
 		AutoAssign     *bool    `json:"autoAssign"`
 		AutoAccept     *bool    `json:"autoAccept"`
+		ReopenGrace    *int     `json:"reopenGraceMinutes"`
 		LogoURL        string   `json:"logoUrl"`
 		AvatarURL      string   `json:"avatarUrl"`
 		FontFamily     string   `json:"fontFamily"`
@@ -308,6 +313,14 @@ func (a *API) adminCreateInbox(w http.ResponseWriter, r *http.Request, p auth.Pr
 	if in.AutoAccept != nil {
 		autoAccept = *in.AutoAccept
 	}
+	reopenGrace := 1440
+	if in.ReopenGrace != nil {
+		reopenGrace = *in.ReopenGrace
+	}
+	if reopenGrace < 0 || reopenGrace > 10080 {
+		fail(w, 400, "reopenGraceMinutes 需在 0 到 10080 之间")
+		return
+	}
 	if in.AllowedDomains == nil {
 		in.AllowedDomains = []string{}
 	}
@@ -317,11 +330,13 @@ func (a *API) adminCreateInbox(w http.ResponseWriter, r *http.Request, p auth.Pr
 	}
 	id := uuid.New()
 	if _, err := a.db.Exec(r.Context(), `insert into inbox(id, tenant_id, name, public_key, status, auto_assign, auto_accept,
-			allowed_domains, welcome_message, offline_message, logo_url, avatar_url, font_family, bubble_radius, custom_css)
-		values($1,$2,$3,$4,'ACTIVE',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+			allowed_domains, welcome_message, offline_message, logo_url, avatar_url, font_family, bubble_radius, custom_css,
+			reopen_grace_minutes)
+		values($1,$2,$3,$4,'ACTIVE',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
 		id, p.TenantID, in.Name, publicKey, autoAssign, autoAccept, in.AllowedDomains,
 		nullable(in.WelcomeMessage), nullable(in.OfflineMessage),
-		nullable(in.LogoURL), nullable(in.AvatarURL), nullable(in.FontFamily), in.BubbleRadius, nullable(in.CustomCSS)); err != nil {
+		nullable(in.LogoURL), nullable(in.AvatarURL), nullable(in.FontFamily), in.BubbleRadius, nullable(in.CustomCSS),
+		reopenGrace); err != nil {
 		if isUniqueViolation(err) {
 			failCode(w, 409, "PUBLIC_KEY_TAKEN", "该 publicKey 已被占用")
 			return
@@ -354,6 +369,7 @@ func (a *API) adminUpdateInbox(w http.ResponseWriter, r *http.Request, p auth.Pr
 		OfflineMessage *string  `json:"offlineMessage"`
 		AutoAssign     *bool    `json:"autoAssign"`
 		AutoAccept     *bool    `json:"autoAccept"`
+		ReopenGrace    *int     `json:"reopenGraceMinutes"`
 		LogoURL        *string  `json:"logoUrl"`
 		AvatarURL      *string  `json:"avatarUrl"`
 		FontFamily     *string  `json:"fontFamily"`
@@ -374,6 +390,10 @@ func (a *API) adminUpdateInbox(w http.ResponseWriter, r *http.Request, p auth.Pr
 	}
 	if in.BubbleRadius != nil && (*in.BubbleRadius < 0 || *in.BubbleRadius > 40) {
 		fail(w, 400, "bubbleRadius 需在 0 到 40 之间")
+		return
+	}
+	if in.ReopenGrace != nil && (*in.ReopenGrace < 0 || *in.ReopenGrace > 10080) {
+		fail(w, 400, "reopenGraceMinutes 需在 0 到 10080 之间")
 		return
 	}
 	tx, err := a.db.Begin(r.Context())
@@ -400,12 +420,13 @@ func (a *API) adminUpdateInbox(w http.ResponseWriter, r *http.Request, p auth.Pr
 		    font_family = coalesce($12, font_family),
 		    bubble_radius = coalesce($13, bubble_radius),
 		    custom_css = coalesce($14, custom_css),
+		    reopen_grace_minutes = coalesce($15, reopen_grace_minutes),
 		    updated_at = now()
 		where id = $1 and tenant_id = $2`,
 		id, p.TenantID, in.Name, status, in.AllowedDomains,
 		nullableIfSet(in.WelcomeMessage), nullableIfSet(in.OfflineMessage), in.AutoAssign, in.AutoAccept,
 		nullableIfSet(in.LogoURL), nullableIfSet(in.AvatarURL), nullableIfSet(in.FontFamily),
-		in.BubbleRadius, nullableIfSet(in.CustomCSS)); err != nil {
+		in.BubbleRadius, nullableIfSet(in.CustomCSS), in.ReopenGrace); err != nil {
 		fail(w, 500, "更新客服入口失败")
 		return
 	}

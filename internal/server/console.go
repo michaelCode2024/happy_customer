@@ -360,7 +360,9 @@ func (a *API) consoleConversations(w http.ResponseWriter, r *http.Request, p aut
 		select c.id, c.tenant_id, c.inbox_id, c.visitor_id, coalesce(c.subject,''), c.status, c.assignee_id,
 		       coalesce(ag.display_name,''), c.priority, c.source, c.last_sequence,
 		       coalesce(c.last_message_preview,''), c.last_message_at, c.agent_unread, c.visitor_unread,
-		       coalesce(v.display_name,''), c.created_at, c.updated_at, c.accepted_at, c.assignment_expires_at
+		       coalesce(v.display_name,''), c.created_at, c.updated_at, c.accepted_at, c.assignment_expires_at,
+		       c.closed_at,
+		       (select i.reopen_grace_minutes from inbox i where i.id = c.inbox_id)
 		  from conversation c
 		  join visitor v on v.id = c.visitor_id
 		  left join agent ag on ag.id = c.assignee_id
@@ -701,7 +703,7 @@ func (a *API) consoleStatus(w http.ResponseWriter, r *http.Request, p auth.Princ
 		respond(w, 200, map[string]any{"status": "OK"})
 		return
 	}
-	if _, err := a.db.Exec(r.Context(), `update conversation set status=$3, updated_at=now()
+	if _, err := a.db.Exec(r.Context(), `update conversation set status=$3, closed_at=null, updated_at=now()
 		where id=$1 and tenant_id=$2`, id, p.TenantID, status); err != nil {
 		fail(w, 500, "更新状态失败")
 		return
@@ -934,7 +936,9 @@ func (a *API) consoleVisitorConversations(w http.ResponseWriter, r *http.Request
 		select c.id, c.tenant_id, c.inbox_id, c.visitor_id, coalesce(c.subject,''), c.status, c.assignee_id,
 		       coalesce(ag.display_name,''), c.priority, c.source, c.last_sequence,
 		       coalesce(c.last_message_preview,''), c.last_message_at, c.agent_unread, c.visitor_unread,
-		       coalesce(v.display_name,''), c.created_at, c.updated_at, c.accepted_at, c.assignment_expires_at
+		       coalesce(v.display_name,''), c.created_at, c.updated_at, c.accepted_at, c.assignment_expires_at,
+		       c.closed_at,
+		       (select i.reopen_grace_minutes from inbox i where i.id = c.inbox_id)
 		  from conversation c
 		  join visitor v on v.id = c.visitor_id
 		  left join agent ag on ag.id = c.assignee_id

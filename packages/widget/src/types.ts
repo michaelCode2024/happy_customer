@@ -93,6 +93,8 @@ export interface Conversation {
   tags?: string[];
   createdAt: string;
   updatedAt: string;
+  closedAt?: string;
+  reopenGraceMinutes?: number | null;
 }
 
 export interface ChannelItem { id: string; title: string; description?: string; imageUrl?: string; action: "REPLY" | "LINK" | "HANDOFF"; value: string; }
@@ -109,6 +111,7 @@ export interface InboxInfo {
   avatarUrl?: string;
   fontFamily?: string;
   bubbleRadius?: number;
+  reopenGraceMinutes?: number;
   customCss?: string;
 }
 

@@ -34,6 +34,8 @@ export interface Snapshot {
   agentTyping: boolean;
   agentsOnline: number;
   aiEnabled: boolean;
+  /** 入口级结束宽限期（分钟）；超时限的再发言自动新建会话进大厅。 */
+  reopenGraceMinutes?: number;
   connection: SocketStatus;
   uploading: number;
   offline: boolean;
@@ -69,6 +71,23 @@ type Listener = (snapshot: Snapshot) => void;
 
 function localId(): string {
   return 'local-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+}
+
+/** 超过入口宽限期的已结束会话不再复活，访客再发言改走自动新建会话进大厅。 */
+function shouldForkAfterGrace(conversation: Conversation | undefined, graceMinutes: number | undefined): boolean {
+  if (!conversation || conversation.status !== 'RESOLVED') {
+    return false;
+  }
+  const grace = graceMinutes ?? 1440;
+  if (grace === 0) {
+    return true;
+  }
+  const closed = conversation.closedAt ?? conversation.lastMessageAt ?? conversation.updatedAt;
+  // 存量数据没有 closedAt；兜底时间都无法判定时按超时处理，保持「结束即进大厅」的严格语义。
+  if (!closed) {
+    return true;
+  }
+  return Date.now() - new Date(closed).getTime() > grace * 60_000;
 }
 
 /**
@@ -213,6 +232,7 @@ export class ChatStore {
             status: 'READY',
             agentsOnline: live.agentsOnline ?? 0,
             aiEnabled: live.aiEnabled ?? false,
+            reopenGraceMinutes: live.inbox?.reopenGraceMinutes,
             automation: live.automation,
             welcomeMessage: live.welcomeMessage || this.#options.welcomeMessage,
             offlineMessage: live.offlineMessage || this.#options.offlineMessage,
@@ -262,6 +282,7 @@ export class ChatStore {
       status: 'READY',
       agentsOnline: result.agentsOnline,
       aiEnabled: result.aiEnabled,
+      reopenGraceMinutes: result.inbox.reopenGraceMinutes,
       automation: result.inbox.automation,
       welcomeMessage: result.inbox.welcomeMessage || this.#options.welcomeMessage,
       offlineMessage: result.inbox.offlineMessage || this.#options.offlineMessage,
@@ -358,11 +379,20 @@ export class ChatStore {
     if (this.#state.activeId === id) {
       return;
     }
+    await this.#switchTo(id);
+  }
+
+  /** 切换当前会话线程：退订旧会话、清空线程并拉取新历史。 */
+  async #switchTo(id: string, fresh?: Conversation): Promise<void> {
     const previous = this.#state.activeId;
-    if (previous) {
+    if (previous && previous !== id) {
       this.#socket.unsubscribe(previous);
     }
+    const conversations = fresh
+      ? [fresh, ...this.#state.conversations.filter((item) => item.id !== fresh.id)]
+      : this.#state.conversations;
     this.#patch({
+      conversations,
       activeId: id,
       messages: [],
       hasMore: false,
@@ -374,6 +404,7 @@ export class ChatStore {
       loadingThread: true,
       search: { query: '', running: false, hits: [] },
     });
+    this.#writeSession({ ...this.#requireSession(), conversations });
     this.#socket.subscribe(id);
     await this.#loadMessages(id);
   }
@@ -445,19 +476,28 @@ export class ChatStore {
       this.#patch({ messages: [...this.#state.messages, optimistic] });
     }
     try {
-      const created = await this.#api.createConversation(subject ?? this.#options.subject ?? '', content, this.#options.source ?? (this.#options.embedded ? 'APP' : 'WEB'));
-      const conversations = [created.conversation, ...this.#state.conversations.filter((item) => item.id !== created.conversation.id)];
-      this.#patch({ conversations, activeId: created.conversation.id });
-      this.#writeSession({ ...this.#requireSession(), conversations });
-      this.#socket.subscribe(created.conversation.id);
-      await this.#loadMessages(created.conversation.id);
-      this.#emit({ type: 'conversation', data: created.conversation });
+      const created = await this.#createFreshRow(content, subject);
+      await this.#switchTo(created.id, created);
+      this.#emit({ type: 'conversation', data: created });
     } catch (error) {
       if (optimistic) {
         this.#failMessage(optimistic.localId, error);
       }
       this.#emit({ type: 'error', data: error instanceof Error ? error.message : '创建会话失败' });
     }
+  }
+
+  #createFreshRow(content: string, subject?: string): Promise<Conversation> {
+    return this.#api
+      .createConversation(subject ?? this.#options.subject ?? '', content, this.#options.source ?? (this.#options.embedded ? 'APP' : 'WEB'))
+      .then((created) => created.conversation);
+  }
+
+  /** 超宽限的已结束会话上再发言：先新建无主会话（进大厅），再在新线程里发送。 */
+  async #forkToFreshConversation(): Promise<string> {
+    const created = await this.#createFreshRow('');
+    await this.#switchTo(created.id, created);
+    return created.id;
   }
 
   /**
@@ -574,7 +614,11 @@ export class ChatStore {
     optimistic.localId = optimistic.id;
     this.#patch({ messages: [...this.#state.messages, optimistic], replyTo: undefined });
 
-    if (!id) {
+    if (id && shouldForkAfterGrace(this.#state.conversations.find((item) => item.id === id), this.#state.reopenGraceMinutes)) {
+      // 超宽限：新建无主会话进大厅，再继续发送。
+      id = await this.#forkToFreshConversation();
+      optimistic.conversationId = id;
+    } else if (!id) {
       // 首条文字也走带 clientMessageId 的发送接口，避免建会话首消息
       // 与乐观消息使用不同标识，造成重复气泡和永久“发送中”。
       id = await this.#ensureAttachmentConversation();
@@ -583,6 +627,10 @@ export class ChatStore {
         return;
       }
       optimistic.conversationId = id;
+    }
+    // 切线程会清空历史；刚建会话或分流时把这条乐观气泡放回新线程，避免气泡消失。
+    if (!this.#state.messages.some((message) => message.localId === optimistic.localId)) {
+      this.#patch({ messages: [...this.#state.messages, optimistic] });
     }
     try {
       const saved = await this.#api.sendMessage(id, {
@@ -596,7 +644,13 @@ export class ChatStore {
       saved.attachments = this.#resolveAttachments(saved, optimistic);
       this.#patch({ messages: mergeMessages(this.#state.messages, [toChatMessage(saved)]) });
       this.#emit({ type: 'sent', data: saved });
-      void this.#refreshActiveSummary(id);
+      if (saved.conversationId !== id) {
+        // 服务端兜底分流（旧客户端未预检）：跟服务端的权威结果切到新会话。
+        await this.#switchTo(saved.conversationId);
+        void this.#refreshActiveSummary(saved.conversationId);
+      } else {
+        void this.#refreshActiveSummary(id);
+      }
     } catch (error) {
       if (error instanceof ApiError && error.isAuthError) {
         await this.#recoverToken();
@@ -687,9 +741,12 @@ export class ChatStore {
   }
 
   async #ensureAttachmentConversation(): Promise<string | undefined> {
-    if (this.#state.activeId) return this.#state.activeId;
-    // 首条消息允许是附件；并发选择文件时共享建会话请求，避免重复会话。
-    this.#attachmentConversation ??= this.startConversation('');
+    const active = this.#state.activeId;
+    if (active && !shouldForkAfterGrace(this.#state.conversations.find((item) => item.id === active), this.#state.reopenGraceMinutes)) {
+      return active;
+    }
+    // 附件要落在有效的线程上：无会话、或当前会话已超宽限（新建进大厅）时都先建新线程。
+    this.#attachmentConversation ??= (active ? this.#forkToFreshConversation() : this.startConversation('')).then(() => undefined);
     try {
       await this.#attachmentConversation;
       return this.#state.activeId;
@@ -760,6 +817,10 @@ export class ChatStore {
     try {
       await this.#ensureAttachmentConversation();
       const id = this.#state.activeId!;
+      // 重试可能新建或分流线程，切线程后原失败气泡要跟随过去，否则界面上像丢了消息。
+      if (!this.#state.messages.some((message) => message.localId === localIdValue)) {
+        this.#patch({ messages: [...this.#state.messages, { ...target, conversationId: id, delivery: 'SENDING', error: undefined }] });
+      }
       if (target.messageType !== 'TEXT' && attachmentIds.length === 0) {
         const file = this.#pendingFiles.get(localIdValue);
         if (!file) throw new Error('原始文件已不可用，请重新选择文件');
@@ -777,7 +838,12 @@ export class ChatStore {
       });
       this.#pendingFiles.delete(localIdValue);
       saved.attachments = saved.attachments?.length ? saved.attachments : target.attachments;
-      this.#patch({ messages: mergeMessages(this.#state.messages, [toChatMessage(saved)]) });
+      if (saved.conversationId !== id) {
+        // 服务端兜底分流：跟随权威结果切到新会话。
+        await this.#switchTo(saved.conversationId);
+      } else {
+        this.#patch({ messages: mergeMessages(this.#state.messages, [toChatMessage(saved)]) });
+      }
     } catch (error) {
       this.#failMessage(localIdValue, error);
     }
@@ -1155,6 +1221,7 @@ export class ChatStore {
       }
       case 'conversation.created':
       case 'conversation.updated':
+      case 'conversation.status':
       case 'conversation.closed': {
         const conversation = event.data as Conversation | undefined;
         if (!conversation?.id) {

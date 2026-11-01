@@ -157,7 +157,8 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
                           'avatarUrl',
                           'fontFamily',
                           'bubbleRadius',
-                          'customCss'
+                          'customCss',
+                          'reopenGraceMinutes'
                         ]));
                   } else {
                     final id = asString(inbox['id']);
@@ -173,7 +174,8 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
                       'avatarUrl',
                       'fontFamily',
                       'bubbleRadius',
-                      'customCss'
+                      'customCss',
+                      'reopenGraceMinutes'
                     ]);
                     if (_canAI) {
                       payload['aiEnabled'] = data['aiEnabled'];
@@ -817,6 +819,9 @@ class _InboxDialogState extends State<_InboxDialog> {
       TextEditingController(text: asString(widget.inbox?['fontFamily']));
   late final _radius = TextEditingController(
       text: widget.inbox?['bubbleRadius']?.toString() ?? '');
+  // 结束宽限期：访客在时限内再发言回到原会话，超时自动新建会话进大厅。
+  late final _reopenGrace = TextEditingController(
+      text: '${widget.inbox?['reopenGraceMinutes'] ?? 1440}');
   late final _css =
       TextEditingController(text: asString(widget.inbox?['customCss']));
   late bool _auto = widget.inbox?['autoAssign'] != false,
@@ -844,6 +849,7 @@ class _InboxDialogState extends State<_InboxDialog> {
     _avatar.dispose();
     _font.dispose();
     _radius.dispose();
+    _reopenGrace.dispose();
     _css.dispose();
     super.dispose();
   }
@@ -910,6 +916,20 @@ class _InboxDialogState extends State<_InboxDialog> {
                             onChanged: !_auto
                                 ? null
                                 : (v) => setState(() => _autoAccept = v)),
+                        const SizedBox(height: 16),
+                        TextFormField(
+                            controller: _reopenGrace,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                                labelText: '再次咨询的宽限期（分钟）',
+                                helperText:
+                                    '结束后此时长内访客再发言，回到原会话并由原客服接待；超时自动新建会话进入待接待大厅，由在线客服抢单。0 表示结束后一律进大厅，默认1440分钟'),
+                            validator: (v) {
+                              final n = int.tryParse((v ?? '').trim());
+                              return n == null || n < 0 || n > 10080
+                                  ? '请输入0到10080之间的整数'
+                                  : null;
+                            }),
                         const SizedBox(height: 16),
                         ExpansionTile(
                             tilePadding: EdgeInsets.zero,
@@ -1035,6 +1055,8 @@ class _InboxDialogState extends State<_InboxDialog> {
                             'fontFamily': _font.text.trim(),
                             'customCss': _css.text,
                             'bubbleRadius': int.tryParse(_radius.text.trim()),
+                            'reopenGraceMinutes':
+                                int.parse(_reopenGrace.text.trim()),
                             'status': _active ? 'ACTIVE' : 'DISABLED',
                             'aiEnabled': _ai,
                             'confidenceThreshold':
