@@ -75,14 +75,27 @@ export function waitingForAgentHint(conversation: WaitingSnapshot | undefined): 
 const KEYBOARD_MIN_HEIGHT = 120;
 
 /**
- * 宿主发来 `host-viewport` 时还要确认它真的改过 iframe 盒子：只发消息不改高度，
- * 组件交出去之后就没人再把输入栏顶到键盘上方了。键盘收起（false）的消息永远可信，
- * 那只是复位；此时 iframe 还没变矮的「打开」消息先不接，留给组件自己跟。
+ * 宿主说键盘已打开时，iframe 盒子必须真的变矮，组件才能停掉自己的 visualViewport 跟随。
+ * 只发消息、布局高度仍是整屏时不接：H5 PWA 里焦点在跨域 iframe，父页可视区经常不变，
+ * 提前接管会把输入栏留在键盘底下。innerHeight 在 iOS 上可能滞后，客户区或宿主传入的像素高
+ * 已经落在收起基线 120px 以下时同样算变矮。
  */
-export function hostViewportTrusted(baselineHeight: number, innerHeight: number, keyboardOpen: boolean): boolean {
+export function hostViewportTrusted(
+  baselineHeight: number,
+  innerHeight: number,
+  keyboardOpen: boolean,
+  clientHeight = 0,
+  boxHeight = 0,
+): boolean {
   if (!keyboardOpen) return true;
   const baseline = baselineHeight > 0 ? baselineHeight : innerHeight;
-  return innerHeight < baseline - KEYBOARD_MIN_HEIGHT;
+  if (baseline <= 0) return false;
+  if (innerHeight > 0 && innerHeight < baseline - KEYBOARD_MIN_HEIGHT) return true;
+  if (clientHeight > 0 && clientHeight < baseline - KEYBOARD_MIN_HEIGHT) return true;
+  return boxHeight > 0
+    && boxHeight < baseline - KEYBOARD_MIN_HEIGHT
+    && clientHeight > 0
+    && clientHeight <= boxHeight + 24;
 }
 
 /** 键盘弹起时由谁负责面板高度：视口模型 + 宿主托管状态。 */
@@ -397,6 +410,10 @@ export class WidgetView {
   #keyboardPinBound = false;
   #hostViewportManaged = false;
   #hostKeyboardOpen = false;
+  /** 宿主最近一次声明键盘已打开。盒子没变矮之前不能据此停掉自己的跟随。 */
+  #hostWantsKeyboard = false;
+  /** 宿主当前把 iframe 收成的像素高，0 表示没带。 */
+  #hostBoxHeight = 0;
   #stopKeyboardPin?: () => void;
   /** 按住收尾的页面级兜底同样只绑一次。 */
   #holdSafetyBound = false;
@@ -482,17 +499,55 @@ export class WidgetView {
     }
   }
 
-  /** iframe 由宿主按可视区定位时，组件只负责填满容器和底部安全区。 */
-  setHostViewport(keyboardOpen: boolean): void {
+  /** 宿主声明键盘状态。盒子没变矮时不接管，输入栏继续跟 iframe 自己的可视区。 */
+  setHostViewport(keyboardOpen: boolean, boxHeight = 0): void {
     if (!this.#options.embedded || window.parent === window) return;
-    // 宿主说键盘开着、但 iframe 盒子并没有真的变矮：多半只抄了 postMessage 那一行。
-    // 这时把布局让给宿主，输入栏会直接停在键盘底下，不如继续自己跟，等它真的改了再接。
-    if (!hostViewportTrusted(this.#baselineHeight, window.innerHeight, keyboardOpen)) {
+    this.#hostWantsKeyboard = keyboardOpen;
+    this.#hostBoxHeight = boxHeight;
+    this.#reconcileHostViewport();
+  }
+
+  #viewportClientHeight(): number {
+    return document.documentElement?.clientHeight || window.innerHeight;
+  }
+
+  /** 记下收起时的布局高度，并判断宿主这只盒子是不是已经让开键盘。 */
+  #hostBoxIsShort(): boolean {
+    if (!this.#baselineHeight) {
+      this.#baselineHeight = window.innerHeight;
+    } else if (window.innerHeight > this.#baselineHeight) {
+      this.#baselineHeight = window.innerHeight;
+    }
+    return hostViewportTrusted(
+      this.#baselineHeight,
+      window.innerHeight,
+      true,
+      this.#viewportClientHeight(),
+      this.#hostBoxHeight,
+    );
+  }
+
+  /**
+   * keyboardOpen false，或盒子仍是整屏：交还 visualViewport 跟随。
+   * 只有盒子确认变矮才停掉跟随并填满 iframe，避免和宿主各缩一次。
+   */
+  #reconcileHostViewport(): void {
+    const takeOver = this.#hostWantsKeyboard && this.#hostBoxIsShort();
+    if (!takeOver) {
+      if (this.#hostViewportManaged) {
+        this.#hostViewportManaged = false;
+        this.#hostKeyboardOpen = false;
+        this.#keyboardPinBound = false;
+        this.#stopKeyboardPin?.();
+        this.#stopKeyboardPin = undefined;
+        this.#bindKeyboardPin();
+      }
+      this.#pinComposerToKeyboard();
       return;
     }
     if (!this.#hostViewportManaged) this.disposeViewport();
     this.#hostViewportManaged = true;
-    this.#hostKeyboardOpen = keyboardOpen;
+    this.#hostKeyboardOpen = true;
     this.#pinComposerToKeyboard();
   }
 
@@ -543,6 +598,11 @@ export class WidgetView {
   #pinComposerToKeyboard(): void {
     const panel = this.#root.querySelector('.rd-panel') as HTMLElement | null;
     if (!panel || panel.hidden) return;
+    // 宿主消息可能早于 iframe 布局。盒子随后变矮时再交出去，避免一直按旧的可视区缩。
+    if (this.#hostWantsKeyboard && !this.#hostViewportManaged && this.#hostBoxIsShort()) {
+      this.#reconcileHostViewport();
+      return;
+    }
     if (this.#hostViewportManaged) {
       // 外层已缩到键盘上沿，不能再用 iframe 内尚未同步的 visualViewport 缩第二次。
       this.#applyPanelBox(panel, '100%', 0, this.#hostKeyboardOpen);
@@ -2731,7 +2791,8 @@ ${this.#options.embedded ? `
 .rd-item-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: 11px; color: ${light ? '#939aab' : '#8b91a0'}; }
 .rd-dot { min-width: 18px; height: 18px; border-radius: 999px; background: #ff4d4f; color: #fff; font: 600 11px/18px system-ui; text-align: center; padding: 0 5px; }
 .rd-tag { align-self: flex-end; padding: 1px 7px; border-radius: 999px; font: 500 11px/16px var(--rd-font); color: ${light ? '#8a909e' : '#9aa0ad'}; background: ${light ? '#eef1f6' : '#2b303a'}; }
-.rd-ended { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-shrink: 0; padding: 7px 16px; font-size: 12px; line-height: 1.4; color: ${light ? '#8a5a12' : '#f0c98a'}; background: ${light ? '#fff7e8' : '#2a2418'}; }
+/* 结束条换掉输入栏后，Home 安全区留白必须留在这条上，否则「重新发起」落进指示条。 */
+.rd-ended { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-shrink: 0; padding: 7px 16px calc(7px + env(safe-area-inset-bottom, 0px)); font-size: 12px; line-height: 1.4; color: ${light ? '#8a5a12' : '#f0c98a'}; background: ${light ? '#fff7e8' : '#2a2418'}; }
 .rd-ended[hidden] { display: none; }
 .rd-begin-new { flex: none; border: 0; border-radius: 8px; padding: 6px 12px; font: 600 12px/1.2 var(--rd-font, system-ui); color: #fff; background: var(--rd-accent, #3370ff); cursor: pointer; }
 /* 等待客服接单是一条进行时状态，配色跟企业主色走，加个呼吸点表示「还在跑」而不是卡住。 */
@@ -2768,6 +2829,7 @@ ${this.#options.embedded ? `
 .rd-composer-row .rd-input:focus { border-color: ${accent}; }
 .rd-composer { padding-bottom: env(safe-area-inset-bottom, 0px); }
 .rd-panel.is-keyboard .rd-composer { padding-bottom: 0; }
+.rd-panel.is-keyboard .rd-ended { padding-bottom: 7px; }
 .rd-reply { display: flex; align-items: center; gap: 8px; padding: 8px 16px 0; font-size: 12px; color: ${light ? '#6b7280' : '#9ca3af'}; }
 .rd-reply[hidden] { display: none; }
 .rd-reply-icon svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; display: block; color: ${accent}; }

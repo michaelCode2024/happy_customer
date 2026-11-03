@@ -380,8 +380,17 @@ func (a *API) appendMessage(ctx context.Context, tenantID, conversationID uuid.U
 			a.bumpDailyStat(ctx, tenantID, "conversations_started")
 		}
 	}
-	a.afterMessageCommitted(ctx, tenantID, conversationID, view, newAssignee, in.SenderType)
+	// 已有接待人时 autoAssign 原样返回，不能再广播成新分配。
+	a.afterMessageCommitted(ctx, tenantID, conversationID, view, assigneeIfChanged(assignee, newAssignee), in.SenderType)
 	return view, nil
+}
+
+// assigneeIfChanged 返回本次新确定的接待人。发送前已是同一人时返回 nil。
+func assigneeIfChanged(before, after *uuid.UUID) *uuid.UUID {
+	if after == nil || (before != nil && *before == *after) {
+		return nil
+	}
+	return after
 }
 
 // 结束提示的两套文案。手动结束由坐席触发，自动结束必须说清是「没消息了」，

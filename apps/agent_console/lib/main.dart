@@ -25,7 +25,10 @@ import 'package:tongyu_agent_console/src/ui/pwa_panel.dart';
 import 'package:tongyu_agent_console/src/ui/platform_login_page.dart';
 import 'package:tongyu_agent_console/src/ui/platform_page.dart';
 import 'package:tongyu_agent_console/src/ui/product_brand.dart';
+import 'package:tongyu_agent_console/src/ui/desk_notice.dart';
+import 'package:tongyu_agent_console/src/ui/notice_hub.dart';
 import 'package:tongyu_agent_console/src/ui/workbench_page.dart';
+import 'package:tongyu_agent_console/src/util/notice.dart';
 import 'package:tongyu_agent_console/src/util/web_emoji_font.dart';
 
 void main() {
@@ -86,6 +89,7 @@ class _TongYuConsoleAppState extends State<TongYuConsoleApp>
   bool _surfaceRestored = false;
   bool _manualSurface = false;
   final _navigatorKey = GlobalKey<NavigatorState>();
+  final NoticeHubController _noticeHub = NoticeHubController();
 
   /// 网页上 iOS 转场不要再挂一套边缘手势，浏览器历史已经负责这一下。
   ThemeData get _theme {
@@ -164,6 +168,7 @@ class _TongYuConsoleAppState extends State<TongYuConsoleApp>
     _platform.removeListener(_onPlatformChanged);
     _session.dispose();
     _platform.dispose();
+    _noticeHub.dispose();
     super.dispose();
   }
 
@@ -268,15 +273,26 @@ class _TongYuConsoleAppState extends State<TongYuConsoleApp>
                     bottomRgb: bottomBar?.toARGB32(),
                   );
                   final topColor = top ?? theme.colorScheme.surface;
-                  return AnnotatedRegion<SystemUiOverlayStyle>(
-                    value: BrowserChrome.overlayFor(topColor),
-                    child: ColoredBox(
-                      color: bottomBar ?? theme.colorScheme.surface,
-                      child: AppSafeArea(
-                        browserBottom: browserBottom,
-                        child: wrapWithWebEmojiFallback(
-                            child ?? const SizedBox.shrink()),
-                      ),
+                  return DeskNoticeScope(
+                    hub: _noticeHub,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        AnnotatedRegion<SystemUiOverlayStyle>(
+                          value: BrowserChrome.overlayFor(topColor),
+                          child: ColoredBox(
+                            color: bottomBar ?? theme.colorScheme.surface,
+                            child: AppSafeArea(
+                              browserBottom: browserBottom,
+                              child: wrapWithWebEmojiFallback(
+                                  child ?? const SizedBox.shrink()),
+                            ),
+                          ),
+                        ),
+                        Positioned.fill(
+                          child: NoticeHub(controller: _noticeHub),
+                        ),
+                      ],
                     ),
                   );
                 },
@@ -379,6 +395,7 @@ class _TongYuConsoleAppState extends State<TongYuConsoleApp>
             return WorkbenchPage(
               key: ValueKey<String>('workbench-$agentId'),
               session: _session,
+              noticeHub: _noticeHub,
               themeMode: _themeMode,
               onThemeModeChanged: _setThemeMode,
             );

@@ -1,11 +1,11 @@
 import '../util/pwa_bridge.dart';
-import 'package:tongyu_agent_console/src/util/in_app_push.dart';
+import 'package:tongyu_agent_console/src/util/notice.dart';
 import 'package:tongyu_agent_console/src/util/message_alert_stub.dart'
     if (dart.library.html) 'package:tongyu_agent_console/src/util/message_alert_web.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 
 import 'package:tongyu_agent_console/src/api/api_exception.dart';
 import 'package:tongyu_agent_console/src/api/models.dart';
@@ -50,15 +50,19 @@ class WorkbenchController extends ChangeNotifier {
     this.selfId = '',
     this.seesTeam = false,
     this.visitorAlert,
+    NoticeHubController? noticeHub,
     Set<String> autoAcceptInboxIds = const <String>{},
-  }) : _autoAcceptInboxIds = Set<String>.unmodifiable(autoAcceptInboxIds);
+  })  : noticeHub = noticeHub ?? NoticeHubController(),
+        _ownsNoticeHub = noticeHub == null,
+        _autoAcceptInboxIds = Set<String>.unmodifiable(autoAcceptInboxIds);
 
   /// 主管能看到同事的会话。归属还未知时不响，避免把别人的消息播出来。
   final bool seesTeam;
   final void Function(String messageId, String senderName)? visitorAlert;
 
-  /// 站内右上角推送提醒。控制器只负责入队，界面负责渲染与自动消失。
-  final InAppPushManager inAppPush = InAppPushManager();
+  /// 站内右下角统一通知。控制器只负责入队，界面负责渲染与自动消失。
+  final NoticeHubController noticeHub;
+  final bool _ownsNoticeHub;
   final DateTime _alertsSince = DateTime.now();
   final Map<String, int> _notificationSequences = {};
   final Set<String> _checkingNotifications = {};
@@ -78,6 +82,19 @@ class WorkbenchController extends ChangeNotifier {
   void setAutoAcceptInboxIds(Iterable<String> ids) {
     _autoAcceptInboxIds = Set<String>.unmodifiable(ids);
   }
+
+  /// 入口 id → 入口名称。待接待播报用名称区分业务，不改已分配消息的原有声音。
+  Map<String, String> _inboxNames = const {};
+
+  void setInboxNames(Iterable<InboxInfo> inboxes) {
+    _inboxNames = {
+      for (final inbox in inboxes)
+        if (inbox.id.isNotEmpty && inbox.name.trim().isNotEmpty)
+          inbox.id: inbox.name.trim(),
+    };
+  }
+
+  final Map<String, String> _conversationInbox = {};
 
   // ------------------------------------------------------------------- state
 
@@ -126,6 +143,7 @@ class WorkbenchController extends ChangeNotifier {
           page.items.where((c) => !c.isResolved && c.canClaim(selfId)).toList();
       for (final row in queue) {
         _rememberAssignee(row.id, row.assigneeId);
+        _rememberInbox(row.id, row.inboxId);
       }
       final ids = queue.map((c) => c.id).toSet();
       final baseline = _receptionBaseline;
@@ -442,9 +460,22 @@ class WorkbenchController extends ChangeNotifier {
         break;
     }
     if (event.type == 'message.created') {
-      if (event.data['senderType'] == 'VISITOR' &&
+      if (event.meta.containsKey('assigneeId')) {
+        final raw = event.meta['assigneeId'];
+        _rememberAssignee(event.conversationId, raw is String ? raw : null);
+      }
+      final inboxName = event.meta['inboxName'];
+      if (inboxName is String && inboxName.trim().isNotEmpty) {
+        _conversationInbox[event.conversationId] = inboxName.trim();
+      }
+      // alert 由服务端按当前接待人计算。没有这个字段时才退回本地判断。
+      final marked = event.meta['alert'];
+      final shouldAlert = event.data['senderType'] == 'VISITOR' &&
           event.data['private'] != true &&
-          _shouldAlertVisitorMessage(event.conversationId)) {
+          (marked is bool
+              ? marked
+              : _shouldAlertVisitorMessage(event.conversationId));
+      if (shouldAlert) {
         var senderName = asString(event.data['senderName']);
         if (senderName.trim().isEmpty) {
           senderName = _visitorNameOf(event.conversationId);
@@ -768,6 +799,7 @@ class WorkbenchController extends ChangeNotifier {
       }
       for (final row in page.items) {
         _rememberAssignee(row.id, row.assigneeId);
+        _rememberInbox(row.id, row.inboxId);
         final previous = _notificationSequences[row.id];
         // 首次打开只建基线；新会话只提醒本次工作台打开后到达的消息。
         if (silent &&
@@ -824,13 +856,16 @@ class WorkbenchController extends ChangeNotifier {
     }
   }
 
-  /// 模拟一条站内推送，供设置页预览右上角弹窗效果；不影响真实消息与声音。
+  /// 模拟一条站内推送，供设置页预览右下角弹窗效果；不影响真实消息与声音。
   void previewInAppPush() {
-    inAppPush.push(InAppMessagePush(
-      messageId: 'preview-${DateTime.now().microsecondsSinceEpoch}',
-      conversationId: _selectedId ?? '',
-      sender: '测试客户',
-      preview: '这是一条测试消息，用于预览右上角弹窗提醒效果。',
+    noticeHub.show(NoticeItem(
+      id: 'preview-${DateTime.now().microsecondsSinceEpoch}',
+      kind: NoticeKind.card,
+      title: '测试客户',
+      body: '这是一条测试消息，用于预览站内弹窗提醒效果。',
+      avatarLabel: '测',
+      openId: _selectedId ?? '',
+      actionLabel: '去处理',
     ));
   }
 
@@ -842,7 +877,7 @@ class WorkbenchController extends ChangeNotifier {
     final suppressSound = _suppressMessageSound(conversationId);
     final foregroundNotice =
         conversationId != _selectedId || !pageVisible() || _conversationIsResolved(_selectedId);
-    // 站内右上角浮层：页面可见、且当前不是在专注阅读这个会话时才弹。
+    // 站内右下角浮层：页面可见、且当前不是在专注阅读这个会话时才弹。
     // 注意 readingThread 为 false（停在设置/知识库等非会话页）时也要弹，
     // 否则 _selectedId 残留会让这类消息被漏掉。
     final showInAppPush = pageVisible() &&
@@ -850,11 +885,15 @@ class WorkbenchController extends ChangeNotifier {
             conversationId != _selectedId ||
             _conversationIsResolved(_selectedId));
     if (showInAppPush) {
-      inAppPush.push(InAppMessagePush(
-        messageId: id,
-        conversationId: conversationId,
-        sender: name,
-        preview: body,
+      noticeHub.show(NoticeItem(
+        id: id,
+        kind: NoticeKind.card,
+        title: name,
+        body: body,
+        avatarLabel: name,
+        groupKey: conversationId,
+        openId: conversationId,
+        actionLabel: '去处理',
       ));
     }
     if (visitorAlert != null) {
@@ -863,7 +902,8 @@ class WorkbenchController extends ChangeNotifier {
       messageAlert(id, body,
           senderName: name,
           foregroundNotice: foregroundNotice,
-          suppressSound: suppressSound);
+          suppressSound: suppressSound,
+          spoken: _receptionSpoken(conversationId));
     }
     if (_alertedMessages.length > 500) {
       _alertedMessages.remove(_alertedMessages.first);
@@ -910,17 +950,33 @@ class WorkbenchController extends ChangeNotifier {
         : senderName.trim();
     final id = '$kind-$conversationId';
     if (pageVisible()) {
-      inAppPush.push(InAppMessagePush(
-        messageId: id,
-        conversationId: conversationId,
-        sender: name,
-        preview: body,
+      noticeHub.show(NoticeItem(
+        id: id,
+        kind: NoticeKind.card,
+        title: name,
+        body: body,
+        icon: switch (kind) {
+          'transfer' => Icons.swap_horiz_rounded,
+          'assigned' => Icons.person_add_alt_1_rounded,
+          _ => Icons.support_agent_rounded,
+        },
+        accent: switch (kind) {
+          'transfer' => const Color(0xFF845EF7),
+          'assigned' => const Color(0xFF3263FF),
+          _ => const Color(0xFF12B886),
+        },
+        groupKey: conversationId,
+        openId: conversationId,
+        actionLabel: '去处理',
       ));
     }
     if (visitorAlert != null) {
       visitorAlert!(id, name);
     } else {
-      messageAlert(id, body, senderName: name, foregroundNotice: true);
+      messageAlert(id, body,
+          senderName: name,
+          foregroundNotice: true,
+          spoken: kind == 'reception' ? _receptionSpoken(conversationId) : '');
     }
   }
 
@@ -975,13 +1031,30 @@ class WorkbenchController extends ChangeNotifier {
   }
 
   /// 已知归属：自己的和待接待要响，同事的不响。
-  /// 当前列表还没有这通会话时，普通坐席收得到就说明是自己的或待接待。
+  /// 只在事件没有带 alert 时使用。列表里还没有这通会话时，普通坐席收得到就按自己的或待接待处理。
   final Map<String, String?> _knownAssignee = {};
 
   void _rememberAssignee(String conversationId, String? assigneeId) {
     if (conversationId.isEmpty) return;
     final owner = assigneeId?.trim() ?? '';
     _knownAssignee[conversationId] = owner.isEmpty ? null : owner;
+  }
+
+  void _rememberInbox(String conversationId, String inboxId) {
+    if (conversationId.isEmpty) return;
+    final name = _inboxNames[inboxId]?.trim() ?? '';
+    if (name.isNotEmpty) _conversationInbox[conversationId] = name;
+  }
+
+  /// 未分配才换成入口名。已经分给自己的消息返回空，继续用原来的新消息播报。
+  String _receptionSpoken(String conversationId) {
+    if (!_knownAssignee.containsKey(conversationId)) return '';
+    final owner = _knownAssignee[conversationId];
+    if (owner != null && owner.isNotEmpty) return '';
+    final business = _conversationInbox[conversationId]?.trim() ?? '';
+    if (business.isEmpty) return '有客户待接待';
+    final short = String.fromCharCodes(business.runes.take(20));
+    return '$short有客户待接待';
   }
 
   bool _shouldAlertVisitorMessage(String conversationId) {
@@ -1977,7 +2050,7 @@ class WorkbenchController extends ChangeNotifier {
     _stateSubscription?.cancel();
     _reconnectSubscription?.cancel();
     _socket?.dispose();
-    inAppPush.dispose();
+    if (_ownsNoticeHub) noticeHub.dispose();
     super.dispose();
   }
 }

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:tongyu_agent_console/src/ui/desk_notice.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -306,9 +307,7 @@ Future<void> promptAndroidAppUpdateIfNeeded(
 }) async {
   if (!runningOnAndroid) {
     if (manual && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('当前不是安卓安装包，请使用网页版的检查更新')),
-      );
+      showDeskNotice(context, '当前不是安卓安装包，请使用网页版的检查更新');
     }
     return;
   }
@@ -316,9 +315,8 @@ Future<void> promptAndroidAppUpdateIfNeeded(
   if (!context.mounted) return;
   if (result.error != null) {
     if (manual) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result.error!)),
-      );
+      showDeskNotice(context, result.error!,
+          icon: Icons.error_outline, accent: const Color(0xFFE03131));
     }
     return;
   }
@@ -326,12 +324,9 @@ Future<void> promptAndroidAppUpdateIfNeeded(
     await clearDownloadedApk();
     if (!context.mounted) return;
     if (manual) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '已是最新版本（${result.localVersion} · ${result.localBuildNumber}）',
-          ),
-        ),
+      showDeskNotice(
+        context,
+        '已是最新版本（${result.localVersion} · ${result.localBuildNumber}）',
       );
     }
     return;

@@ -195,6 +195,7 @@ export class TongYuWidgetElement extends HTMLElement {
       source?: string;
       identityToken?: string;
       keyboardOpen?: boolean;
+      height?: number;
     } = {};
     try {
       parsed = typeof payload === 'string'
@@ -210,7 +211,8 @@ export class TongYuWidgetElement extends HTMLElement {
     switch (parsed.type) {
       case 'host-viewport':
         if (typeof parsed.keyboardOpen === 'boolean') {
-          this.#view?.setHostViewport(parsed.keyboardOpen);
+          const height = typeof parsed.height === 'number' ? parsed.height : 0;
+          this.#view?.setHostViewport(parsed.keyboardOpen, height);
         }
         break;
       case 'authenticate':

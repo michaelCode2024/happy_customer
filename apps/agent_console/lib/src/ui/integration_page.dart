@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:tongyu_agent_console/src/ui/desk_notice.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:tongyu_agent_console/src/theme.dart';
 import 'package:tongyu_agent_console/src/ui/code_block.dart';
@@ -99,8 +100,7 @@ class _IntegrationPageState extends State<IntegrationPage> {
     }
   }
 
-  void _notice(String text) =>
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  void _notice(String text) => showDeskNotice(context, text);
 
   /// 打开接口文档。不公开文档的实例（DOCS_ENABLED=false）靠服务端签发的短期
   /// Cookie 放行，所以先换一次 Cookie 再开新标签：直接给地址只会跳回首页。

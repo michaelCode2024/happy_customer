@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:tongyu_agent_console/src/ui/desk_notice.dart';
 import 'package:tongyu_agent_console/src/util/labels.dart';
 import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
 import 'package:tongyu_agent_console/src/api/models.dart';
@@ -72,7 +73,7 @@ class _SupportAssetsPageState extends State<SupportAssetsPage> {
 
   void _notice(String text) {
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+      showDeskNotice(context, text);
     }
   }
 

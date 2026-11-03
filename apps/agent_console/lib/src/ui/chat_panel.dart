@@ -1,3 +1,4 @@
+import 'package:tongyu_agent_console/src/ui/desk_notice.dart';
 import 'package:tongyu_agent_console/src/ui/error_banner.dart';
 import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
 import 'package:tongyu_agent_console/src/ui/ai_assist_panel.dart';
@@ -12,6 +13,7 @@ import 'package:flutter/rendering.dart';
 import 'package:tongyu_agent_console/src/api/models.dart';
 import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
 import 'package:tongyu_agent_console/src/theme.dart';
+import 'package:tongyu_agent_console/src/util/notice.dart';
 import 'package:tongyu_agent_console/src/util/attachment_picker.dart';
 import 'package:tongyu_agent_console/src/util/browser_chrome.dart';
 import 'package:tongyu_agent_console/src/util/voice_recording.dart';
@@ -83,6 +85,7 @@ class _ChatPanelState extends State<ChatPanel> {
   final List<Attachment> _pending = <Attachment>[];
 
   bool _noteMode = false;
+  int _blockFlash = 0;
   bool _isAiDraft = false;
   bool _sending = false;
   bool _uploading = false;
@@ -90,60 +93,26 @@ class _ChatPanelState extends State<ChatPanel> {
   final Map<String, int> _voiceDurations = {};
 
   /// 会话区里的一句话提示（发送被拦截、发送失败、已转发等）。
-  ///
-  /// 做成浮在消息区底部的小胶囊，而不是 SnackBar：不需要占满宽度、不会盖住
-  /// 输入框，几秒后自己消失。卡片的计时和淡入淡出由 [_ChatTipCard] 自己管，
-  /// 这里只负责把文案换掉、让同一时刻最多只有一条。
-  String? _tip;
-  int _tipSeq = 0;
-
+  /// 统一走右下角通知宿主的轻提示档，不再单独维护浮层与计时。
   void _showTip(String message) {
-    setState(() {
-      _tip = message;
-      _tipSeq++;
-    });
+    widget.workbench.noticeHub.show(NoticeItem(
+      id: 'chat-tip-${DateTime.now().microsecondsSinceEpoch}',
+      kind: NoticeKind.toast,
+      title: message,
+    ));
   }
 
-  void _hideTip() {
-    if (!mounted || _tip == null) return;
-    setState(() => _tip = null);
-  }
-
-  /// 标记解决后的小提示：挂在窗口右上角的浮层里，几秒后自动消失。
-  /// 走 root overlay 而不是会话区，是为了不挤占布局、也不盖住聊天内容。
-  OverlayEntry? _resolveToastEntry;
-
+  /// 标记解决后的轻提示：统一走右下角通知宿主，带「查看已结束」入口。
   void _showResolveToast() {
-    _dismissResolveToast();
-    final overlay = Overlay.maybeOf(context, rootOverlay: true);
-    if (overlay == null) return;
-    late final OverlayEntry entry;
-    entry = OverlayEntry(
-      builder: (overlayContext) => Positioned(
-        top: MediaQuery.paddingOf(overlayContext).top + 12,
-        right: 16,
-        child: _ResolveToastCard(
-          onViewResolved: () =>
-              widget.workbench.setFilter(QueueFilter.resolved),
-          onClosed: () {
-            if (!identical(_resolveToastEntry, entry)) return;
-            _resolveToastEntry = null;
-            entry.remove();
-            entry.dispose();
-          },
-        ),
-      ),
-    );
-    _resolveToastEntry = entry;
-    overlay.insert(entry);
-  }
-
-  void _dismissResolveToast() {
-    final entry = _resolveToastEntry;
-    if (entry == null) return;
-    _resolveToastEntry = null;
-    entry.remove();
-    entry.dispose();
+    widget.workbench.noticeHub.show(NoticeItem(
+      id: 'resolve-${DateTime.now().microsecondsSinceEpoch}',
+      kind: NoticeKind.toast,
+      title: '已标记解决',
+      icon: Icons.check_circle_rounded,
+      accent: const Color(0xFF12B886),
+      actionLabel: '查看已结束',
+      onAction: () => widget.workbench.setFilter(QueueFilter.resolved),
+    ));
   }
 
   Future<void> _attachVoice(RecordedVoice voice) async {
@@ -276,12 +245,6 @@ class _ChatPanelState extends State<ChatPanel> {
   @override
   void dispose() {
     _readTimer?.cancel();
-    final toast = _resolveToastEntry;
-    _resolveToastEntry = null;
-    if (toast != null) {
-      toast.remove();
-      toast.dispose();
-    }
     if (_draftLoaded && _draftConversationId != null && !_noteMode) {
       unawaited(widget.workbench.api.saveDraft(
           _draftConversationId!, _composer.text,
@@ -314,8 +277,6 @@ class _ChatPanelState extends State<ChatPanel> {
       _stickToBottom = true;
       _userScrolling = false;
       _lastStickMaxExtent = null;
-      // 换会话后旧提示没有意义，也不该浮在另一个会话的消息区上。
-      _tip = null;
       _scrollToBottom();
     }
     if (lastId != _lastMessageId) {
@@ -492,6 +453,31 @@ class _ChatPanelState extends State<ChatPanel> {
     }
   }
 
+  /// 已结束或别人接待时，输入区换成常驻条，不再用右下角胶囊说同一句话。
+  _ReplyBlock? _replyBlock(Conversation conversation, String selfId) {
+    if (conversation.isResolved) {
+      return const _ReplyBlock(
+        '会话已结束，不能再回复',
+        '访客再次咨询会开始新会话',
+        canNote: true,
+      );
+    }
+    if (conversation.isHeldByOther(selfId)) {
+      final name = conversation.assigneeName.trim().isEmpty
+          ? '其他客服'
+          : conversation.assigneeName.trim();
+      if (!widget.workbench.seesTeam) {
+        return _ReplyBlock('该会话已交给「$name」', '你只能查看记录', canNote: false);
+      }
+      return _ReplyBlock(
+        '该会话由「$name」接待中',
+        '请先转派给自己后再回复',
+        canNote: true,
+      );
+    }
+    return null;
+  }
+
   /// 输入区常驻说明。可领取会话改由底部接待坞提示，这里不再重复。
   String? _composerHint(Conversation conversation, String selfId) {
     if (_noteMode) {
@@ -500,17 +486,8 @@ class _ChatPanelState extends State<ChatPanel> {
     if (conversation.canClaim(selfId)) {
       return null;
     }
-    if (conversation.isHeldByOther(selfId)) {
-      final name = conversation.assigneeName.trim().isEmpty
-          ? '其他客服'
-          : conversation.assigneeName.trim();
-      if (!widget.workbench.seesTeam) {
-        return '该会话已交给「$name」，你只能查看记录';
-      }
-      return '该会话由「$name」接待中，请先转派给自己后再回复；内部备注仍可发送。';
-    }
-    if (conversation.isResolved) {
-      return '会话已结束。访客再次咨询会开始新会话。';
+    if (conversation.isHeldByOther(selfId) || conversation.isResolved) {
+      return null;
     }
     return null;
   }
@@ -542,7 +519,12 @@ class _ChatPanelState extends State<ChatPanel> {
     if (!_noteMode && conversation != null) {
       final block = conversation.publicReplyBlockReason(workbench.selfId);
       if (block != null) {
-        _showTip(block);
+        if (conversation.isResolved ||
+            conversation.isHeldByOther(workbench.selfId)) {
+          setState(() => _blockFlash++);
+        } else {
+          _showTip(block);
+        }
         return;
       }
     }
@@ -911,26 +893,6 @@ class _ChatPanelState extends State<ChatPanel> {
                       ),
                     ),
                   ),
-                  // 轻提示浮在消息区底部、输入框上方：不占布局、不挡输入，
-                  // 同一时刻只有一条（见 _ChatTipCard）。
-                  if (_tip != null)
-                    Positioned(
-                      left: 16,
-                      right: 16,
-                      bottom: 12,
-                      child: IgnorePointer(
-                        child: Center(
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 460),
-                            child: _ChatTipCard(
-                              message: _tip!,
-                              seq: _tipSeq,
-                              onClosed: _hideTip,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
                 ],
               ),
             ),
@@ -1037,15 +999,7 @@ class _ChatPanelState extends State<ChatPanel> {
                   unawaited(workbench.reloadSelected());
                   unawaited(workbench.refreshConversations(silent: true));
                   if (!mounted) return;
-                  final messenger = ScaffoldMessenger.maybeOf(context);
-                  messenger
-                    ?..hideCurrentSnackBar()
-                    ..showSnackBar(const SnackBar(
-                      content: Text('接单已超时，会话正在重新分配'),
-                      duration: Duration(milliseconds: 2200),
-                      behavior: SnackBarBehavior.floating,
-                      margin: EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    ));
+                  showDeskNotice(context, '接单已超时，会话正在重新分配');
                 },
                 onClaim: () async {
                   await workbench.claim();
@@ -1072,6 +1026,15 @@ class _ChatPanelState extends State<ChatPanel> {
               supportsFiles: widget.picker.supportsArbitraryFiles,
               quote: workbench.replyTo,
               statusHint: _composerHint(conversation, workbench.selfId),
+              blockTitle: _noteMode
+                  ? null
+                  : _replyBlock(conversation, workbench.selfId)?.title,
+              blockDetail: _replyBlock(conversation, workbench.selfId)?.detail,
+              onWriteNote: _replyBlock(conversation, workbench.selfId)?.canNote ==
+                      true
+                  ? () => setState(() => _noteMode = true)
+                  : null,
+              blockFlash: _blockFlash,
               lockPublicReply: (conversation.isHeldByOther(workbench.selfId) &&
                       !workbench.seesTeam) ||
                   (!_noteMode &&
@@ -1547,8 +1510,7 @@ class _ThreadHeader extends StatelessWidget {
     if (!context.mounted) {
       return;
     }
-    // 反馈不再用顶栏横幅：横幅会把整个工作区往下挤一格。改由会话区里
-    // 浮一张小提示卡（见 _ResolveToastCard），不占布局位置。
+    // 结果走右下角胶囊，清掉可能还挂着的旧底部条。
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..clearMaterialBanners();
@@ -1570,279 +1532,6 @@ class _ThreadHeader extends StatelessWidget {
     await showDialog<void>(
       context: context,
       builder: (context) => _TagDialog(workbench: workbench),
-    );
-  }
-}
-
-/// 会话区底部的小胶囊提示（发送被拦截、失败、已转发等）。
-///
-/// 替代原来那条底部通栏 SnackBar：浅色小卡片、宽度随文案收窄、贴消息区底部，
-/// 不盖住输入框；淡入后停留 3 秒自己淡出，下一次提示会重置计时并重新入场。
-/// 同一时刻只有一条，[seq] 变化表示又弹了一次。
-class _ChatTipCard extends StatefulWidget {
-  const _ChatTipCard({
-    required this.message,
-    required this.seq,
-    required this.onClosed,
-  });
-
-  final String message;
-
-  /// 每弹一次自增；同一条文案重复弹出时也重新计时、重新入场。
-  final int seq;
-
-  /// 淡出结束，浮层可以移除了。
-  final VoidCallback onClosed;
-
-  @override
-  State<_ChatTipCard> createState() => _ChatTipCardState();
-}
-
-class _ChatTipCardState extends State<_ChatTipCard>
-    with SingleTickerProviderStateMixin {
-  static const Duration _linger = Duration(seconds: 3);
-
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 180),
-  );
-  late final CurvedAnimation _curve =
-      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic);
-  late final Animation<Offset> _slide =
-      Tween<Offset>(begin: const Offset(0, .3), end: Offset.zero)
-          .animate(_curve);
-  Timer? _timer;
-  bool _closing = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller.forward();
-    _restartTimer();
-  }
-
-  @override
-  void didUpdateWidget(covariant _ChatTipCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.seq == oldWidget.seq) return;
-    if (_closing) {
-      // 正在淡出时又弹了新提示：取消退出，直接以新文案重新入场。
-      _closing = false;
-      _controller.forward(from: 0);
-    }
-    _restartTimer();
-  }
-
-  void _restartTimer() {
-    _timer?.cancel();
-    _timer = Timer(_linger, _close);
-  }
-
-  Future<void> _close() async {
-    if (_closing) return;
-    _closing = true;
-    _timer?.cancel();
-    await _controller.reverse();
-    if (mounted) widget.onClosed();
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    _curve.dispose();
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return FadeTransition(
-      opacity: _curve,
-      child: SlideTransition(
-        position: _slide,
-        child: Semantics(
-          container: true,
-          liveRegion: true,
-          label: widget.message,
-          excludeSemantics: true,
-          child: Material(
-            key: const ValueKey('desk-chat-tip'),
-            color: scheme.surface,
-            elevation: 4,
-            shadowColor: Colors.black.withAlpha(36),
-            shape: StadiumBorder(
-              side: BorderSide(color: scheme.outlineVariant),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 8, 16, 8),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Icon(Icons.info_outline, size: 15, color: scheme.primary),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      widget.message,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurface,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 操作成功的轻提示。做成右上角浮起的小胶囊而不是顶栏横幅：横幅会把整块
-/// 工作区往下挤，而这里只需要一句话加一个「去看看」的入口。
-/// 计时与淡出都自己管，动画放完再回调 [onClosed] 让调用方摘掉浮层。
-class _ResolveToastCard extends StatefulWidget {
-  const _ResolveToastCard({
-    required this.onViewResolved,
-    required this.onClosed,
-  });
-
-  /// 点了「查看已结束」。
-  final VoidCallback onViewResolved;
-
-  /// 淡出结束，浮层可以移除了。
-  final VoidCallback onClosed;
-
-  @override
-  State<_ResolveToastCard> createState() => _ResolveToastCardState();
-}
-
-class _ResolveToastCardState extends State<_ResolveToastCard>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 180),
-  );
-  late final CurvedAnimation _curve =
-      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic);
-  late final Animation<Offset> _slide =
-      Tween<Offset>(begin: const Offset(0, -0.35), end: Offset.zero)
-          .animate(_curve);
-  Timer? _timer;
-  bool _closing = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller.forward();
-    _timer = Timer(const Duration(seconds: 5), _close);
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    _curve.dispose();
-    _controller.dispose();
-    super.dispose();
-  }
-
-  Future<void> _close() async {
-    if (_closing) return;
-    _closing = true;
-    _timer?.cancel();
-    await _controller.reverse();
-    if (mounted) widget.onClosed();
-  }
-
-  void _viewResolved() {
-    widget.onViewResolved();
-    unawaited(_close());
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 320),
-      child: FadeTransition(
-        opacity: _curve,
-        child: SlideTransition(
-          position: _slide,
-          child: Material(
-            key: const ValueKey('desk-resolve-toast'),
-            color: scheme.surface,
-            elevation: 6,
-            shadowColor: Colors.black.withOpacity(.18),
-            shape: StadiumBorder(
-              side: BorderSide(color: scheme.outlineVariant),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 5, 4, 5),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  const Icon(
-                    Icons.check_circle_rounded,
-                    size: 16,
-                    color: Color(0xFF12B76A),
-                  ),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      '已标记解决',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        fontWeight: FontWeight.w500,
-                        color: scheme.onSurface,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 2),
-                  Semantics(
-                    button: true,
-                    label: '查看已结束',
-                    identifier: 'desk.resolve.viewResolved',
-                    child: TextButton(
-                      key: const ValueKey('desk-resolve-view-resolved'),
-                      onPressed: _viewResolved,
-                      style: TextButton.styleFrom(
-                        minimumSize: const Size(0, 30),
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        foregroundColor: scheme.primary,
-                        textStyle: theme.textTheme.bodySmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      child: const Text('查看已结束'),
-                    ),
-                  ),
-                  IconButton(
-                    key: const ValueKey('desk-resolve-toast-dismiss'),
-                    onPressed: () => unawaited(_close()),
-                    tooltip: '关闭',
-                    iconSize: 15,
-                    padding: EdgeInsets.zero,
-                    visualDensity: VisualDensity.compact,
-                    constraints:
-                        const BoxConstraints(minWidth: 28, minHeight: 28),
-                    icon: Icon(
-                      Icons.close_rounded,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
@@ -3633,6 +3322,122 @@ class _FileChip extends StatelessWidget {
   }
 }
 
+class _ReplyBlock {
+  const _ReplyBlock(this.title, this.detail, {required this.canNote});
+
+  final String title;
+  final String detail;
+  final bool canNote;
+}
+
+/// 不能再回复时贴在输入区的常驻条。再按发送只让这条闪一下。
+class _BlockedReplyBar extends StatefulWidget {
+  const _BlockedReplyBar({
+    required this.title,
+    required this.detail,
+    required this.flash,
+    this.onWriteNote,
+  });
+
+  final String title;
+  final String detail;
+  final int flash;
+  final VoidCallback? onWriteNote;
+
+  @override
+  State<_BlockedReplyBar> createState() => _BlockedReplyBarState();
+}
+
+class _BlockedReplyBarState extends State<_BlockedReplyBar>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _flash = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 180),
+  );
+
+  @override
+  void didUpdateWidget(covariant _BlockedReplyBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.flash != oldWidget.flash) {
+      _flash.forward(from: 0).whenComplete(() {
+        if (mounted) _flash.reverse();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _flash.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _flash,
+      builder: (context, _) {
+        final hot = _flash.value > 0.01;
+        return Material(
+          color: Theme.of(context).colorScheme.surface,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+              decoration: BoxDecoration(
+                color: hot ? const Color(0xFFFFE0A3) : const Color(0xFFFFF8EB),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: hot ? const Color(0xFFE8A317) : const Color(0xFFF0DBB8),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 28,
+                    height: 28,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.lock_outline,
+                        size: 16, color: Color(0xFF7A4E00)),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(widget.title,
+                            style: const TextStyle(
+                                fontSize: 13, fontWeight: FontWeight.w600)),
+                        if (widget.detail.isNotEmpty)
+                          Text(widget.detail,
+                              style: const TextStyle(
+                                  fontSize: 12, color: Color(0xFF637B9E))),
+                      ],
+                    ),
+                  ),
+                  if (widget.onWriteNote != null)
+                    OutlinedButton(
+                      onPressed: widget.onWriteNote,
+                      style: OutlinedButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        foregroundColor: const Color(0xFF0C1D40),
+                      ),
+                      child: const Text('写内部备注'),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 /// The composer.
 class _Composer extends StatefulWidget {
   const _Composer({
@@ -3648,6 +3453,10 @@ class _Composer extends StatefulWidget {
     required this.supportsFiles,
     required this.quote,
     this.statusHint,
+    this.blockTitle,
+    this.blockDetail,
+    this.onWriteNote,
+    this.blockFlash = 0,
     this.lockPublicReply = false,
     this.aiOpen = false,
     this.aiPanel,
@@ -3679,8 +3488,14 @@ class _Composer extends StatefulWidget {
   /// The message the next reply will quote, if the agent picked one.
   final ChatMessage? quote;
 
-  /// 输入区常驻说明（他人会话 / 已解决等）。
+  /// 输入区常驻说明（他人会话 / 已解决等）。已改由 [blockTitle] 常驻条承接时为空。
   final String? statusHint;
+
+  /// 不能公开回复时替换输入框的主句。备注模式仍显示输入框。
+  final String? blockTitle;
+  final String? blockDetail;
+  final VoidCallback? onWriteNote;
+  final int blockFlash;
 
   /// 为 true 时禁止公开回复的附件与语音（内部备注不受影响）。
   final bool lockPublicReply;
@@ -3714,6 +3529,15 @@ class _ComposerState extends State<_Composer> {
 
   @override
   Widget build(BuildContext context) {
+    final blockTitle = widget.blockTitle;
+    if (blockTitle != null && !widget.noteMode) {
+      return _BlockedReplyBar(
+        title: blockTitle,
+        detail: widget.blockDetail ?? '',
+        flash: widget.blockFlash,
+        onWriteNote: widget.onWriteNote,
+      );
+    }
     final controller = widget.controller;
     final focusNode = widget.focusNode;
     final noteMode = widget.noteMode;
@@ -3727,6 +3551,10 @@ class _ComposerState extends State<_Composer> {
     final quote = widget.quote;
     final statusHint = widget.statusHint;
     final lockPublicReply = widget.lockPublicReply;
+    // 已结束、他人接待等各有自己的原因；锁住输入时不要一律写成接待或转派。
+    final lockedHint = (statusHint != null && statusHint.isNotEmpty)
+        ? statusHint
+        : '请先完成接待或转派后再回复客户';
     final aiPanel = widget.aiPanel;
     final onChanged = widget.onChanged;
     final onToggleNote = widget.onToggleNote;
@@ -3828,14 +3656,14 @@ class _ComposerState extends State<_Composer> {
                 ),
               ),
               toolIcon(
-                tooltip: lockPublicReply ? '请先完成接待或转派' : '发送图片',
+                tooltip: lockPublicReply ? lockedHint : '发送图片',
                 icon: Icons.image_outlined,
                 accent: RelayTheme.teal,
                 onPressed: uploading || lockPublicReply ? null : onPickImage,
               ),
               if (supportsFiles)
                 toolIcon(
-                  tooltip: lockPublicReply ? '请先完成接待或转派' : '发送文件',
+                  tooltip: lockPublicReply ? lockedHint : '发送文件',
                   icon: Icons.folder_open_outlined,
                   accent: RelayTheme.blue,
                   onPressed: uploading || lockPublicReply ? null : onPickFile,
@@ -3973,7 +3801,7 @@ class _ComposerState extends State<_Composer> {
                       hintText: noteMode
                           ? '写一条内部备注，访客看不到'
                           : lockPublicReply
-                              ? '请先完成接待或转派后再回复客户'
+                              ? lockedHint
                               : visitorTyping
                                   ? '对方正在输入…'
                                   : '输入回复内容…',
@@ -4324,7 +4152,10 @@ class _MobileComposerState extends State<_MobileComposer> {
                               hintText: c.noteMode
                                   ? '添加内部备注…'
                                   : c.lockPublicReply
-                                      ? '请先完成接待或转派'
+                                      ? ((c.statusHint != null &&
+                                              c.statusHint!.isNotEmpty)
+                                          ? c.statusHint!
+                                          : '请先完成接待或转派')
                                       : c.visitorTyping
                                           ? '对方正在输入…'
                                           : '输入消息…',

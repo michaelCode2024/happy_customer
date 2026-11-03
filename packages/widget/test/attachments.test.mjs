@@ -152,6 +152,8 @@ test('访客端拒绝私有消息事件，公开回复仍能实时显示', async
   globalThis.WebSocket = FakeWebSocket;
   VisitorSocket.prototype.connect = realConnect;
   VisitorSocket.prototype.close = realClose;
+  VisitorApi.prototype.bootstrap = async () => ({token:'test',visitorId:'v1',expiresIn:3600,inbox:{},agentsOnline:1});
+  VisitorApi.prototype.listConversations = async () => ({items:[{id:'c1',visitorUnread:0,lastSequence:0,status:'OPEN'}]});
   VisitorApi.prototype.markRead = async () => ({});
   VisitorApi.prototype.markDelivered = async () => ({});
   VisitorApi.prototype.pageMessages = async () => ({items:[],hasOlder:false});

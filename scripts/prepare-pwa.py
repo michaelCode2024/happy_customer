@@ -41,6 +41,24 @@ assert (
     and release_info['notes']
     and all(isinstance(n, str) and n.strip() for n in release_info['notes'])
 ), '缺少更新说明'
+# 旧 worker 按「路径+查询」整段命中缓存。入口不带新的 release 时，刷新仍执行上一版引导脚本。
+index_path = web / 'index.html'
+index_html = index_path.read_text(encoding='utf-8')
+index_html = index_html.replace(
+    "tongyuAppendBootstrap('flutter_bootstrap.js')",
+    f"tongyuAppendBootstrap('flutter_bootstrap.js?release={release}')",
+)
+index_html = index_html.replace(
+    'src="pwa-client.js"',
+    f'src="pwa-client.js?release={release}"',
+)
+index_html = index_html.replace(
+    'src="push-client.js"',
+    f'src="push-client.js?release={release}"',
+)
+if f'flutter_bootstrap.js?release={release}' not in index_html:
+    raise SystemExit('index.html 未能写上引导脚本版本')
+index_path.write_text(index_html, encoding='utf-8')
 files = [
     'pwa-release.json',
     'index.html',
@@ -67,7 +85,11 @@ version = hashlib.sha256(
     + main_bytes
     + (root / 'apps/agent_console/web/tongyu-push-sw.js').read_bytes()
 ).hexdigest()[:16]
-assets = ['/console/' + f for f in files] + [
+versioned_entries = {'flutter_bootstrap.js', 'pwa-client.js', 'push-client.js'}
+assets = [
+    '/console/' + (f + '?release=' + release if f in versioned_entries else f)
+    for f in files
+] + [
     '/console/main.dart.js?release=' + release
 ]
 (web / 'pwa-assets.json').write_text(

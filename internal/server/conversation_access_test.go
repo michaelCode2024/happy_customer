@@ -128,11 +128,16 @@ func TestConversationOwnershipIsolation(t *testing.T) {
 		t.Fatal("valid access lost")
 	}
 	payload := realtime.Encode(realtime.Event{Type: "message.created", ConversationID: ids[0].String(), Data: map[string]any{"content": "isolation-secret"}})
-	if !strings.Contains(string(api.filterConsoleEvent(ctx, p1, payload)), "isolation-secret") {
+	own := string(api.filterConsoleEvent(ctx, p1, payload))
+	if !strings.Contains(own, "isolation-secret") || !strings.Contains(own, `"alert":true`) {
 		t.Fatal("own realtime denied")
 	}
 	if strings.Contains(string(api.filterConsoleEvent(ctx, p2, payload)), "isolation-secret") {
 		t.Fatal("realtime leaked")
+	}
+	supervisorView := string(api.filterConsoleEvent(ctx, ps, payload))
+	if !strings.Contains(supervisorView, "isolation-secret") || !strings.Contains(supervisorView, `"alert":false`) {
+		t.Fatal("supervisor alerted on another agent's message")
 	}
 	// Simulate an existing socket subscription surviving a transfer.
 	exec(`update conversation set assignee_id=$2 where id=$1`, ids[0], second)
@@ -149,8 +154,9 @@ func TestConversationOwnershipIsolation(t *testing.T) {
 	if request(api.consoleSend, p1, ids[0], "/").Code != 403 {
 		t.Fatal("former assignee can still reply after transfer")
 	}
-	if !strings.Contains(string(api.filterConsoleEvent(ctx, p1, payload)), "isolation-secret") {
-		t.Fatal("former assignee realtime dropped")
+	former := string(api.filterConsoleEvent(ctx, p1, payload))
+	if !strings.Contains(former, "isolation-secret") || !strings.Contains(former, `"alert":false`) {
+		t.Fatal("former assignee realtime dropped or still alerted")
 	}
 	t.Log("PASS: bidirectional list/detail/messages/draft/search/visitor/realtime isolation; former assignee can read but not reply")
 }

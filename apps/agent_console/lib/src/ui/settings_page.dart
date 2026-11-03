@@ -6,6 +6,7 @@ import 'pwa_panel.dart';
 import 'package:tongyu_agent_console/src/util/message_alert_stub.dart'
     if (dart.library.html) 'package:tongyu_agent_console/src/util/message_alert_web.dart';
 import 'package:flutter/material.dart';
+import 'package:tongyu_agent_console/src/ui/desk_notice.dart';
 
 import 'package:tongyu_agent_console/src/api/api_exception.dart';
 import 'package:tongyu_agent_console/src/state/session_controller.dart';
@@ -241,9 +242,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   void _toast(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
-    );
+    showDeskNotice(context, message);
   }
 
   @override
@@ -1068,7 +1067,7 @@ class _VersionCard extends StatelessWidget {
           Text(
             showAndroidCheck
                 ? '安卓安装包会对照服务器发行清单检查更新；有新版本时在应用内下载，完成后打开系统安装。已下载但未安装时，下次进入会直接提示安装。'
-                : '手机网页有新版本时会提示立即更新。电脑版在后台下载，刷新页面后使用新版本。',
+                : '网页有新版本时会提示立即更新。手机和电脑都不能选稍后。',
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),

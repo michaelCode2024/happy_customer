@@ -13,6 +13,32 @@ function pushEnvironment(){
     throw new Error('当前环境不支持浏览器通知。请使用 HTTPS 打开。iPhone 请使用 iOS 16.4 或以上，并从主屏幕打开');
   if(Notification.permission==='denied')throw new Error('系统通知被阻止，请在浏览器或系统设置中允许通知后重新检查');
 }
+// 页面开久后 serviceWorker.ready 可能一直不返回。已有注册就直接用；没有活动 worker 时让等待中的版本接管，否则订阅发不出去。
+async function consolePushRegistration(){
+  let registration=await navigator.serviceWorker.getRegistration('/console/');
+  if(!registration){
+    await (window.tongyuPwaReady||navigator.serviceWorker.register('/console/tongyu-push-sw.js',{scope:'/console/'}));
+    registration=await navigator.serviceWorker.getRegistration('/console/');
+  }
+  if(registration&&!registration.active&&registration.waiting){
+    registration.waiting.postMessage({type:'ACTIVATE_QUIET'});
+    await new Promise(resolve=>{
+      let settled=false;
+      const finish=()=>{
+        if(settled)return;
+        settled=true;
+        clearTimeout(timer);
+        navigator.serviceWorker.removeEventListener('controllerchange', finish);
+        resolve();
+      };
+      const timer=setTimeout(finish, 2000);
+      navigator.serviceWorker.addEventListener('controllerchange', finish);
+    });
+    registration=await navigator.serviceWorker.getRegistration('/console/')||registration;
+  }
+  if(registration?.pushManager)return registration;
+  return navigator.serviceWorker.ready;
+}
 window.tongyuPushStatus=()=>({...tongyuPushResult,permission:window.Notification?.permission||'unsupported'});
 window.tongyuPreparePush=function(server,token){
   try{
@@ -21,19 +47,25 @@ window.tongyuPreparePush=function(server,token){
     if(!token)throw new Error('请先登录客服账号');
   }catch(error){tongyuPushResult={stage:'error',message:error.message};return Promise.reject(error)}
   if(tongyuPushPending?.token===token)return tongyuPushPending.promise;
-  const generation=++tongyuPushGeneration;
-  tongyuPushContext=null;tongyuPushResult={stage:'preparing',message:'正在准备浏览器通知…'};
+  // 核对开始时不清已有注册。页面开久后核对和点击会叠在一起，清掉后这次点击等不到授权弹窗。
+  if(tongyuPushContext&&tongyuPushContext.token!==token){
+    tongyuPushGeneration+=1;
+    tongyuPushContext=null;
+  }
+  const generation=tongyuPushGeneration;
+  if(tongyuPushResult.stage!=='enabled')tongyuPushResult={stage:'preparing',message:'正在准备浏览器通知…'};
   const promise=(async()=>{
-    const registration=await pushWait((async()=>{
-      await (window.tongyuPwaReady||navigator.serviceWorker.register('/console/tongyu-push-sw.js',{scope:'/console/'}));
-      return navigator.serviceWorker.ready;
-    })(),'通知服务尚未就绪，请联网后重试');
+    const registration=await pushWait(consolePushRegistration(),'通知服务尚未就绪，请联网后重试');
     const response=await fetch('/api/v1/console/push/key',{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(15000),cache:'no-store'});
     if(!response.ok)throw new Error(response.status===401?'登录已失效，请重新登录后开启通知':'推送服务暂不可用，请稍后重试');
     const config=await response.json();
     const encoded=config.publicKey.replace(/-/g,'+').replace(/_/g,'/');
     const key=Uint8Array.from(atob(encoded+'='.repeat((4-encoded.length%4)%4)),c=>c.charCodeAt(0));
-    const subscription=await pushWait(registration.pushManager.getSubscription(),'读取本机通知状态超时，请重试');
+    let subscription=await pushWait(registration.pushManager.getSubscription(),'读取本机通知状态超时，请重试');
+    if(subscription&&typeof subscription.expirationTime==='number'&&subscription.expirationTime<=Date.now()){
+      try{await subscription.unsubscribe();}catch(_){}
+      subscription=null;
+    }
     if(generation!==tongyuPushGeneration)throw new Error('账号已切换，请重新开启通知');
     tongyuPushContext={token,registration,key,subscription,generation};
     let enabled=false;
@@ -57,17 +89,16 @@ window.tongyuEnablePush=async function(server,token){
   try{
     pushEnvironment();
     if(new URL(server||location.origin).origin!==location.origin)throw new Error('服务地址不一致');
-    if(tongyuPushContext?.token!==token){
-      await window.tongyuPreparePush(server,token);
-      if(tongyuPushResult.stage==='enabled')return tongyuPushResult.message;
-      // 权限还没给时，订阅必须留在下一次点击里，否则 Safari 会丢掉手势授权。
-      if(Notification.permission!=='granted'||tongyuPushContext?.token!==token)
-        throw new Error('通知已准备好，请再点一次以允许浏览器推送');
-    }
     const context=tongyuPushContext;
-    if(!context)throw new Error('通知已准备好，请再点一次以允许浏览器推送');
-    // subscribe 在点击调用栈内执行；此前不等待权限、注册 worker 或网络请求。
-    const pending=context.subscription||context.registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:context.key});
+    const ready=!!(context&&context.token===token&&context.registration&&context.key);
+    if(!ready){
+      // 注册还没备好时不能先等待：一等，浏览器就不再弹出授权。这次只去准备，下一次点击再订阅。
+      window.tongyuPreparePush(server,token).catch(()=>{});
+      throw new Error('通知已准备好，请再点一次以允许浏览器推送');
+    }
+    // 订阅必须在这次点击的调用栈里发起。先等待准备或网络时，页面开久后授权弹窗不会再出现。
+    // 已有旧订阅也要重新 subscribe，复用旧对象不会再向浏览器要授权。
+    const pending=context.registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:context.key});
     tongyuPushResult={stage:'subscribing',message:'请在系统弹窗中允许通知，正在连接通知服务…'};
     const subscription=await pushWait(pending,'连接系统通知服务超时，请检查网络后重试');
     if(context.generation!==tongyuPushGeneration)throw new Error('账号已切换，请重新开启通知');
@@ -84,6 +115,10 @@ window.tongyuEnablePush=async function(server,token){
     return tongyuPushResult.message;
   }catch(error){
     let message=error.message;
+    if(error.name==='InvalidStateError'){
+      tongyuPushContext=null;
+      message='通知服务已更新，请再点一次以允许浏览器推送';
+    }
     if(error.name==='NotAllowedError'){
       const iosDevice=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
       message=Notification.permission==='denied'
@@ -123,4 +158,19 @@ window.tongyuClearPush = async function() {
   const subscription=await registration?.pushManager.getSubscription();
   if(subscription)await subscription.unsubscribe();
   await navigator.clearAppBadge?.();
+};
+// 系统通知由服务工作线程登记展示。页面直接 new Notification 时，标签开久后浏览器会把后台通知丢掉。
+window.tongyuShowDeskNotice=function(title, body, tag){
+  const text=String(title||'客户');
+  const detail=String(body||'');
+  const name=typeof tag==='string'&&tag.indexOf('tongyu-')===0?tag:'tongyu-message';
+  const options={body:detail, tag:name, icon:'/console/icons/Icon-192.png', badge:'/console/icons/Icon-192.png'};
+  const fallback=()=>{ try{ if(typeof Notification!=='undefined') new Notification(text,{body:detail, tag:name}); }catch(_){} };
+  if(typeof Notification==='undefined'||Notification.permission!=='granted')return;
+  const lookup=navigator.serviceWorker?.getRegistration?.('/console/');
+  if(!lookup){ fallback(); return; }
+  lookup.then(found=>{
+    if(found&&typeof found.showNotification==='function')return found.showNotification(text, options).catch(fallback);
+    fallback();
+  }).catch(fallback);
 };

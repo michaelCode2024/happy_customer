@@ -52,6 +52,8 @@ self.addEventListener('message', event => {
 self.addEventListener('fetch', event => {
   const request=event.request, url=new URL(request.url);
   if (request.method!=='GET' || url.origin!==self.location.origin || !url.pathname.startsWith('/console/') || url.pathname==='/console/mobile-call.html' || url.searchParams.has('token')) return;
+  // 新壳安装时的预取带着 reload。旧 worker 若把这类请求回成自己的缓存，新壳会装进旧入口，刷新后页面仍是旧的。
+  if (request.cache==='reload' || request.cache==='no-store') return;
   // canvaskit.wasm 约 6MB。经 worker 转发会失去流式编译，每次打开都要等整包下完再编译。
   if (url.pathname.startsWith('/console/canvaskit/')) return;
   event.respondWith((async () => {

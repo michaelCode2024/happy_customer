@@ -52,7 +52,10 @@ void watchDeskAlerts() {}
 void rememberDeskAlerts() {}
 
 void messageAlert(String name, String body,
-    {String senderName = '', bool foregroundNotice = false, bool suppressSound = false}) {
+    {String senderName = '',
+    bool foregroundNotice = false,
+    bool suppressSound = false,
+    String spoken = ''}) {
   if (_quietUntil?.isAfter(DateTime.now()) == true) return;
   if (defaultTargetPlatform != TargetPlatform.android || !_enabled.value)
     return;
@@ -61,6 +64,7 @@ void messageAlert(String name, String body,
     'sender': senderName,
     'body': body,
     'foreground': foregroundNotice,
+    if (spoken.trim().isNotEmpty) 'spoken': spoken.trim(),
   }).catchError((_) {});
 }
 

@@ -1,5 +1,6 @@
 import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
 import 'package:flutter/material.dart';
+import 'package:tongyu_agent_console/src/ui/desk_notice.dart';
 import 'package:flutter/services.dart';
 import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
 import 'package:tongyu_agent_console/src/api/models.dart';
@@ -155,8 +156,8 @@ class _AutomationPageState extends State<AutomationPage> {
         _revision = (result['revision'] as num).toInt();
         _dirty = false;
       });
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('已保存，新的访客会话立即使用此配置')));
+      showDeskNotice(context, '已保存，新的访客会话立即使用此配置',
+          icon: Icons.check_rounded);
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     } finally {
@@ -694,9 +695,8 @@ class _AutomationPageState extends State<AutomationPage> {
                                     await Clipboard.setData(ClipboardData(
                                         text: asString(_snippet[pair.$2])));
                                     if (mounted) {
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(const SnackBar(
-                                              content: Text('已复制')));
+                                      showDeskNotice(context, '已复制',
+                                          icon: Icons.check_rounded);
                                     }
                                   })
                             ]),

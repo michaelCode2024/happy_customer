@@ -6,6 +6,7 @@ import 'package:tongyu_agent_console/src/theme.dart';
 import 'package:tongyu_agent_console/src/api/models.dart';
 import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
 import 'package:tongyu_agent_console/src/util/format.dart';
+import 'package:tongyu_agent_console/src/ui/desk_notice.dart';
 import 'package:tongyu_agent_console/src/ui/error_banner.dart';
 import 'package:tongyu_agent_console/src/ui/ai_assist_panel.dart';
 
@@ -176,9 +177,7 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
       });
       await widget.workbench.refreshConversations(silent: true);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('客户名称已更新')),
-      );
+      showDeskNotice(context, '客户名称已更新', icon: Icons.check_rounded);
     } catch (error) {
       if (!mounted) {
         return;

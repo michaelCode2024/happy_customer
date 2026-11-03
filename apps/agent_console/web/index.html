@@ -339,10 +339,6 @@
     // 所以登录页会一直看不到新包。这里在入口页直接询问正在等待的版本。
     (function () {
       if (!navigator.serviceWorker) return;
-      var ua = navigator.userAgent || '';
-      var ios = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-      // 电脑版不弹更新窗。刷新时由启动脚本接管已下载的版本。
-      if (!ios && !/Android/i.test(ua)) return;
       var asked = false, pending = false;
       function offer() {
         if (asked || pending) return;
@@ -396,24 +392,15 @@
             });
             var actions = document.createElement('div');
             actions.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;margin-top:16px';
-            function button(label, primary) {
-              var el = document.createElement('button');
-              el.type = 'button';
-              el.textContent = label;
-              el.style.cssText = primary
-                ? 'border:0;border-radius:10px;background:#3263ff;color:#fff;font:14px inherit;padding:10px 16px;cursor:pointer'
-                : 'border:0;border-radius:10px;background:transparent;color:#334155;font:14px inherit;padding:10px 12px;cursor:pointer';
-              return el;
-            }
-            var later = button('稍后', false);
-            var now = button('立即更新', true);
-            later.addEventListener('click', function () { root.remove(); });
+            var now = document.createElement('button');
+            now.type = 'button';
+            now.textContent = '立即更新';
+            now.style.cssText = 'border:0;border-radius:10px;background:#3263ff;color:#fff;font:14px inherit;padding:10px 16px;cursor:pointer';
             now.addEventListener('click', function () {
               now.disabled = true;
               navigator.serviceWorker.addEventListener('controllerchange', function () { location.reload(); });
               if (reg.waiting) reg.waiting.postMessage({type: 'ACTIVATE_UPDATE'});
             });
-            actions.appendChild(later);
             actions.appendChild(now);
             card.appendChild(actions);
             root.appendChild(card);
@@ -427,34 +414,6 @@
     })();
   </script>
   <script src="pwa-client.js"></script>
-  <script>
-    // 已打开的旧工作台仍会向页面要更新窗。电脑版在这里拦住，刷新后再换新版本。
-    (function () {
-      var ua = navigator.userAgent || '';
-      var ios = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-      if (ios || /Android/i.test(ua) || typeof window.tongyuPwaAction !== 'function') return;
-      var status = window.tongyuPwaStatus;
-      var action = window.tongyuPwaAction;
-      if (typeof status === 'function') {
-        window.tongyuPwaStatus = function () {
-          var raw = status();
-          try {
-            var data = JSON.parse(raw);
-            if (data.desktop === true) return raw;
-            data.update = false;
-            data.desktop = true;
-            return JSON.stringify(data);
-          } catch (e) {
-            return raw;
-          }
-        };
-      }
-      window.tongyuPwaAction = function (name) {
-        if (name === 'claimUpdatePrompt') return Promise.resolve('');
-        return action(name);
-      };
-    })();
-  </script>
   <script src="push-client.js"></script>
 </body>
 </html>

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:tongyu_agent_console/src/ui/desk_notice.dart';
 import 'package:flutter/services.dart';
 import 'package:tongyu_agent_console/src/api/models.dart';
 import 'package:tongyu_agent_console/src/state/session_controller.dart';
@@ -432,9 +433,7 @@ class _MobileConversationListViewState
         widget.workbench.setPriority(next);
       case 'copy_id':
         Clipboard.setData(ClipboardData(text: conversation.id));
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('已复制会话 ID')),
-        );
+        showDeskNotice(context, '已复制会话 ID', icon: Icons.check_rounded);
     }
   }
 

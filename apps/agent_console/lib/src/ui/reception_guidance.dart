@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:tongyu_agent_console/src/api/models.dart';
 import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
+import 'package:tongyu_agent_console/src/ui/desk_bar.dart';
 
 /// 跨页面保留接待入口；仅显式点击查看才导航，不抢走客服当前的会话。
 class ReceptionGuidance extends StatelessWidget {
@@ -20,137 +21,31 @@ class ReceptionGuidance extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
     final notice = workbench.receptionNotice;
     final waiting = workbench.receptionWaiting;
     // Build the label explicitly so web semantics never drop the digit.
     final waitingLabel = '有 ${waiting.toString()} 位客户正在等待接待';
-    // 同一时刻只留一条接待提示：有等待人数时用顶栏，右下角卡片让开。
+    // 有等待人数时并进顶栏横幅；新客户到达的即时提醒走右下角通知。
     final showTopBanner = waiting > 0;
-    final showArrivalCard = notice != null && !showTopBanner;
-    final size = MediaQuery.sizeOf(context);
-    // 卡片落在偏下区域，避免盖住会话标题栏上的操作。
-    final cardBottom = (size.height * 0.08).clamp(12.0, 48.0);
 
-    return Stack(children: [
-      Column(children: [
+    return Column(children: [
         if (showTopBanner)
-          Container(
-              key: const ValueKey('reception-waiting-banner'),
-              width: double.infinity,
-              margin: const EdgeInsets.all(12),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                  color: const Color(0xFFFFF6E9),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFFF0DBB8))),
-              child: Wrap(
-                  alignment: WrapAlignment.spaceBetween,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 16,
-                  runSpacing: 8,
-                  children: [
-                    Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(waitingLabel,
-                              key: ValueKey<String>(
-                                  'reception-waiting-count-$waiting'),
-                              semanticsLabel: waitingLabel,
-                              style: TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  color: colors.onSurface)),
-                          const SizedBox(height: 4),
-                          Text(
-                              notice == null
-                                  ? '队列里有可领取或待你确认的会话，请及时响应'
-                                  : '最新待接待：${notice.title}',
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  color: colors.onSurfaceVariant)),
-                        ]),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        if (notice != null)
-                          FilledButton(
-                            key: const ValueKey('reception-banner-open-notice'),
-                            onPressed: () => onOpen(notice),
-                            child: const Text('查看并接待'),
-                          ),
-                        OutlinedButton(
-                            key: const ValueKey('reception-banner-show-queue'),
-                            onPressed: onShowQueue,
-                            child: const Text('查看待接待 →')),
-                      ],
-                    ),
-                  ])),
+          DeskBar(
+            key: const ValueKey('reception-waiting-banner'),
+            tone: DeskBarTone.amber,
+            message: waitingLabel,
+            messageKey: ValueKey<String>('reception-waiting-count-$waiting'),
+            detail: notice == null
+                ? '队列里有可领取或待你确认的会话，请及时响应'
+                : '最新待接待：${notice.title}',
+            actionLabel: '查看并接待',
+            actionKey: ValueKey(notice != null
+                ? 'reception-banner-open-notice'
+                : 'reception-banner-show-queue'),
+            onAction: notice != null ? () => onOpen(notice) : onShowQueue,
+          ),
         Expanded(child: child),
-      ]),
-      if (showArrivalCard)
-        Positioned(
-            right: 12,
-            bottom: cardBottom,
-            child: SafeArea(
-              child: SizedBox(
-                  width: (size.width - 24).clamp(0, 340).toDouble(),
-                  child: Material(
-                      elevation: 3,
-                      color: colors.surface,
-                      borderRadius: BorderRadius.circular(12),
-                      child: Container(
-                          key: const ValueKey('reception-arrival-notice'),
-                          padding: const EdgeInsets.fromLTRB(18, 10, 12, 18),
-                          decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                  color: colors.primary.withOpacity(.35))),
-                          child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(children: [
-                                  Icon(Icons.support_agent,
-                                      size: 20, color: colors.primary),
-                                  const SizedBox(width: 8),
-                                  const Expanded(
-                                      child: Text('有客户等待接待',
-                                          style: TextStyle(
-                                              fontWeight: FontWeight.w700))),
-                                  IconButton(
-                                      tooltip: '关闭接待提醒',
-                                      onPressed:
-                                          workbench.dismissReceptionNotice,
-                                      icon: const Icon(Icons.close, size: 18)),
-                                ]),
-                                Text(notice.title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis),
-                                const SizedBox(height: 6),
-                                Text(workbench.receptionNoticePreview,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                        fontSize: 12,
-                                        color: colors.onSurfaceVariant)),
-                                const SizedBox(height: 14),
-                                SizedBox(
-                                    width: double.infinity,
-                                    child: FilledButton(
-                                        onPressed: () => onOpen(notice),
-                                        child: const Text('查看并接待'))),
-                                const SizedBox(height: 8),
-                                Text(
-                                    '查看后点击「${notice.receptionActionLabel}」才会接单',
-                                    style: TextStyle(
-                                        fontSize: 11,
-                                        color: colors.onSurfaceVariant)),
-                              ])))),
-            )),
-    ]);
+      ]);
   }
 }
 

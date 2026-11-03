@@ -1,6 +1,7 @@
 import '../ui/manual_quota_page.dart';
 import 'package:tongyu_agent_console/src/platform/create_agent_dialog.dart';
 import 'package:flutter/material.dart';
+import 'package:tongyu_agent_console/src/ui/desk_notice.dart';
 
 import 'package:tongyu_agent_console/src/platform/platform_controller.dart';
 import 'package:tongyu_agent_console/src/platform/platform_models.dart';
@@ -171,9 +172,7 @@ class TenantDetailPane extends StatelessWidget {
                             builder: (_) => CreateAgentDialog(
                                 controller: controller, tenantId: tenant.id));
                         if (created == true && context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text('账户已建立，请在企业后台分配客服入口。')));
+                          showDeskNotice(context, '账户已建立，请在企业后台分配客服入口。');
                         }
                       },
                 icon: const Icon(Icons.person_add_alt, size: 18),
@@ -375,11 +374,11 @@ class TenantDetailPane extends StatelessWidget {
   }
 
   void _report(BuildContext context, bool ok, String success, String failure) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(ok ? success : failure),
-        duration: const Duration(seconds: 2),
-      ),
+    showDeskNotice(
+      context,
+      ok ? success : failure,
+      icon: ok ? Icons.check_rounded : Icons.error_outline,
+      accent: ok ? const Color(0xFF12B886) : const Color(0xFFE03131),
     );
   }
 }

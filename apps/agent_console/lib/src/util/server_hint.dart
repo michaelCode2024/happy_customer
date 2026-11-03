@@ -14,7 +14,8 @@ String initialServerHint(String saved, {bool? web, Uri? location}) {
     return 'https://chat.lookfunny.xyz';
   }
   final page = location ?? Uri.base;
-  // Flutter web-server preview hosts UI on :8092; API is a different origin.
+  // 工作台预览固定在 :8094。用户端 H5 用 :8091，店主端用 :8092，不要互相占用。
+  // 本机 API 是另一个源。
   if ((page.host == 'localhost' || page.host == '127.0.0.1') &&
       page.port != 18790) {
     return 'http://127.0.0.1:18790';

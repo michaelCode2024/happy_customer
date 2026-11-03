@@ -109,9 +109,9 @@ class _AlertEnableCardState extends State<AlertEnableCard> {
     return Material(
       color: Colors.transparent,
       child: Container(
-        width: 460,
-        constraints: const BoxConstraints(maxWidth: 460),
-        padding: const EdgeInsets.fromLTRB(26, 22, 16, 22),
+        width: 400,
+        constraints: const BoxConstraints(maxWidth: 400),
+        padding: const EdgeInsets.fromLTRB(22, 20, 14, 20),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(20),
@@ -136,7 +136,7 @@ class _AlertEnableCardState extends State<AlertEnableCard> {
                   child: Text(
                     copy.title,
                     style: RelayTheme.uiText(
-                      fontSize: 20,
+                      fontSize: 18,
                       fontWeight: FontWeight.w700,
                       color: const Color(0xFF0B0B0F),
                       height: 1.35,
@@ -152,7 +152,7 @@ class _AlertEnableCardState extends State<AlertEnableCard> {
               child: Text(
                 copy.body,
                 style: RelayTheme.uiText(
-                  fontSize: 14.5,
+                  fontSize: 14,
                   color: const Color(0xFF8A9099),
                   height: 1.75,
                 ),
@@ -239,10 +239,10 @@ class _CardAction extends StatelessWidget {
       );
 }
 
-/// 工作台上的引导卡宿主：只在浏览器里、且确实需要动作时弹一次。
+/// 工作台上的引导卡宿主：只在浏览器里、且确实需要动作时弹出。
 ///
-/// 关掉后 24 小时内不再自动弹，避免每次刷新都盖住工作台；
-/// 顶部黄色横幅仍然保留，作为持续提醒。
+/// 关掉后 24 小时内不再自动弹，避免每次刷新都盖住工作台。
+/// 页面一直开着时也会再核对；到点后不用整页刷新就会再弹。
 class AlertEnableCardHost extends StatefulWidget {
   const AlertEnableCardHost({super.key, required this.api});
   final TongYuApi api;
@@ -251,48 +251,75 @@ class AlertEnableCardHost extends StatefulWidget {
   State<AlertEnableCardHost> createState() => _AlertEnableCardHostState();
 }
 
-class _AlertEnableCardHostState extends State<AlertEnableCardHost> {
+class _AlertEnableCardHostState extends State<AlertEnableCardHost>
+    with WidgetsBindingObserver {
   static const _promptKey = 'tongyu.alertCardPromptAt';
-  bool _shown = false;
+  Timer? _recheck;
+  bool _busyPrompt = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    if (kIsWeb) {
+      // 工作台经常一整天不刷新。到了 24 小时也要再问，不能只在打开那一次判断。
+      _recheck = Timer.periodic(const Duration(minutes: 10), (_) {
+        final state = WidgetsBinding.instance.lifecycleState;
+        if (state != null && state != AppLifecycleState.resumed) return;
+        unawaited(_maybePrompt());
+      });
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_maybePrompt());
     });
   }
 
+  @override
+  void dispose() {
+    _recheck?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) unawaited(_maybePrompt());
+  }
+
   Future<void> _maybePrompt() async {
-    if (_shown || !mounted || !kIsWeb) return;
-    if (ModalRoute.of(context)?.isCurrent != true) return;
-    if (await _promptedRecently()) return;
-    if (!mounted) return;
-
-    final permission = notificationPermission;
-    AlertCardStage? stage;
-    if (permission == 'default') {
-      stage = AlertCardStage.enable;
-    } else if (permission == 'denied') {
-      stage = AlertCardStage.openSettings;
-    } else if (permission == 'granted') {
-      var pushOff = false;
-      try {
-        pushOff = await pushNeedsEnable(widget.api);
-      } catch (_) {
-        return;
-      }
+    if (_busyPrompt || !mounted || !kIsWeb) return;
+    _busyPrompt = true;
+    try {
+      if (ModalRoute.of(context)?.isCurrent != true) return;
+      if (await _promptedRecently()) return;
       if (!mounted) return;
-      stage = alertCardStage(
-          permission: permission, pushChecked: true, pushOff: pushOff);
-    }
-    if (stage == null) return;
 
-    // 等首帧和工作台骨架渲染完，避免卡片盖住加载态。
-    await Future<void>.delayed(const Duration(milliseconds: 900));
-    if (!mounted || ModalRoute.of(context)?.isCurrent != true) return;
-    _shown = true;
-    await _present(stage);
+      final permission = notificationPermission;
+      AlertCardStage? stage;
+      if (permission == 'default') {
+        stage = AlertCardStage.enable;
+      } else if (permission == 'denied') {
+        stage = AlertCardStage.openSettings;
+      } else if (permission == 'granted') {
+        var pushOff = false;
+        try {
+          pushOff = await pushNeedsEnable(widget.api);
+        } catch (_) {
+          return;
+        }
+        if (!mounted) return;
+        stage = alertCardStage(
+            permission: permission, pushChecked: true, pushOff: pushOff);
+      }
+      if (stage == null) return;
+
+      // 等首帧和工作台骨架渲染完，避免卡片盖住加载态。
+      await Future<void>.delayed(const Duration(milliseconds: 900));
+      if (!mounted || ModalRoute.of(context)?.isCurrent != true) return;
+      await _present(stage);
+    } finally {
+      _busyPrompt = false;
+    }
   }
 
   Future<void> _present(AlertCardStage stage) async {
@@ -327,15 +354,10 @@ class _AlertEnableCardHostState extends State<AlertEnableCardHost> {
 
   Future<String?> _runAction(BuildContext ctx, AlertCardStage stage) async {
     if (stage == AlertCardStage.openSettings) {
-      final granted = await _showSettingsHelp(ctx);
+      final granted = await showBrowserNotificationSettings(ctx);
       if (!granted) return '还没有检测到通知权限，请按步骤开启后重试';
     }
-    if (stage == AlertCardStage.enable) {
-      final permission = await requestNotificationPermission();
-      if (permission != 'granted') {
-        return '浏览器未允许通知，请在站点设置中允许后重试';
-      }
-    }
+    // 授权弹窗必须留在这次点击里。先单独请求权限再订阅，页面开久后浏览器不再弹窗。
     turnMessageSoundOn();
     rememberDeskAlerts();
     final message = await enableBackgroundPush(widget.api);
@@ -346,80 +368,7 @@ class _AlertEnableCardHostState extends State<AlertEnableCardHost> {
     } catch (_) {}
     notifyPushStateChanged();
     if (stillOff) return message;
-    if (!mounted) return null;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
     return null;
-  }
-
-  Future<bool> _showSettingsHelp(BuildContext ctx) async {
-    final granted = await showDialog<bool>(
-      context: ctx,
-      builder: (c) => AlertDialog(
-        title: const Text('在浏览器中允许通知'),
-        content: SizedBox(
-          width: 420,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (var i = 0; i < _settingsSteps.length; i++)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        CircleAvatar(
-                            radius: 11,
-                            child: Text('${i + 1}',
-                                style: const TextStyle(fontSize: 11))),
-                        const SizedBox(width: 10),
-                        Expanded(child: Text(_settingsSteps[i])),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('稍后')),
-          FilledButton(
-            onPressed: () =>
-                Navigator.pop(c, notificationPermission == 'granted'),
-            child: const Text('重新检查'),
-          ),
-        ],
-      ),
-    );
-    return granted == true;
-  }
-
-  List<String> get _settingsSteps {
-    switch (defaultTargetPlatform) {
-      case TargetPlatform.iOS:
-        return const [
-          '打开手机「设置」→「通知」→ 找到浏览器或已添加到主屏幕的通语',
-          '打开「允许通知」，并勾选声音与横幅',
-          '回到这里点「重新检查」',
-        ];
-      case TargetPlatform.android:
-        return const [
-          '点地址栏左侧的锁图标 →「权限」→ 通知 → 允许',
-          '若浏览器整体被禁，打开手机「设置」→「应用」→ 浏览器 →「通知」中允许',
-          '回到这里点「重新检查」',
-        ];
-      default:
-        return const [
-          '点地址栏左侧的锁或滑块图标 →「网站设置」→「通知」→ 选择「允许」',
-          'macOS 还需在「系统设置」→「通知」中允许浏览器通知',
-          'Windows 请确认「专注助手 / 勿扰」没有拦截通知',
-          '改完回到这里点「重新检查」',
-        ];
-    }
   }
 
   Future<bool> _promptedRecently() async {
@@ -444,4 +393,75 @@ class _AlertEnableCardHostState extends State<AlertEnableCardHost> {
 
   @override
   Widget build(BuildContext context) => const SizedBox.shrink();
+}
+
+/// 浏览器不再弹出授权时，改由这里列出站点设置步骤。
+/// 返回 true 表示重新检查时通知权限已经允许。
+Future<bool> showBrowserNotificationSettings(BuildContext context) async {
+  final steps = browserNotificationSettingsSteps();
+  final granted = await showDialog<bool>(
+    context: context,
+    builder: (c) => AlertDialog(
+      title: const Text('在浏览器中允许通知'),
+      content: SizedBox(
+        width: 420,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var i = 0; i < steps.length; i++)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      CircleAvatar(
+                          radius: 11,
+                          child: Text('${i + 1}',
+                              style: const TextStyle(fontSize: 11))),
+                      const SizedBox(width: 10),
+                      Expanded(child: Text(steps[i])),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(c, false), child: const Text('稍后')),
+        FilledButton(
+          onPressed: () => Navigator.pop(c, notificationPermission == 'granted'),
+          child: const Text('重新检查'),
+        ),
+      ],
+    ),
+  );
+  return granted == true;
+}
+
+List<String> browserNotificationSettingsSteps() {
+  switch (defaultTargetPlatform) {
+    case TargetPlatform.iOS:
+      return const [
+        '打开手机「设置」→「通知」→ 找到浏览器或已添加到主屏幕的通语',
+        '打开「允许通知」，并勾选声音与横幅',
+        '回到这里点「重新检查」',
+      ];
+    case TargetPlatform.android:
+      return const [
+        '点地址栏左侧的锁图标 →「权限」→ 通知 → 允许',
+        '若浏览器整体被禁，打开手机「设置」→「应用」→ 浏览器 →「通知」中允许',
+        '回到这里点「重新检查」',
+      ];
+    default:
+      return const [
+        '点地址栏左侧的锁或滑块图标 →「网站设置」→「通知」→ 选择「允许」',
+        'macOS 还需在「系统设置」→「通知」中允许浏览器通知',
+        'Windows 请确认「专注助手 / 勿扰」没有拦截通知',
+        '改完回到这里点「重新检查」',
+      ];
+  }
 }

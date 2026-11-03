@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:tongyu_agent_console/src/ui/desk_notice.dart';
 import 'package:http/http.dart' as http;
 import 'package:tongyu_agent_console/src/ui/platform_support_frame.dart';
 import 'package:tongyu_agent_console/src/util/server_hint.dart';
@@ -158,7 +159,7 @@ Future<bool> _supportInboxAllowed(String origin) async {
 }
 
 void _notice(BuildContext context, String text) {
-  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  showDeskNotice(context, text);
 }
 
 String _clip(String value, int max) {

@@ -1301,6 +1301,7 @@ class RealtimeEvent {
     required this.tenantId,
     required this.conversationId,
     required this.data,
+    this.meta = const <String, dynamic>{},
   });
 
   factory RealtimeEvent.fromJson(Map<String, dynamic> json) => RealtimeEvent(
@@ -1308,12 +1309,16 @@ class RealtimeEvent {
         tenantId: asString(json['tenantId']),
         conversationId: asString(json['conversationId']),
         data: asMap(json['data']),
+        meta: asMap(json['meta']),
       );
 
   final String type;
   final String tenantId;
   final String conversationId;
   final Map<String, dynamic> data;
+
+  /// 服务端投递时附带的范围。message.created 的 alert 表示这条要不要响。
+  final Map<String, dynamic> meta;
 
   /// The greeting frame the socket sends before anything else.
   bool get isHello => type == 'ready';

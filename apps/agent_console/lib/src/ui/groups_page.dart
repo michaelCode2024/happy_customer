@@ -5,6 +5,7 @@ import '../util/message_alert_stub.dart'
 import 'package:tongyu_agent_console/src/util/group_window_stub.dart'
     if (dart.library.html) 'package:tongyu_agent_console/src/util/group_window_web.dart';
 import 'package:flutter/material.dart';
+import 'package:tongyu_agent_console/src/ui/desk_notice.dart';
 import 'package:tongyu_agent_console/src/ui/create_group_dialog.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
@@ -240,8 +241,8 @@ class _GroupsPageState extends State<GroupsPage> {
                           await Clipboard.setData(
                               ClipboardData(text: result['url'] as String));
                           if (ctx.mounted) {
-                            ScaffoldMessenger.of(ctx).showSnackBar(
-                                const SnackBar(content: Text('邀请链接已复制')));
+                            showDeskNotice(ctx, '邀请链接已复制',
+                                icon: Icons.check_rounded);
                           }
                         },
                         child: const Text('复制链接'))

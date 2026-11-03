@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:tongyu_agent_console/src/ui/desk_notice.dart';
 
 /// An inline failure notice.
 ///
@@ -101,7 +102,5 @@ Future<void> copyToClipboard(
     onCopied();
     return;
   }
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text('$label已复制'), duration: const Duration(seconds: 2)),
-  );
+  showDeskNotice(context, '$label已复制', icon: Icons.check_rounded);
 }

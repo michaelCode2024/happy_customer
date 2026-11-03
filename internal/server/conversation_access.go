@@ -3,10 +3,12 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"strings"
+
 	"github.com/google/uuid"
 	"github.com/tongyu/tongyu/internal/auth"
 	"github.com/tongyu/tongyu/internal/realtime"
-	"net/http"
 )
 
 // Ownership is an authorization boundary, independent of UI queue filters.
@@ -67,8 +69,18 @@ func (a *API) agentVisitorAccess(w http.ResponseWriter, r *http.Request, p auth.
 }
 
 // Recheck ownership at delivery time, not just when a socket subscribes.
+// 读权限比接待范围宽：转接后的原客服仍能收到消息，用来刷新已经打开的记录。
+// alert 只在当前接待人或待接待时为真，坐席端据此决定要不要出声。
 func (a *API) filterConsoleEvent(ctx context.Context, p auth.Principal, payload []byte) []byte {
-	var event realtime.Event
+	// Data 保持原始字节。重新按结构体编一遍会把序号等字段转成另一种 JSON 写法。
+	var event struct {
+		Type           string          `json:"type"`
+		TenantID       string          `json:"tenantId,omitempty"`
+		ConversationID string          `json:"conversationId,omitempty"`
+		Data           json.RawMessage `json:"data,omitempty"`
+		Truncated      bool            `json:"truncated,omitempty"`
+		Meta           map[string]any  `json:"meta,omitempty"`
+	}
 	if json.Unmarshal(payload, &event) != nil {
 		return nil
 	}
@@ -79,8 +91,38 @@ func (a *API) filterConsoleEvent(ctx context.Context, p auth.Principal, payload 
 	if err != nil {
 		return nil
 	}
-	if a.agentConversationAccess(ctx, p, id) {
+	supervisor := auth.CanViewReports(p.Role)
+	var assignee *string
+	var inboxName string
+	var duty bool
+	err = a.db.QueryRow(ctx, `select c.assignee_id::text, coalesce(i.name,''), `+conversationDuty("c", "$3", supervisor)+`
+		from conversation c
+		left join inbox i on i.id = c.inbox_id
+		where c.id=$1 and c.tenant_id=$2 and `+conversationVisibility("c", "$3", supervisor),
+		id, p.TenantID, p.AgentID).Scan(&assignee, &inboxName, &duty)
+	if err != nil {
+		return realtime.Encode(realtime.Event{Type: "conversation.scope.changed"})
+	}
+	if event.Type != "message.created" {
 		return payload
 	}
-	return realtime.Encode(realtime.Event{Type: "conversation.scope.changed"})
+	if event.Meta == nil {
+		event.Meta = map[string]any{}
+	}
+	var owner any
+	sameOwner := false
+	if assignee != nil && *assignee != "" {
+		owner = *assignee
+		if parsed, parseErr := uuid.Parse(*assignee); parseErr == nil {
+			sameOwner = parsed == p.AgentID
+		}
+	}
+	event.Meta["assigneeId"] = owner
+	event.Meta["inboxName"] = strings.TrimSpace(inboxName)
+	event.Meta["alert"] = duty && (assignee == nil || sameOwner)
+	out, err := json.Marshal(event)
+	if err != nil {
+		return nil
+	}
+	return out
 }

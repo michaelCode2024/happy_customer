@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:tongyu_agent_console/src/ui/desk_notice.dart';
 import '../platform/platform_controller.dart';
 import '../api/api_exception.dart';
 import '../util/labels.dart';
@@ -535,8 +536,7 @@ class _ManualQuotaEditorState extends State<ManualQuotaEditor> {
     try {
       await widget.controller.api.allocateQuota(widget.tenantId, body);
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('额度分配成功')));
+      showDeskNotice(context, '额度分配成功', icon: Icons.check_rounded);
       Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted)

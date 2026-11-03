@@ -29,7 +29,7 @@ void main() {
   test('local flutter web preview points at the local API port', () {
     expect(
       initialServerHint('',
-          web: true, location: Uri.parse('http://127.0.0.1:8092/')),
+          web: true, location: Uri.parse('http://127.0.0.1:8094/')),
       'http://127.0.0.1:18790',
     );
   });

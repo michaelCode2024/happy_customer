@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'alert_enable_banner.dart';
-import 'alert_enable_card.dart';
 import 'pwa_panel.dart';
 import 'package:tongyu_agent_console/src/util/host_session.dart';
 import '../util/message_alert_stub.dart'
@@ -10,7 +9,9 @@ import 'package:tongyu_agent_console/src/util/group_window_stub.dart'
     if (dart.library.html) 'package:tongyu_agent_console/src/util/group_window_web.dart';
 import 'package:tongyu_agent_console/src/ui/groups_page.dart';
 import 'notification_center.dart';
-import 'in_app_push_overlay.dart';
+import 'desk_notice.dart';
+import 'notice_hub.dart';
+import 'package:tongyu_agent_console/src/util/notice.dart';
 import '../util/push_bridge_stub.dart'
     if (dart.library.html) '../util/push_bridge_web.dart';
 import '../util/website.dart';
@@ -82,12 +83,16 @@ class WorkbenchPage extends StatefulWidget {
   const WorkbenchPage({
     super.key,
     required this.session,
+    this.noticeHub,
     this.picker,
     this.themeMode = ThemeMode.system,
     this.onThemeModeChanged,
   });
 
   final SessionController session;
+
+  /// 和应用壳共用的右下角通知。测试不传时，这一页自己建一个。
+  final NoticeHubController? noticeHub;
 
   /// Injectable so widget tests can drive the composer without a platform
   /// channel; production passes null and gets the real image picker.
@@ -162,7 +167,10 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
       selfId: widget.session.agent?.id ?? '',
       seesTeam: widget.session.agent?.role == 'SUPERVISOR',
       autoAcceptInboxIds: _autoAcceptInboxIdsOf(widget.session),
+      noticeHub: widget.noticeHub,
     );
+    widget.noticeHub?.onOpen = _openNotificationConversation;
+    _workbench.setInboxNames(widget.session.inboxes);
     _picker = widget.picker ?? ImageAttachmentPicker();
     unawaited(_refreshPlan());
     _planRefresh =
@@ -191,6 +199,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     super.didUpdateWidget(oldWidget);
     // 入口「自动接单」可能在企业管理页改过，每次重建都同步到工作台。
     _workbench.setAutoAcceptInboxIds(_autoAcceptInboxIdsOf(widget.session));
+    _workbench.setInboxNames(widget.session.inboxes);
   }
 
   Future<void> _openInitialConversation() async {
@@ -212,18 +221,10 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     final effectiveWidth = width ?? MediaQuery.sizeOf(context).width;
     if (effectiveWidth < 980) _workbench.clearSelection();
     unawaited(_workbench.showReceptionQueue());
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    if (messenger == null) return;
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(waiting > 0
-            ? '已切到待接待队列 · $waiting 位客户在等待'
-            : '待接待队列已清空'),
-        duration: const Duration(milliseconds: 1600),
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      ));
+    showDeskNotice(
+      context,
+      waiting > 0 ? '已切到待接待队列 · $waiting 位客户在等待' : '待接待队列已清空',
+    );
   }
 
   final Set<String> noticedCalls = {};
@@ -260,9 +261,9 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                                   body: {'action': 'decline'});
                               if (ctx.mounted) Navigator.pop(ctx);
                             } catch (e) {
-                              if (mounted)
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text(e.toString())));
+                              if (mounted) {
+                                showDeskNotice(context, e.toString());
+                              }
                             }
                           },
                           child: const Text('拒接')),
@@ -281,12 +282,14 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
       if (!mounted || groupCallPanelIsOpen) return;
       final room = conference['room'] as Map<String, dynamic>?;
       if (room != null && noticedCalls.add('room-${room['id']}')) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(room['mediaKind'] == 'VIDEO' ? '群视频通话已发起' : '群语音通话已发起'),
-          duration: const Duration(seconds: 8),
-          action: SnackBarAction(
-              label: '打开通话', onPressed: () => _openGroupCall(id)),
-        ));
+        showDeskNotice(
+          context,
+          room['mediaKind'] == 'VIDEO' ? '群视频通话已发起' : '群语音通话已发起',
+          kind: NoticeKind.card,
+          icon: Icons.call_rounded,
+          actionLabel: '打开通话',
+          onAction: () => _openGroupCall(id),
+        );
       }
     } catch (_) {
       incomingDialog = false;
@@ -329,6 +332,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     _planRefresh?.cancel();
     _assistDraft.dispose();
     _contextPanelTab.dispose();
+    widget.noticeHub?.onOpen = null;
     _workbench.dispose();
     // The player is a process-wide singleton, so it is released rather than
     // disposed: signing out and back in must not hand the new session a dead
@@ -816,10 +820,9 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
               child: _bodyFor(useRail ? width - 78 : width),
             );
             final body = Column(children: [
-              // 居中引导卡只在浏览器、且确实缺权限或推送时弹一次；横幅继续做持续提醒。
+              // 打开通知只留顶栏这一条，进工作台不再另弹居中卡片。
               if (!isHostedConsole)
-                AlertEnableCardHost(api: widget.session.api),
-              if (!isHostedConsole) AlertEnableBanner(api: widget.session.api),
+                AlertEnableBanner(api: widget.session.api),
               if (!isHostedConsole)
                 PwaPanel(
                     api: widget.session.api,
@@ -975,16 +978,16 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     );
   }
 
-  /// 把页面主体包一层 Stack，让站内推送浮层能浮在最上层。
-  /// 浮层只占用右上角卡片区域，其余空白不拦截点击。
+  /// 应用壳已经挂了右下角通知。测试页没有外壳时，仍在这一页自己浮一层。
   Widget _withPushOverlay(Widget child) {
+    if (widget.noticeHub != null) return child;
     return Stack(
       fit: StackFit.expand,
       children: [
         child,
         Positioned.fill(
-          child: InAppPushOverlay(
-            manager: _workbench.inAppPush,
+          child: NoticeHub(
+            controller: _workbench.noticeHub,
             onOpen: (conversationId) {
               if (!mounted || conversationId.isEmpty) return;
               setState(() => _section = WorkbenchSection.conversations);

@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../api/tongyu_api.dart';
 import '../util/pwa_bridge.dart';
+import 'desk_bar.dart';
+import 'desk_notice.dart';
 
 /// 安装、离线就绪和版本更新使用同一个入口，避免把浏览器权限误当成已开启。
 class PwaPanel extends StatefulWidget {
@@ -65,11 +67,8 @@ class _PwaPanelState extends State<PwaPanel> {
     super.dispose();
   }
 
-  bool get _desktopSilent => _status['desktop'] == true;
-
   Future<void> _offerUpdate() async {
-    if (_desktopSilent ||
-        !mounted ||
+    if (!mounted ||
         widget.settingsOnly ||
         _prompting ||
         _status['update'] != true ||
@@ -133,8 +132,7 @@ class _PwaPanelState extends State<PwaPanel> {
       final message = await pwaAction('update');
       handedOff = message == '正在更新…';
       if (mounted && message.isNotEmpty) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(message)));
+        showDeskNotice(context, message);
       }
     } finally {
       if (!handedOff) await pwaAction('releaseUpdate');
@@ -150,8 +148,8 @@ class _PwaPanelState extends State<PwaPanel> {
       await widget.onReconnect?.call();
     } catch (_) {
       if (mounted)
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('暂时无法同步，请检查网络后重试')));
+        showDeskNotice(context, '暂时无法同步，请检查网络后重试',
+            icon: Icons.error_outline, accent: const Color(0xFFE03131));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -160,8 +158,7 @@ class _PwaPanelState extends State<PwaPanel> {
   Future<void> _action(String action) async {
     final message = await pwaAction(action);
     if (mounted && message.isNotEmpty)
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(message)));
+      showDeskNotice(context, message);
   }
 
   void _installation() {
@@ -314,7 +311,6 @@ class _PwaPanelState extends State<PwaPanel> {
     if (!kIsWeb) return const SizedBox.shrink();
     final update = _status['update'] == true;
 
-    // 手机端点一下检查，已有等待中的版本就确认更新。电脑版只检查，刷新页面后使用。
     if (widget.settingsOnly) {
       return ListTile(
         leading: Icon(
@@ -322,9 +318,7 @@ class _PwaPanelState extends State<PwaPanel> {
           color: update ? const Color(0xFF3263FF) : null,
         ),
         title: const Text('系统更新'),
-        subtitle: Text(_desktopSilent
-            ? (update ? '新版本已下载，刷新页面后使用' : '有新版本时刷新页面即可使用')
-            : (update ? '新版本已就绪，可立即更新' : '检查并安装网页版新版本')),
+        subtitle: Text(update ? '新版本已就绪，可立即更新' : '检查并安装网页版新版本'),
         trailing: update
             ? const Icon(Icons.circle, size: 10, color: Color(0xFF3263FF))
             : const Icon(Icons.chevron_right),
@@ -332,46 +326,22 @@ class _PwaPanelState extends State<PwaPanel> {
           await _action('checkUpdate');
           if (!mounted) return;
           setState(() => _status = pwaStatus());
-          if (_desktopSilent || _status['update'] != true) return;
+          if (_status['update'] != true) return;
           await _confirmUpdate();
         },
       );
     }
 
     // 仅在有新版本就绪时才展示热更新条
-    if (!update || widget.hideUpdateBanner || _desktopSilent) {
+    if (!update || widget.hideUpdateBanner) {
       return const SizedBox.shrink();
     }
 
-    return Material(
-        color: const Color(0xFFEFF4FF),
-        child: Container(
-            decoration: const BoxDecoration(
-              border: Border(bottom: BorderSide(color: Color(0xFFD3E0FD))),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(children: [
-              const Icon(Icons.auto_awesome,
-                  size: 16, color: Color(0xFF3263FF)),
-              const SizedBox(width: 8),
-              const Expanded(
-                child: Text(
-                  '通语工作台新版本已就绪，点击「立即更新」即可应用',
-                  style: TextStyle(
-                      fontSize: 13,
-                      color: Color(0xFF0C1D40),
-                      fontWeight: FontWeight.w500),
-                ),
-              ),
-              TextButton(
-                  style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF3263FF),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  ),
-                  onPressed: _confirmUpdate,
-                  child: const Text('立即更新',
-                      style: TextStyle(fontWeight: FontWeight.w600))),
-            ])));
+    return DeskBar(
+      tone: DeskBarTone.info,
+      message: '通语工作台新版本已就绪，点击「立即更新」即可应用',
+      actionLabel: '立即更新',
+      onAction: _confirmUpdate,
+    );
   }
 }

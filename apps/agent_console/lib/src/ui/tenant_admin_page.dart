@@ -5,6 +5,7 @@ import 'package:tongyu_agent_console/src/util/format.dart';
 import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
 import 'package:tongyu_agent_console/src/ui/support_assets_page.dart';
 import 'package:flutter/material.dart';
+import 'package:tongyu_agent_console/src/ui/desk_notice.dart';
 import 'package:tongyu_agent_console/src/ui/console_form_dialog.dart';
 import 'package:tongyu_agent_console/src/api/api_exception.dart';
 import 'package:tongyu_agent_console/src/api/models.dart';
@@ -79,8 +80,7 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
     }
   }
 
-  void _notice(String text) =>
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  void _notice(String text) => showDeskNotice(context, text);
 
   Future<void> _saveAutoClose(int minutes) async {
     setState(() => _savingAutoClose = true);

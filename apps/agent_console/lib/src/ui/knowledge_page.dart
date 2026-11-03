@@ -3,6 +3,7 @@ import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
 import 'package:tongyu_agent_console/src/util/labels.dart';
 import 'package:tongyu_agent_console/src/ui/support_assets_page.dart';
 import 'package:flutter/material.dart';
+import 'package:tongyu_agent_console/src/ui/desk_notice.dart';
 
 import 'package:tongyu_agent_console/src/api/models.dart';
 import 'package:tongyu_agent_console/src/state/session_controller.dart';
@@ -178,9 +179,10 @@ class _KnowledgePageState extends State<KnowledgePage> {
     try {
       categories = await widget.workbench.api.knowledgeCategories();
     } catch (error) {
-      if (mounted)
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text("读取分类失败：$error")));
+      if (mounted) {
+        showDeskNotice(context, '读取分类失败：$error',
+            icon: Icons.error_outline, accent: const Color(0xFFE03131));
+      }
       return false;
     }
     if (!mounted) return false;
@@ -249,9 +251,8 @@ class _KnowledgePageState extends State<KnowledgePage> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('删除失败：$error')),
-      );
+      showDeskNotice(context, '删除失败：$error',
+          icon: Icons.error_outline, accent: const Color(0xFFE03131));
     }
   }
 
@@ -282,9 +283,10 @@ class _KnowledgePageState extends State<KnowledgePage> {
           id: e.id, status: e.status == 'ACTIVE' ? 'DISABLED' : 'ACTIVE');
       await _load();
     } catch (error) {
-      if (mounted)
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('更新失败：$error')));
+      if (mounted) {
+        showDeskNotice(context, '更新失败：$error',
+            icon: Icons.error_outline, accent: const Color(0xFFE03131));
+      }
     }
   }
 

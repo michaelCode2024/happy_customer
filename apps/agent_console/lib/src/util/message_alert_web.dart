@@ -11,6 +11,19 @@ import 'package:web/web.dart' as web;
 @JS('tongyuClaimMessageAlert')
 external JSPromise<JSBoolean> _claimMessageAlert(JSString name);
 
+@JS('tongyuShowDeskNotice')
+external void _tongyuShowDeskNotice(JSString title, JSString body, JSString tag);
+
+/// 系统通知交给已注册的服务工作线程展示。
+/// 页面直接创建时，标签开久后浏览器会把后台通知丢掉。
+void _showDesktopNotice(String title, String body, String tag) {
+  try {
+    _tongyuShowDeskNotice(title.toJS, body.toJS, tag.toJS);
+    return;
+  } catch (_) {}
+  html.Notification(title, body: body, tag: tag);
+}
+
 /// dart:html 的 Document 没有 hasFocus；查询失败时只看可见性。
 bool pageVisible() {
   if (html.document.visibilityState != 'visible') return false;
@@ -36,6 +49,7 @@ String _soundChoice = _soundChoices
     ? html.window.localStorage['tongyu.messageSoundStyle']!
     : 'sender';
 String _pendingSender = '';
+String _pendingSpoken = '';
 DateTime? _quietUntil;
 void setMessageQuietUntil(DateTime? until) {
   _quietUntil = until;
@@ -119,13 +133,18 @@ Future<void> _playSound() async {
   _playRequested = true;
   synthesis.cancel();
   _audio.pause();
+  final spoken = _pendingSpoken.trim().replaceAll(RegExp(r'[\r\n\t]'), ' ');
+  _pendingSpoken = '';
   final name = _pendingSender.trim().replaceAll(RegExp(r'[\r\n\t]'), ' ');
   final shortName = String.fromCharCodes(name.runes.take(30));
-  final text = switch (_soundChoice) {
-    'customer' => '有客户消息，请及时查看',
-    'sender' when shortName.isNotEmpty => '$shortName 给你发来了新消息',
-    _ => '你有新的消息来了',
-  };
+  // 待接待传入入口名。已分配给自己的消息仍走下面的原有播报。
+  final text = spoken.isNotEmpty
+      ? spoken
+      : switch (_soundChoice) {
+          'customer' => '有客户消息，请及时查看',
+          'sender' when shortName.isNotEmpty => '$shortName 给你发来了新消息',
+          _ => '你有新的消息来了',
+        };
   final utterance = html.SpeechSynthesisUtterance(text)
     ..lang = 'zh-CN'
     ..rate = 1
@@ -309,11 +328,13 @@ void rememberDeskAlerts() {
 void messageAlert(String name, String body,
     {String senderName = '',
     bool foregroundNotice = false,
-    bool suppressSound = false}) {
+    bool suppressSound = false,
+    String spoken = ''}) {
   unawaited(_dispatchMessageAlert(name, body,
       senderName: senderName,
       foregroundNotice: foregroundNotice,
-      suppressSound: suppressSound));
+      suppressSound: suppressSound,
+      spoken: spoken));
 }
 
 bool _desktopNoticeOn() =>
@@ -324,7 +345,8 @@ bool _desktopNoticeOn() =>
 Future<void> _dispatchMessageAlert(String name, String body,
     {String senderName = '',
     bool foregroundNotice = false,
-    bool suppressSound = false}) async {
+    bool suppressSound = false,
+    String spoken = ''}) async {
   if (_quietUntil?.isAfter(DateTime.now()) == true) return;
   initializeMessageAlerts();
   if (name.isNotEmpty) {
@@ -341,6 +363,7 @@ Future<void> _dispatchMessageAlert(String name, String body,
   _last = DateTime.now();
   if (_soundEnabled.value && !suppressSound) {
     _pendingSender = senderName;
+    _pendingSpoken = spoken;
     _pendingSound = true;
     if (!_priming) unawaited(_playSound());
   }
@@ -348,7 +371,7 @@ Future<void> _dispatchMessageAlert(String name, String body,
     // 页面还在、只是切到后台时，系统通知和手机推送用同一套：谁发的、发了什么。
     final sender = senderName.trim().isEmpty ? '客户' : senderName.trim();
     final text = body.trim().isEmpty ? '发来一条消息' : body.trim();
-    html.Notification(sender, body: text, tag: 'tongyu-$name');
+    _showDesktopNotice(sender, text, 'tongyu-$name');
   }
 }
 
