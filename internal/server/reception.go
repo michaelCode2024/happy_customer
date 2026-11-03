@@ -10,9 +10,9 @@ import (
 	"github.com/tongyu/tongyu/internal/realtime"
 )
 
-func receptionNotice(ctx context.Context, tx pgx.Tx, tenant, conversation uuid.UUID, content, state string) error {
+func receptionNotice(ctx context.Context, tx pgx.Tx, tenant, conversation uuid.UUID, content, state string, notifyAgent bool) error {
 	_, err := tx.Exec(ctx, `insert into reception_notice(tenant_id,conversation_id,content,state) values($1,$2,$3,$4)`, tenant, conversation, content, state)
-	if err == nil && state == "ASSIGNED" {
+	if err == nil && state == "ASSIGNED" && notifyAgent {
 		_, err = tx.Exec(ctx, `with inserted as (
 		insert into agent_notification(tenant_id,agent_id,conversation_id,kind,title)
 		select c.tenant_id,c.assignee_id,c.id,'ASSIGNED','有新会话分配给你，请及时接待'
@@ -50,7 +50,10 @@ func (a *API) acceptReception(ctx context.Context, tenant, conversation, agent u
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("接单已超时，请刷新列表")
 	}
-	if err = receptionNotice(ctx, tx, tenant, conversation, fmt.Sprintf("客服「%s」已接入，请继续描述您的问题。", name), "ACCEPTED"); err != nil {
+	if err = receptionNotice(ctx, tx, tenant, conversation, fmt.Sprintf("客服「%s」已接入，请继续描述您的问题。", name), "ACCEPTED", true); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `insert into conversation_participant(conversation_id, agent_id) values($1,$2) on conflict do nothing`, conversation, agent); err != nil {
 		return err
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -85,7 +88,7 @@ func (a *API) advanceReception(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	rows, err := tx.Query(ctx, `select id,tenant_id,assignee_id from conversation where status<>'RESOLVED' and accepted_at is null and ((assignee_id is not null and assignment_expires_at<=now()) or (assignee_id is null and handoff_requested_at is not null)) order by updated_at limit 50 for update skip locked`)
+	rows, err := tx.Query(ctx, `select id,tenant_id,assignee_id from conversation where status<>'RESOLVED' and accepted_at is null and ((assignee_id is not null and assignment_expires_at<=now()) or (assignee_id is null and handoff_requested_at is not null and not exists (select 1 from message m where m.conversation_id = conversation.id and m.metadata->>'ended' = 'true'))) order by updated_at limit 50 for update skip locked`)
 	if err != nil {
 		return err
 	}
@@ -115,7 +118,7 @@ func (a *API) advanceReception(ctx context.Context) error {
 			if _, err = tx.Exec(ctx, `update conversation set assignee_id=null,assigned_at=null,assignment_expires_at=null,updated_at=now() where id=$1`, v.id); err != nil {
 				return err
 			}
-			if err = receptionNotice(ctx, tx, v.tenant, v.id, "客服未在规定时间内接单，正在为您重新分配。", "QUEUED"); err != nil {
+			if err = receptionNotice(ctx, tx, v.tenant, v.id, "客服未在规定时间内接单，正在为您重新分配。", "QUEUED", true); err != nil {
 				return err
 			}
 		}
@@ -124,7 +127,7 @@ func (a *API) advanceReception(ctx context.Context) error {
 			return err
 		}
 		if assigned == nil && v.owner != nil {
-			if err = receptionNotice(ctx, tx, v.tenant, v.id, "暂无其他客服可以接单，已为您排队。", "QUEUED"); err != nil {
+			if err = receptionNotice(ctx, tx, v.tenant, v.id, "暂无其他客服可以接单，已为您排队。", "QUEUED", true); err != nil {
 				return err
 			}
 		}

@@ -27,10 +27,13 @@ services:
       WIDGET_TOKEN_TTL: 12h
       ALLOWED_ORIGIN: "*"
       DEMO_ENABLED: "true"
+      DOCS_ENABLED: ${DOCS_ENABLED:-true}
       PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-admin@tongyu.local}
       PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:-TongYu@2026}
       STORAGE_DRIVER: local
       STORAGE_LOCAL_DIR: /data/uploads
+      # 空闲多久自动结束会话（分钟）；0 表示关闭自动结束，只留手动「标记解决」。
+      CONVERSATION_AUTO_CLOSE_MINUTES: "30"
     volumes:
       - tongyu-uploads:/data/uploads
     ports:

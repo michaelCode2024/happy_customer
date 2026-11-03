@@ -1,8 +1,31 @@
 // ignore_for_file: avoid_web_libraries_in_flutter
 import 'dart:html' as html;
-import 'dart:js_util' as js;
+import 'dart:js_interop';
 import 'package:flutter/foundation.dart';
 import '../api/tongyu_api.dart';
+
+@JS('tongyuClearPush')
+external JSPromise<JSAny?> _tongyuClearPush();
+
+@JS('tongyuDisablePush')
+external JSPromise<JSAny?> _tongyuDisablePush(JSString server, JSString token);
+
+@JS('tongyuPreparePush')
+external JSPromise<JSAny?> _tongyuPreparePush(JSString server, JSString token);
+
+@JS('tongyuPushStatus')
+external JSObject _tongyuPushStatus();
+
+@JS('tongyuEnablePush')
+external JSPromise<JSAny?> _tongyuEnablePush(JSString server, JSString token);
+
+extension type _PushStatus(JSObject _) implements JSObject {
+  external JSString? get stage;
+}
+
+extension type _JsError(JSObject _) implements JSObject {
+  external JSString? get message;
+}
 
 /// 推送订阅状态变化时自增，供顶部横幅等界面同步刷新。
 /// 卡片开启成功后靠它让横幅立即收起，不用等下次切回页面。
@@ -23,15 +46,13 @@ Future<String?> initialNotificationConversation() async =>
 
 Future<void> disableBackgroundAlerts() async {
   try {
-    await js.promiseToFuture<Object?>(
-        js.callMethod(html.window, 'tongyuClearPush', []));
+    await _tongyuClearPush().toDart;
   } catch (_) {}
 }
 
 Future<String> disableBackgroundPush(TongYuApi api) async {
   try {
-    await js.promiseToFuture<Object?>(js
-        .callMethod(html.window, 'tongyuDisablePush', [api.server, api.token]));
+    await _tongyuDisablePush(api.server.toJS, api.token.toJS).toDart;
     return '后台消息提醒已关闭';
   } catch (_) {
     return '关闭失败，请检查网络后重试';
@@ -40,12 +61,11 @@ Future<String> disableBackgroundPush(TongYuApi api) async {
 
 Future<bool> pushNeedsEnable(TongYuApi api) async {
   try {
-    await js.promiseToFuture<Object?>(js
-        .callMethod(html.window, 'tongyuPreparePush', [api.server, api.token]));
+    await _tongyuPreparePush(api.server.toJS, api.token.toJS).toDart;
   } catch (_) {}
   try {
-    final status = js.callMethod(html.window, 'tongyuPushStatus', []);
-    return js.getProperty(status, 'stage')?.toString() != 'enabled';
+    final stage = _PushStatus(_tongyuPushStatus()).stage?.toDart;
+    return stage != 'enabled';
   } catch (_) {
     return true;
   }
@@ -54,9 +74,9 @@ Future<bool> pushNeedsEnable(TongYuApi api) async {
 Future<String> enableBackgroundPush(TongYuApi api) async {
   try {
     // 权限请求留在用户点击事件中，避免 Safari 丢失手势授权。
-    final result = await js.promiseToFuture<Object?>(js
-        .callMethod(html.window, 'tongyuEnablePush', [api.server, api.token]));
-    return result?.toString() ?? '已开启后台消息提醒';
+    final result =
+        await _tongyuEnablePush(api.server.toJS, api.token.toJS).toDart;
+    return result?.dartify()?.toString() ?? '已开启后台消息提醒';
   } catch (error) {
     final message = _pushErrorText(error);
     if (message.isNotEmpty) return message;
@@ -66,8 +86,8 @@ Future<String> enableBackgroundPush(TongYuApi api) async {
 
 String _pushErrorText(Object error) {
   try {
-    final message = js.getProperty(error, 'message');
-    if (message is String && message.trim().isNotEmpty) return message.trim();
+    final message = _JsError(error as JSObject).message?.toDart;
+    if (message != null && message.trim().isNotEmpty) return message.trim();
   } catch (_) {}
   final text = error.toString().trim();
   const prefix = 'Exception: ';

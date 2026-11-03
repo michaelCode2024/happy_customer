@@ -10,14 +10,17 @@ import (
 )
 
 type Config struct {
-	ListenAddress         string
-	PublicBaseURL         string
-	StaticDir             string
-	DatabaseURL           string
-	DatabaseMaxConns      int32
-	WidgetTokenKey        string
-	WidgetTokenTTL        time.Duration
-	AgentSessionTTL       time.Duration
+	ListenAddress    string
+	PublicBaseURL    string
+	StaticDir        string
+	DatabaseURL      string
+	DatabaseMaxConns int32
+	WidgetTokenKey   string
+	WidgetTokenTTL   time.Duration
+	AgentSessionTTL  time.Duration
+	// ConversationAutoClose ends a conversation nobody has written in after this
+	// long. Zero disables the sweep; negative values are rejected at load time.
+	ConversationAutoClose time.Duration
 	PlatformAdminEmail    string
 	PlatformAdminPassword string
 	AllowedOrigins        []string
@@ -26,11 +29,15 @@ type Config struct {
 	FrameAncestors   []string
 	MaxWSConnections int
 	DemoEnabled      bool
-	Storage          Storage
-	Webhook          Webhook
-	AI               AI
-	RateLimit        RateLimit
-	Upload           Upload
+	// DocsEnabled publishes the integrator reference at /docs. The docs are
+	// embedded in the binary, so they are on by default; set DOCS_ENABLED=false
+	// on an instance that must not expose its API reference.
+	DocsEnabled bool
+	Storage     Storage
+	Webhook     Webhook
+	AI          AI
+	RateLimit   RateLimit
+	Upload      Upload
 }
 
 type Storage struct {
@@ -109,6 +116,11 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	// 文档随二进制发布，默认开启；关掉后 /docs 整站不再提供。
+	docs, err := boolean("DOCS_ENABLED", true)
+	if err != nil {
+		return Config{}, err
+	}
 	pathStyle, err := boolean("S3_PATH_STYLE", true)
 	if err != nil {
 		return Config{}, err
@@ -179,6 +191,12 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	// 空闲多久算「没人再说话」。30 分钟对齐柜台场景：访客取资料、被叫走都可能超过
+	// 十几分钟，再短就会把还在进行的咨询掐掉。
+	autoCloseMinutes, err := integer("CONVERSATION_AUTO_CLOSE_MINUTES", 30)
+	if err != nil {
+		return Config{}, err
+	}
 
 	storage := Storage{
 		Driver:            env("STORAGE_DRIVER", "local"),
@@ -206,12 +224,14 @@ func Load() (Config, error) {
 		WidgetTokenKey:        env("WIDGET_TOKEN_SECRET", "local-only-change-this-secret-before-production"),
 		WidgetTokenTTL:        widgetTTL,
 		AgentSessionTTL:       sessionTTL,
+		ConversationAutoClose: time.Duration(autoCloseMinutes) * time.Minute,
 		PlatformAdminEmail:    env("PLATFORM_ADMIN_EMAIL", ""),
 		PlatformAdminPassword: env("PLATFORM_ADMIN_PASSWORD", ""),
 		AllowedOrigins:        splitAndTrim(env("ALLOWED_ORIGINS", env("ALLOWED_ORIGIN", "*"))),
 		FrameAncestors:        splitAndTrim(env("FRAME_ANCESTORS", "*")),
 		MaxWSConnections:      maxWS,
 		DemoEnabled:           demo,
+		DocsEnabled:           docs,
 		Storage:               storage,
 		Webhook:               Webhook{MaxAttempts: maxAttempts, Timeout: 10 * time.Second},
 		AI: AI{

@@ -232,6 +232,7 @@ func (a *API) openListConversations(w http.ResponseWriter, r *http.Request, p ap
 		       c.assignee_id, coalesce(ag.display_name,''), c.last_sequence,
 		       coalesce(c.last_message_preview,''), c.last_message_at, c.agent_unread, c.visitor_unread,
 		       coalesce(v.display_name,''), c.created_at, c.updated_at, c.accepted_at, c.assignment_expires_at,
+		       c.handoff_requested_at,
 		       coalesce((select array_agg(t.name order by t.name) from conversation_tag ct
 		                  join tag t on t.id = ct.tag_id where ct.conversation_id = c.id), '{}')
 		  from conversation c
@@ -260,7 +261,7 @@ func (a *API) openListConversations(w http.ResponseWriter, r *http.Request, p ap
 		if err := rows.Scan(&view.ID, &view.InboxID, &view.VisitorID, &view.Subject, &view.Status,
 			&view.Priority, &view.Source, &view.AssigneeID, &view.AssigneeName, &view.LastSequence,
 			&view.LastMessagePreview, &view.LastMessageAt, &view.AgentUnread, &view.VisitorUnread,
-			&view.VisitorName, &view.CreatedAt, &view.UpdatedAt, &view.AcceptedAt, &view.AssignmentExpiresAt, &tags); err != nil {
+			&view.VisitorName, &view.CreatedAt, &view.UpdatedAt, &view.AcceptedAt, &view.AssignmentExpiresAt, &view.HandoffRequestedAt, &tags); err != nil {
 			fail(w, 500, "查询会话失败")
 			return
 		}
@@ -621,6 +622,10 @@ func (a *API) openCreateConversation(w http.ResponseWriter, r *http.Request, p a
 		fail(w, 500, "创建会话失败")
 		return
 	}
+	// 后端主动开启的咨询：访客尚未发消息（首条消息是坐席/集成侧消息，不触发 MESSAGE 通知），
+	// 待接待坐席关掉标签页也要能收到进线推送。
+	a.enqueueReceptionAlert(r.Context(), p.TenantID, conversationID)
+	a.nudgePush()
 	if len(in.Tags) > 0 {
 		a.applyConversationTags(r.Context(), p.TenantID, conversationID, in.Tags)
 	}
@@ -799,6 +804,7 @@ func (a *API) loadConversation(ctx handlerContext, tenantID, conversationID uuid
 		       c.assignee_id, coalesce(ag.display_name,''), c.last_sequence,
 		       coalesce(c.last_message_preview,''), c.last_message_at, c.agent_unread, c.visitor_unread,
 		       coalesce(v.display_name,''), c.created_at, c.updated_at, c.accepted_at, c.assignment_expires_at,
+		       c.handoff_requested_at,
 		       coalesce((select array_agg(t.name order by t.name) from conversation_tag ct
 		                  join tag t on t.id = ct.tag_id where ct.conversation_id = c.id), '{}')
 		  from conversation c
@@ -808,7 +814,7 @@ func (a *API) loadConversation(ctx handlerContext, tenantID, conversationID uuid
 		Scan(&view.ID, &view.InboxID, &view.VisitorID, &view.Subject, &view.Status, &view.Priority,
 			&view.Source, &view.AssigneeID, &view.AssigneeName, &view.LastSequence,
 			&view.LastMessagePreview, &view.LastMessageAt, &view.AgentUnread, &view.VisitorUnread,
-			&view.VisitorName, &view.CreatedAt, &view.UpdatedAt, &view.AcceptedAt, &view.AssignmentExpiresAt, &tags)
+			&view.VisitorName, &view.CreatedAt, &view.UpdatedAt, &view.AcceptedAt, &view.AssignmentExpiresAt, &view.HandoffRequestedAt, &tags)
 	if err != nil {
 		return conversationView{}, err
 	}

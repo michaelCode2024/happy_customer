@@ -13,8 +13,12 @@ class OfflineStore {
     final prefs = await SharedPreferences.getInstance();
     final legacy =
         prefix.replaceFirst('tongyu.offline.v2.', 'tongyu.offline.v1.');
-    for (final key in prefs.getKeys().where((key) => key.startsWith(legacy))) {
-      await prefs.remove(key);
+    for (final key in prefs.getKeys().toList()) {
+      // 旧版会把草稿写进本机。启动时清掉，避免占满配额后挡住会话快照。
+      final staleDraft = key.startsWith(prefix) && key.contains('draft%2F');
+      if (key.startsWith(legacy) || staleDraft) {
+        await prefs.remove(key);
+      }
     }
   }
 
@@ -25,12 +29,17 @@ class OfflineStore {
   static const maxCharacters = 1000000;
   static const maxEntries = 120;
   bool _cleared = false;
-  bool writeFailed = false;
   Future<void> _pending = Future.value();
 
   Future<void> flush() => _pending;
 
   String _key(String path) => prefix + Uri.encodeComponent(path);
+
+  Future<void> remove(String path) async {
+    await _pending;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_key(path));
+  }
 
   Future<Map<String, dynamic>?> read(String path) async {
     await _pending;
@@ -41,10 +50,7 @@ class OfflineStore {
     try {
       final row = jsonDecode(raw) as Map<String, dynamic>;
       final age = DateTime.now().millisecondsSinceEpoch - (row['time'] as int);
-      if (age < 0 ||
-          age >
-              (path.startsWith('draft/') ? const Duration(days: 7) : maxAge)
-                  .inMilliseconds) {
+      if (age < 0 || age > maxAge.inMilliseconds) {
         await prefs.remove(_key(path));
         return null;
       }
@@ -59,7 +65,6 @@ class OfflineStore {
     // 串行保存与清理，防止退出过程中尚未完成的请求重新写回客户数据。
     _pending = _pending.then((_) async {
       if (_cleared) {
-        writeFailed = true;
         return;
       }
       try {
@@ -67,7 +72,6 @@ class OfflineStore {
         final value = jsonEncode(
             {'time': DateTime.now().millisecondsSinceEpoch, 'data': data});
         if (value.length > maxCharacters ~/ 3) {
-          writeFailed = true;
           return;
         }
         final keys = prefs
@@ -81,24 +85,15 @@ class OfflineStore {
         while (keys.isNotEmpty &&
             (keys.length >= maxEntries ||
                 size + value.length > maxCharacters)) {
-          final candidates =
-              keys.where((k) => !k.startsWith(prefix + 'draft%2F')).toList();
-          if (candidates.isEmpty) {
-            writeFailed = true;
-            return;
-          }
-          final key = candidates.first;
+          final key = keys.first;
           keys.remove(key);
           size -= prefs.getString(key)?.length ?? 0;
           await prefs.remove(key);
         }
-        final saved = await prefs.setString(_key(path), value);
-        if (!saved)
-          writeFailed = true;
-        else if (path.startsWith('draft/')) writeFailed = false;
-      } catch (_) {
-        writeFailed = true;
         // 存储配额或隐私模式失败不能把已成功的服务端操作报告为失败。
+        await prefs.setString(_key(path), value);
+      } catch (_) {
+        // 同上：本机快照只是便利，写失败不影响在线操作。
       }
     });
     return _pending;
@@ -113,6 +108,5 @@ class OfflineStore {
       await prefs.remove(key);
     }
     _cleared = retire;
-    writeFailed = false;
   }
 }

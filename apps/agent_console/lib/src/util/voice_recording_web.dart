@@ -2,8 +2,11 @@ import 'dart:async';
 import 'dart:typed_data';
 // ignore: avoid_web_libraries_in_flutter
 import 'dart:html' as html;
-import 'dart:js_util' as js;
+import 'dart:js_interop';
 import 'voice_recording.dart';
+
+@JS('MediaRecorder')
+external JSAny? get _browserMediaRecorder;
 
 class VoiceRecorder {
   html.MediaStream? _stream;
@@ -14,7 +17,7 @@ class VoiceRecorder {
   Future<void> start() async {
     final generation = ++_generation;
     final media = html.window.navigator.mediaDevices;
-    if (media == null || !js.hasProperty(html.window, 'MediaRecorder')) {
+    if (media == null || _browserMediaRecorder == null) {
       throw StateError('此浏览器不支持录音，请使用Chrome或Edge，并通过HTTPS或localhost访问');
     }
     var expired = false;
@@ -44,8 +47,10 @@ class VoiceRecorder {
       _recorder = recorder;
       _chunks.clear();
       recorder.addEventListener('dataavailable', (event) {
-        final blob = js.getProperty<html.Blob>(event, 'data');
-        if (blob.size > 0 && generation == _generation) _chunks.add(blob);
+        final blob = (event as html.BlobEvent).data;
+        if (blob != null && blob.size > 0 && generation == _generation) {
+          _chunks.add(blob);
+        }
       });
       recorder.start(250);
       _started = DateTime.now();

@@ -28,7 +28,7 @@ func (a *API) registerNotifications(mux *http.ServeMux) {
 }
 
 // 可见性单独记录，不动坐席手工设置的 ONLINE/AWAY：状态是「愿不愿意接活」，
-// 可见是「眼睛在不在这个屏上」。推送只跳过后者，避免人盯着工作台时手机还响。
+// 可见是「眼睛在不在这个屏上」。人看着工作台时，页面声音和手机推送一起响。
 func (a *API) consoleActivity(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 	var in struct {
 		Visible *bool `json:"visible"`
@@ -52,16 +52,16 @@ func (a *API) consoleActivity(w http.ResponseWriter, r *http.Request, p auth.Pri
 	respond(w, 200, map[string]any{"visible": *in.Visible})
 }
 
-// 只通知当前接待人。未分配时不能按入口广播：自动回复会先留下未分配会话，
-// 推送会先送到每个在线坐席，几秒后才被人接走，另一个人手机上就是别人的消息。
+// 已有接待人时只通知本人。还在待接待时通知该入口里能领取的坐席，否则新咨询没有声音也没有推送。
+// 被人接走之后，投递条件不再满足，其他人不会继续收到这通会话的新消息。
 func enqueueMessageNotifications(ctx context.Context, tx pgx.Tx, tenantID, conversationID, messageID uuid.UUID) error {
 	_, err := tx.Exec(ctx, `with inserted as (
  insert into agent_notification(tenant_id,agent_id,conversation_id,message_id,title)
  select c.tenant_id,ag.id,c.id,$3,coalesce(nullif(v.display_name,''),'客户') || ' 发来了新消息'
  from conversation c join visitor v on v.id=c.visitor_id
- join agent ag on ag.id=c.assignee_id and ag.tenant_id=c.tenant_id and ag.status='ACTIVE'
- join agent_inbox ai on ai.inbox_id=c.inbox_id and ai.agent_id=ag.id
- where c.id=$1 and c.tenant_id=$2 and c.assignee_id is not null
+ join agent_inbox ai on ai.inbox_id=c.inbox_id
+ join agent ag on ag.id=ai.agent_id and ag.tenant_id=c.tenant_id and ag.status='ACTIVE'
+ where c.id=$1 and c.tenant_id=$2 and (c.assignee_id is null or c.assignee_id=ag.id)
  on conflict(agent_id,message_id) do nothing returning id,agent_id
  ) insert into push_delivery(notification_id,subscription_id)
  select n.id,s.id from inserted n join push_subscription s on s.agent_id=n.agent_id
@@ -69,8 +69,45 @@ func enqueueMessageNotifications(ctx context.Context, tx pgx.Tx, tenantID, conve
 	return err
 }
 
-// 读通知时再次核对接待人。会话后来分给别人，或本人已退出入口，旧通知不再出现。
-const notificationScope = ` n.tenant_id=$1 and n.agent_id=$2 and exists(select 1 from conversation c join agent_inbox ai on ai.inbox_id=c.inbox_id where c.id=n.conversation_id and ai.agent_id=$2 and c.assignee_id=$2)`
+// 转接没有新的客户消息，单独记一条，关掉页面后仍能推到被转接的人。
+func (a *API) enqueueTransferAlert(ctx context.Context, tenantID, conversationID, agentID uuid.UUID) {
+	var id uuid.UUID
+	err := a.db.QueryRow(ctx, `insert into agent_notification(tenant_id,agent_id,conversation_id,kind,title)
+ select $1,$2,$3,'TRANSFER',coalesce(nullif(v.display_name,''),'客户') || ' 转接给你，请及时接待'
+ from conversation c join visitor v on v.id=c.visitor_id
+ where c.id=$3 and c.tenant_id=$1 and c.assignee_id=$2
+ and not exists(select 1 from agent_notification n where n.agent_id=$2 and n.conversation_id=$3 and n.kind='TRANSFER' and n.created_at>now()-interval '1 minute')
+ returning id`, tenantID, agentID, conversationID).Scan(&id)
+	if err != nil {
+		return
+	}
+	_, _ = a.db.Exec(ctx, `insert into push_delivery(notification_id,subscription_id)
+ select $1,s.id from push_subscription s join agent_session ss on ss.id=s.session_id and ss.expires_at>now()
+ where s.agent_id=$2`, id, agentID)
+}
+
+// 待接待（未分配）新客户进线时，关掉页面也要能收到推送，通知入口里能领取的坐席。
+// 只在「纯进线、还没有访客消息」时调用；带首条消息的进线由 MESSAGE 通知覆盖，避免重复。
+func (a *API) enqueueReceptionAlert(ctx context.Context, tenantID, conversationID uuid.UUID) {
+	_, err := a.db.Exec(ctx, `with inserted as (
+ insert into agent_notification(tenant_id,agent_id,conversation_id,kind,title)
+ select c.tenant_id,ag.id,c.id,'QUEUED',coalesce(nullif(v.display_name,''),'客户') || ' 已进入待接待队列，请及时接待'
+ from conversation c join visitor v on v.id=c.visitor_id
+ join agent_inbox ai on ai.inbox_id=c.inbox_id
+ join agent ag on ag.id=ai.agent_id and ag.tenant_id=c.tenant_id and ag.status='ACTIVE'
+ where c.id=$1 and c.tenant_id=$2 and c.assignee_id is null
+ and not exists(select 1 from agent_notification n where n.agent_id=ag.id and n.conversation_id=c.id and n.kind='QUEUED' and n.created_at>now()-interval '1 minute')
+ returning id,agent_id
+ ) insert into push_delivery(notification_id,subscription_id)
+ select n.id,s.id from inserted n join push_subscription s on s.agent_id=n.agent_id
+ join agent_session ss on ss.id=s.session_id and ss.expires_at>now()`, conversationID, tenantID)
+	if err != nil {
+		a.logger.Warn("enqueue reception alert failed", "error", err, "conversation", conversationID)
+	}
+}
+
+// 读通知时再次核对入口。待接待仍发给能领取的人；已经分给别人，或本人已退出入口，旧通知不再出现。
+const notificationScope = ` n.tenant_id=$1 and n.agent_id=$2 and exists(select 1 from conversation c join agent_inbox ai on ai.inbox_id=c.inbox_id where c.id=n.conversation_id and ai.agent_id=$2 and (c.assignee_id is null or c.assignee_id=$2))`
 
 func (a *API) notifications(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 	rows, err := a.db.Query(r.Context(), `select n.id,n.conversation_id,n.kind,n.title,n.created_at,n.read_at from agent_notification n where `+notificationScope+` order by n.created_at desc limit 100`, p.TenantID, p.AgentID)
@@ -308,8 +345,7 @@ func (a *API) deliverPushBatch(ctx context.Context) {
  where d.completed_at is null and d.attempts<5 and d.next_attempt_at<=now() and n.read_at is null
  and not exists(select 1 from agent_alert_preference pref where pref.agent_id=n.agent_id and pref.quiet_until>now())
  and n.created_at>now()-interval '24 hours'
- and exists(select 1 from conversation c join agent_inbox ai on ai.inbox_id=c.inbox_id where c.id=n.conversation_id and ai.agent_id=n.agent_id and c.assignee_id=n.agent_id)
- and not exists(select 1 from agent_presence ap where ap.agent_id=n.agent_id and ap.focused_at>now()-interval '90 seconds')
+ and exists(select 1 from conversation c join agent_inbox ai on ai.inbox_id=c.inbox_id where c.id=n.conversation_id and ai.agent_id=n.agent_id and (c.assignee_id is null or c.assignee_id=n.agent_id))
  order by d.next_attempt_at limit 10 for update of d skip locked`)
 	if err != nil {
 		a.logger.Warn("claim push batch failed", "error", err)

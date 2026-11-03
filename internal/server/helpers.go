@@ -66,7 +66,7 @@ type inboxContext struct {
 	FontFamily   *string
 	BubbleRadius *int
 	CustomCSS    *string
-	// ReopenGrace 是入口级结束宽限期（分钟），访客端据此决定超时限后新开会话。
+	// ReopenGrace 仍随入口下发。已结束后访客再发言会另开一轮，不再按它决定。
 	ReopenGrace int
 }
 

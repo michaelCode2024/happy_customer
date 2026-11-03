@@ -37,8 +37,6 @@ type messageInput struct {
 	// that only carries metadata.private is invisible to a where clause, and one
 	// forgotten filter would leak it to the visitor.
 	Private bool
-	// Forked 标记消息来自超宽限后的自动新会话，防止分流逻辑递归。
-	Forked bool
 }
 
 // messageColumns is the single column list every message read uses. Keeping it
@@ -130,38 +128,6 @@ func (a *API) appendMessage(ctx context.Context, tenantID, conversationID uuid.U
 		return messageView{}, err
 	}
 
-	// 结束宽限期分流：坐席结束会话后访客再发言，宽限期内复活原会话（延续上下文与原接待人）；
-	// 超过宽限期则自动新建会话，无主进入待接待大厅，由所有在线客服按路由规则接待或抢单。
-	// 放进取事务之前：递归调用会另开事务，不能持有外层连接。
-	if !in.Forked && !in.Private && in.SenderType == "VISITOR" {
-		var status string
-		var closedAt *time.Time
-		lookupErr := a.db.QueryRow(ctx, `
-			select c.status, c.closed_at
-			  from conversation c
-			 where c.id = $1 and c.tenant_id = $2`, conversationID, tenantID).Scan(&status, &closedAt)
-		if errors.Is(lookupErr, pgx.ErrNoRows) {
-			return messageView{}, pgx.ErrNoRows
-		}
-		if lookupErr != nil {
-			return messageView{}, lookupErr
-		}
-		if status == "RESOLVED" {
-			fork, forkErr := a.shouldForkAfterGrace(ctx, conversationID, closedAt)
-			if forkErr != nil {
-				return messageView{}, forkErr
-			}
-			if fork {
-				forkedID, forkErr := a.forkConversation(ctx, tenantID, conversationID)
-				if forkErr != nil {
-					return messageView{}, forkErr
-				}
-				in.Forked = true
-				return a.appendMessage(ctx, tenantID, forkedID, in)
-			}
-		}
-	}
-
 	tx, err := a.db.Begin(ctx)
 	if err != nil {
 		return messageView{}, err
@@ -188,8 +154,12 @@ func (a *API) appendMessage(ctx context.Context, tenantID, conversationID uuid.U
 		// 区分未领取 / 他人接待 / 未确认接单，前端才能给出对得上的操作指引。
 		var owner *uuid.UUID
 		var accepted *time.Time
-		if err = tx.QueryRow(ctx, `select assignee_id, accepted_at from conversation where id=$1 and tenant_id=$2 for update`, conversationID, tenantID).Scan(&owner, &accepted); err != nil {
+		var agentStatus string
+		if err = tx.QueryRow(ctx, `select assignee_id, accepted_at, status from conversation where id=$1 and tenant_id=$2 for update`, conversationID, tenantID).Scan(&owner, &accepted, &agentStatus); err != nil {
 			return messageView{}, err
+		}
+		if agentStatus == "RESOLVED" {
+			return messageView{}, serviceError{"CONVERSATION_CLOSED", "会话已结束，不能在原会话里继续回复"}
 		}
 		if owner == nil {
 			return messageView{}, serviceError{"RECEPTION_REQUIRED", "请先点击「开始接待」，再回复客户"}
@@ -216,21 +186,79 @@ func (a *API) appendMessage(ctx context.Context, tenantID, conversationID uuid.U
 
 	// Row lock on the conversation serialises sequence allocation, so two
 	// concurrent sends can never receive the same sequence.
+	var priorStatus, source string
+	var visitorID, inboxID uuid.UUID
+	if err = tx.QueryRow(ctx, `select status, visitor_id, inbox_id, coalesce(source,'WEB') from conversation where id=$1 and tenant_id=$2 for update`, conversationID, tenantID).Scan(&priorStatus, &visitorID, &inboxID, &source); err != nil {
+		return messageView{}, err
+	}
+	// 已结束的这一轮保持归档。访客再发言另开一轮；客服不能把原会话改回进行中。
+	forked := false
+	originID := conversationID
+	if priorStatus == "RESOLVED" && !in.Private && messageType != "EVENT" && messageType != "SYSTEM" && messageType != "RATING" {
+		if in.SenderType == "AGENT" {
+			return messageView{}, serviceError{"CONVERSATION_CLOSED", "会话已结束，不能在原会话里继续回复"}
+		}
+		if in.SenderType == "VISITOR" {
+			if in.ClientMessageID != "" {
+				existing, lookupErr := scanMessageRow(tx.QueryRow(ctx, "select "+messageColumns+messageJoins+`
+					join conversation c on c.id = m.conversation_id
+					where c.tenant_id=$1 and c.visitor_id=$2 and m.client_message_id=$3 limit 1`, tenantID, visitorID, in.ClientMessageID))
+				if lookupErr == nil {
+					if !sameMessageRetry(existing, in) {
+						return messageView{}, serviceError{"MESSAGE_ID_CONFLICT", "消息标识已被其他发送者或消息用途使用"}
+					}
+					if existing.DeletedAt == nil {
+						existing.Attachments = a.messageAttachments(ctx, existing.ID)
+					}
+					return existing, nil
+				}
+				if !errors.Is(lookupErr, pgx.ErrNoRows) {
+					return messageView{}, lookupErr
+				}
+			}
+			var openID uuid.UUID
+			openErr := tx.QueryRow(ctx, `select id from conversation where tenant_id=$1 and visitor_id=$2 and inbox_id=$3 and status <> 'RESOLVED' and id <> $4 order by updated_at desc limit 1 for update`, tenantID, visitorID, inboxID, originID).Scan(&openID)
+			switch {
+			case openErr == nil:
+				conversationID = openID
+			case errors.Is(openErr, pgx.ErrNoRows):
+				newID := uuid.New()
+				openedAt := nowUTC()
+				if _, err = tx.Exec(ctx, `insert into conversation(id, tenant_id, inbox_id, visitor_id, status, source, last_sequence, last_message_at, created_at, updated_at)
+					values($1,$2,$3,$4,'OPEN',$5,0,$6,$6,$6)`, newID, tenantID, inboxID, visitorID, source, openedAt); err != nil {
+					return messageView{}, err
+				}
+				conversationID = newID
+				forked = true
+			default:
+				return messageView{}, openErr
+			}
+			in.ReplyToID = nil
+			for _, raw := range in.AttachmentIDs {
+				attachmentID, parseErr := uuid.Parse(raw)
+				if parseErr != nil {
+					continue
+				}
+				if _, err = tx.Exec(ctx, `update attachment set conversation_id=$1 where id=$2 and conversation_id=$3 and message_id is null`, conversationID, attachmentID, originID); err != nil {
+					return messageView{}, err
+				}
+			}
+		}
+	}
 	var sequence int64
 	var assignee *uuid.UUID
 	// A private note is not a visitor-visible event, so it must not move the
 	// conversation preview or the agent unread counter — otherwise the queue
 	// shows "1 new message" for a note the visitor never sent.
+	// 系统提示留在已结束的原会话上，不另开一轮，也不改结束状态。
 	err = tx.QueryRow(ctx, `
 		update conversation
-		   set last_sequence = last_sequence + 1,
+		   set last_sequence = `+sequenceAllocation+`,
 		       last_message_at = case when $5 then last_message_at else now() end,
 		       last_message_preview = case when $5 then last_message_preview else $3 end,
 		       updated_at = now(),
 		       agent_unread = case when $4 = 'VISITOR' then agent_unread + 1 else agent_unread end,
-		       visitor_unread = case when $4 <> 'VISITOR' and not $5 then visitor_unread + 1 else visitor_unread end,
-		       status = case when status = 'RESOLVED' and not $5 then 'OPEN' else status end,
-		       closed_at = case when status = 'RESOLVED' and not $5 then null else closed_at end
+		       visitor_unread = case when $4 <> 'VISITOR' and not $5 then visitor_unread + 1 else visitor_unread end
 		 where id = $1 and tenant_id = $2
 		 returning last_sequence, assignee_id`,
 		conversationID, tenantID, messagePreview(messageType, in.Content, metadata), in.SenderType, in.Private).Scan(&sequence, &assignee)
@@ -280,6 +308,11 @@ func (a *API) appendMessage(ctx context.Context, tenantID, conversationID uuid.U
 		}
 		return messageView{}, err
 	}
+	if in.SenderType == "AGENT" && in.SenderID != nil {
+		if _, err := tx.Exec(ctx, `insert into conversation_participant(conversation_id, agent_id) values($1,$2) on conflict do nothing`, conversationID, *in.SenderID); err != nil {
+			return messageView{}, err
+		}
+	}
 
 	// 与消息提交在同一事务内，只有真实发送成功才计入采纳发送；租户、会话和作者必须同时匹配。
 	if raw, ok := in.Metadata["assistInteractionId"].(string); ok && in.SenderType == "AGENT" && !in.Private && messageType == "TEXT" {
@@ -310,6 +343,7 @@ func (a *API) appendMessage(ctx context.Context, tenantID, conversationID uuid.U
 		}
 	}
 
+	// 新一轮按入口自己的分配规则走。已结束的原会话不会在这里被改回进行中。
 	newAssignee, err := a.autoAssign(ctx, tx, tenantID, conversationID, assignee, in.SenderType)
 	if err != nil {
 		return messageView{}, err
@@ -334,158 +368,50 @@ func (a *API) appendMessage(ctx context.Context, tenantID, conversationID uuid.U
 	if in.ReplyToID != nil {
 		view.ReplyTo = a.replyPreview(ctx, *in.ReplyToID)
 	}
+	if forked {
+		var created conversationView
+		if err := a.queryConversation(ctx, conversationID, &created); err == nil {
+			a.publish(ctx, a.conversationChannels(ctx, conversationID), realtime.Event{
+				Type: "conversation.created", TenantID: tenantID.String(), ConversationID: conversationID.String(), Data: created,
+			})
+			a.notifyWebhook(ctx, tenantID, webhook.EventConversationCreated, map[string]any{
+				"conversationId": conversationID, "visitorId": created.VisitorID, "inboxId": created.InboxID, "source": created.Source, "createdAt": created.CreatedAt,
+			})
+			a.bumpDailyStat(ctx, tenantID, "conversations_started")
+		}
+	}
 	a.afterMessageCommitted(ctx, tenantID, conversationID, view, newAssignee, in.SenderType)
 	return view, nil
 }
 
-// shouldForkAfterGrace 判断超宽限的访客消息是否应新建会话。宽限期是入口级设置：
-// 0 表示结束后再发言一律进大厅；NULL（旧数据）按默认 24 小时。
-func (a *API) shouldForkAfterGrace(ctx context.Context, conversationID uuid.UUID, closedAt *time.Time) (bool, error) {
-	var grace int
-	err := a.db.QueryRow(ctx, `
-		select coalesce(i.reopen_grace_minutes, 1440)
-		  from conversation c
-		  join inbox i on i.id = c.inbox_id
-		 where c.id = $1`, conversationID).Scan(&grace)
-	if err != nil {
-		return false, err
-	}
-	if grace == 0 {
-		return true, nil
-	}
-	// 没有 closed_at 的旧数据按创建时间兜底；仍在规定时限内则复活原会话。
-	base := closedAt
-	if base == nil {
-		var createdAt time.Time
-		if err = a.db.QueryRow(ctx, `select created_at from conversation where id=$1`, conversationID).Scan(&createdAt); err != nil {
-			return false, err
-		}
-		base = &createdAt
-	}
-	return time.Since(*base) > time.Duration(grace)*time.Minute, nil
-}
+// 结束提示的两套文案。手动结束由坐席触发，自动结束必须说清是「没消息了」，
+// 否则访客会以为被客服晾了。
+const (
+	endNoticeManual = "客服已结束本次会话。"
+	endNoticeIdle   = "较长时间没有收到新消息，本次咨询已自动结束。"
+)
 
-// forkConversation 为超宽限的访客消息创建新会话，并落一条 EVENT 关联历史会话，
-// 让接单的坐席能回溯上一轮咨询。新会话不带接待人，天然进入待接待大厅。
-// 同一父会话若已分流过且新会话仍在进行中，则复用那条新会话：旧客户端反复重试
-// 时不会在大厅里刷出多个重复线程。
-func (a *API) forkConversation(ctx context.Context, tenantID, conversationID uuid.UUID) (uuid.UUID, error) {
-	var inboxID, visitorID uuid.UUID
-	var subject, lastPreview *string
-	var source string
-	if err := a.db.QueryRow(ctx, `
-		select inbox_id, visitor_id, subject, source, last_message_preview
-		  from conversation
-		 where id = $1 and tenant_id = $2`, conversationID, tenantID).Scan(&inboxID, &visitorID, &subject, &source, &lastPreview); err != nil {
-		return uuid.Nil, err
-	}
-	newID := uuid.New()
-	tx, err := a.db.Begin(ctx)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	if _, err = tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1,0))`, conversationID.String()); err != nil {
-		return uuid.Nil, err
-	}
-	var reused uuid.UUID
-	scanErr := tx.QueryRow(ctx, `
-		select c.id
-		  from conversation c
-		  join message m on m.conversation_id = c.id
-		 where c.tenant_id = $1 and c.inbox_id = $2 and c.visitor_id = $3
-		   and c.status in ('OPEN','PENDING')
-		   and m.message_type = 'EVENT' and m.metadata->>'previousConversationId' = $4
-		 order by c.created_at desc
-		 limit 1`, tenantID, inboxID, visitorID, conversationID.String()).Scan(&reused)
-	if scanErr == nil {
-		if err = tx.Commit(ctx); err != nil {
-			return uuid.Nil, err
-		}
-		return reused, nil
-	}
-	if !errors.Is(scanErr, pgx.ErrNoRows) {
-		return uuid.Nil, scanErr
-	}
-	if _, err = tx.Exec(ctx, `
-		insert into conversation(id, tenant_id, inbox_id, visitor_id, subject, status, source, last_sequence,
-			last_message_at, created_at, updated_at)
-		values($1,$2,$3,$4,$5,'OPEN',$6,1,$7,$7,$7)`,
-		newID, tenantID, inboxID, visitorID, subject, source, nowUTC()); err != nil {
-		return uuid.Nil, err
-	}
-	preview := ""
-	if lastPreview != nil {
-		preview = trimPreview(*lastPreview)
-	}
-	eventMeta, _ := json.Marshal(map[string]any{"fork": true, "previousConversationId": conversationID.String()})
-	eventContent := "上一轮咨询已结束且超过时限，本次咨询进入新会话，由在线客服接待。"
-	if preview != "" {
-		eventContent += "上一轮最后消息：" + preview
-	}
-	if _, err = tx.Exec(ctx, `
-		insert into message(id, tenant_id, conversation_id, sender_type, sequence, message_type, content, metadata, created_at)
-		values($1,$2,$3,'SYSTEM',1,'EVENT',$4,$5,now())`,
-		uuid.New(), tenantID, newID, eventContent, eventMeta); err != nil {
-		return uuid.Nil, err
-	}
-	// 原会话补一条回指提示：坐席翻归档时能看出访客已另起线程，不是被漏接待。
-	// 序列号必须一起递增，否则客户端按 last_sequence 增量拉取会漏掉这条提示。
-	pointerID := uuid.New()
-	var pointerSequence int64
-	pointerContent := "本次咨询已结束，后续咨询已在新会话中继续。"
-	pointerMeta, _ := json.Marshal(map[string]any{"fork": true, "nextConversationId": newID.String()})
-	if err = tx.QueryRow(ctx, `
-		update conversation
-		   set last_sequence = last_sequence + 1, updated_at = now()
-		 where id = $1
-		 returning last_sequence`, conversationID).Scan(&pointerSequence); err != nil {
-		return uuid.Nil, err
-	}
-	if _, err = tx.Exec(ctx, `
-		insert into message(id, tenant_id, conversation_id, sender_type, sequence, message_type, content, metadata, created_at)
-		values($1,$2,$3,'SYSTEM',$4,'EVENT',$5,$6,now())`,
-		pointerID, tenantID, conversationID, pointerSequence, pointerContent, pointerMeta); err != nil {
-		return uuid.Nil, err
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return uuid.Nil, err
-	}
-	// 大厅和 webhook 需要完整会话行，和访客端主动新建会话时保持同一种载荷。
-	var view conversationView
-	if err = a.queryConversation(ctx, newID, &view); err == nil {
-		a.publish(ctx, a.conversationChannels(ctx, newID), realtime.Event{
-			Type: "conversation.created", TenantID: tenantID.String(), ConversationID: newID.String(), Data: view,
-		})
-	}
-	a.notifyWebhook(ctx, tenantID, webhook.EventConversationCreated, map[string]any{
-		"conversationId": newID, "visitorId": visitorID, "inboxId": inboxID, "source": source, "createdAt": view.CreatedAt,
-		"previousConversationId": conversationID,
-	})
-	// 回指提示只推坐席频道：访客频道收到这条会让已结束的历史线程在前端显示成重新打开。
-	a.publish(ctx, a.agentOnlyChannels(ctx, conversationID), realtime.Event{
-		Type: "message.created", TenantID: tenantID.String(), ConversationID: conversationID.String(),
-		Data: messageView{ID: pointerID, ConversationID: conversationID, SenderType: "SYSTEM",
-			Sequence: pointerSequence, MessageType: "EVENT", Content: pointerContent, CreatedAt: nowUTC()},
-	})
-	a.bumpDailyStat(ctx, tenantID, "conversations_started")
-	return newID, nil
-}
+// sequenceAllocation 分配下一条消息序号。只写 last_sequence+1 在存量漂移的行上会撞
+// message(conversation_id, sequence) 唯一键：有的行 last_sequence 还停在 0，消息里却已经
+// 有 sequence=1 的行（绕过接口直接写库的夹具、迁移带进来的旧数据）。一旦撞键，插入方
+// 要么整笔事务回滚、要么提示被吞掉，客户端就永远看不到这条系统消息。取两者的最大值
+// 让计数器自己回到正轨，代价是一条消息行的索引扫描（唯一键索引本身就能覆盖）。
+const sequenceAllocation = `greatest(last_sequence, (select coalesce(max(m.sequence), 0)
+		                            from message m where m.conversation_id = conversation.id)) + 1`
 
 // appendEndedNotice 把「会话已结束」写进消息流。两端原先只在输入框上方给一行小字，
 // 访客很容易当成还在接待；友商（Intercom、腾讯客服）都是在流里留一条系统行。
 // 序列号必须一起递增，否则客户端按 last_sequence 增量拉取会漏掉这条。
-func (a *API) appendEndedNotice(ctx context.Context, tenantID, conversationID uuid.UUID) {
+func (a *API) appendEndedNotice(ctx context.Context, tenantID, conversationID uuid.UUID, content string) {
 	var sequence int64
 	if err := a.db.QueryRow(ctx, `
 		update conversation
-		   set last_sequence = last_sequence + 1, updated_at = now()
+		   set last_sequence = `+sequenceAllocation+`, updated_at = now()
 		 where id = $1 and tenant_id = $2
 		 returning last_sequence`, conversationID, tenantID).Scan(&sequence); err != nil {
 		a.logger.Error("结束提示取序列号失败", "error", err)
 		return
 	}
-	const content = "客服已结束本次会话。"
 	metadata, _ := json.Marshal(map[string]any{"ended": true})
 	id := uuid.New()
 	if _, err := a.db.Exec(ctx, `
@@ -612,6 +538,12 @@ var errVisitorBlocked = errors.New("该访客已被拉黑")
 func (a *API) autoAssign(ctx context.Context, tx pgx.Tx, tenantID, conversationID uuid.UUID, current *uuid.UUID, senderType string) (*uuid.UUID, error) {
 	if current != nil || senderType != "VISITOR" {
 		return current, nil
+	}
+	// 结束过又重新打开、还没有人点「开始接待」的对话留在待接待。
+	// 自动分配和后台补分配都走这里，避免在线的原客服被立刻分回来。
+	var reopenedWaiting bool
+	if tx.QueryRow(ctx, `select exists(select 1 from message where conversation_id=$1 and metadata->>'ended'='true')`, conversationID).Scan(&reopenedWaiting) == nil && reopenedWaiting {
+		return nil, nil
 	}
 	// 启用自动回复或 AI 接待的入口先由机器人回答；转人工 / 客服主动接管后再按原有规则分配。
 	// 只看 automation 会漏掉「只开了 AI」的入口：坐席登录会标 ONLINE，访客一来就被分配，AI 立刻 AGENT_ALREADY_ASSIGNED。
@@ -740,7 +672,7 @@ func (a *API) completeHandoff(ctx context.Context, tenantID, conversationID uuid
 			state = "ACCEPTED"
 			content = fmt.Sprintf("客服「%s」已在接待中，请直接描述您的问题。", name)
 		}
-		if err = receptionNotice(ctx, tx, tenantID, conversationID, content, state); err != nil {
+		if err = receptionNotice(ctx, tx, tenantID, conversationID, content, state, true); err != nil {
 			return nil, "", err
 		}
 	}
@@ -749,7 +681,7 @@ func (a *API) completeHandoff(ctx context.Context, tenantID, conversationID uuid
 		if content == "" {
 			content = "正在为您转接人工客服。"
 		}
-		if err := receptionNotice(ctx, tx, tenantID, conversationID, content, "TRANSFERRING"); err != nil {
+		if err := receptionNotice(ctx, tx, tenantID, conversationID, content, "TRANSFERRING", true); err != nil {
 			return nil, "", err
 		}
 		if _, err := tx.Exec(ctx, `update conversation set bot_paused = true, handoff_requested_at=coalesce(handoff_requested_at,now()), updated_at = now() where id = $1`, conversationID); err != nil {
@@ -761,7 +693,7 @@ func (a *API) completeHandoff(ctx context.Context, tenantID, conversationID uuid
 		return nil, "", err
 	}
 	if assignee == nil {
-		if err := receptionNotice(ctx, tx, tenantID, conversationID, "暂无客服可以接单，已为您排队。", "QUEUED"); err != nil {
+		if err := receptionNotice(ctx, tx, tenantID, conversationID, "暂无客服可以接单，已为您排队。", "QUEUED", true); err != nil {
 			return nil, "", err
 		}
 	}
@@ -866,7 +798,7 @@ func (a *API) setAssignee(ctx context.Context, tx pgx.Tx, tenantID, conversation
 		return pgx.ErrNoRows
 	}
 	if autoAccept {
-		if err = receptionNotice(ctx, tx, tenantID, conversationID, fmt.Sprintf("客服「%s」已接入，请继续描述您的问题。", name), "ACCEPTED"); err != nil {
+		if err = receptionNotice(ctx, tx, tenantID, conversationID, fmt.Sprintf("客服「%s」已接入，请继续描述您的问题。", name), "ACCEPTED", true); err != nil {
 			return err
 		}
 		// 自动接单也要通知坐席，避免只看到访客消息却不知道会话已落到自己名下。
@@ -879,7 +811,7 @@ func (a *API) setAssignee(ctx context.Context, tx pgx.Tx, tenantID, conversation
 			tenantID, agentID, conversationID); err != nil {
 			return err
 		}
-	} else if err = receptionNotice(ctx, tx, tenantID, conversationID, fmt.Sprintf("已分配给客服「%s」，等待客服接待。", name), "ASSIGNED"); err != nil {
+	} else if err = receptionNotice(ctx, tx, tenantID, conversationID, fmt.Sprintf("已分配给客服「%s」，等待客服接待。", name), "ASSIGNED", true); err != nil {
 		return err
 	}
 
@@ -890,6 +822,10 @@ func (a *API) setAssignee(ctx context.Context, tx pgx.Tx, tenantID, conversation
 	_, err = tx.Exec(ctx, `insert into conversation_event(id, tenant_id, conversation_id, event_type, actor_type, actor_id, detail)
 		values($1,$2,$3,'assigned','SYSTEM',$4,$5)`,
 		uuid.New(), tenantID, conversationID, agentID, map[string]any{"assigneeId": agentID, "autoAccept": autoAccept})
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `insert into conversation_participant(conversation_id, agent_id) values($1,$2) on conflict do nothing`, conversationID, agentID)
 	return err
 }
 
@@ -1232,6 +1168,7 @@ func (a *API) queryConversation(ctx context.Context, conversationID uuid.UUID, v
 		       coalesce(ag.display_name,''), c.priority, c.source, c.last_sequence,
 		       coalesce(c.last_message_preview,''), c.last_message_at, c.agent_unread, c.visitor_unread,
 		       coalesce(v.display_name,''), c.created_at, c.updated_at, c.accepted_at, c.assignment_expires_at,
+		       c.handoff_requested_at,
 		       c.closed_at, i.reopen_grace_minutes
 		  from conversation c
 		  join visitor v on v.id = c.visitor_id
@@ -1261,7 +1198,7 @@ func scanConversationRow(row rowScanner, view *conversationView) error {
 		&view.AssigneeID, &view.AssigneeName, &view.Priority, &view.Source, &view.LastSequence,
 		&view.LastMessagePreview, &view.LastMessageAt, &view.AgentUnread, &view.VisitorUnread,
 		&view.VisitorName, &view.CreatedAt, &view.UpdatedAt, &view.AcceptedAt, &view.AssignmentExpiresAt,
-		&view.ClosedAt, &view.ReopenGraceMinutes)
+		&view.HandoffRequestedAt, &view.ClosedAt, &view.ReopenGraceMinutes)
 }
 
 func (a *API) conversationTags(ctx context.Context, conversationID uuid.UUID) ([]string, error) {

@@ -51,12 +51,17 @@ void adoptGrantedDeskAlerts() {}
 void watchDeskAlerts() {}
 void rememberDeskAlerts() {}
 
-void messageAlert(String name, String body, {String senderName = ''}) {
+void messageAlert(String name, String body,
+    {String senderName = '', bool foregroundNotice = false, bool suppressSound = false}) {
   if (_quietUntil?.isAfter(DateTime.now()) == true) return;
   if (defaultTargetPlatform != TargetPlatform.android || !_enabled.value)
     return;
-  _channel.invokeMethod<void>(
-      'alert', {'id': name, 'sender': senderName}).catchError((_) {});
+  _channel.invokeMethod<void>('alert', {
+    'id': name,
+    'sender': senderName,
+    'body': body,
+    'foreground': foregroundNotice,
+  }).catchError((_) {});
 }
 
 /// 是否已豁免系统电池优化（即「不受限制」）。非安卓或查询失败时按未豁免处理。
@@ -82,7 +87,8 @@ Future<bool> openBatteryOptimizationSettings() async {
   }
 }
 
-Widget messageSoundButton({TongYuApi? api}) => Builder(
+Widget messageSoundButton({TongYuApi? api, VoidCallback? onTestInAppPush}) =>
+    Builder(
     builder: (context) => IconButton(
         tooltip: '声音提醒与发送者播报',
         icon: const Icon(Icons.record_voice_over_outlined),
@@ -93,13 +99,22 @@ Widget messageSoundButton({TongYuApi? api}) => Builder(
                     content: SizedBox(
                         width: 430,
                         child: SingleChildScrollView(
-                            child: messageAlertSettings(api: api))),
+                            child: messageAlertSettings(
+                                api: api,
+                                onTestInAppPush: onTestInAppPush == null
+                                    ? null
+                                    : () {
+                                        // 浮层在工作台 body（对话框之下），先关弹窗再弹卡片。
+                                        Navigator.pop(ctx);
+                                        onTestInAppPush();
+                                      }))),
                     actions: [
                       TextButton(
                           onPressed: () => Navigator.pop(ctx),
                           child: const Text('完成'))
                     ]))));
-Widget messageAlertSettings({TongYuApi? api}) => StatefulBuilder(
+Widget messageAlertSettings({TongYuApi? api, VoidCallback? onTestInAppPush}) =>
+    StatefulBuilder(
     builder: (context, refresh) => ValueListenableBuilder<bool>(
         valueListenable: _enabled,
         builder: (context, enabled, _) =>
@@ -119,6 +134,7 @@ Widget messageAlertSettings({TongYuApi? api}) => StatefulBuilder(
                 },
                 onTest: () =>
                     _channel.invokeMethod<void>('test').catchError((_) {}),
+                onTestInAppPush: onTestInAppPush,
               ),
               const _BatteryOptimizationCard(),
             ])));

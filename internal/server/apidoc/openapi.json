@@ -1,0 +1,1532 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "通语开放接口",
+    "version": "1.0.0",
+    "summary": "业务系统服务端对接通语客服",
+    "description": "本规范覆盖 `/api/v1/open/` 服务端开放接口、群聊接口与 `/api/v1/widget/` 访客端接口。\n\n**调用方**：`/api/v1/open/` 与群聊接口必须由你的后端调用，携带 `X-TongYu-Key`；密钥不得出现在浏览器、App 安装包或聊天页面中。访客端接口由前端携带访客令牌调用。\n\n**限流**：带密钥的请求按密钥计数，默认 600 次 / 分钟，超限返回 `429 RATE_LIMITED` 并带 `Retry-After`。\n\n**幂等**：`clientMessageId`、`externalGroupId`、额度 `requestId` 为幂等键，网络重试请沿用同一个值。\n\n**错误**：失败响应为 `{status, code, message, timestamp}`；`code` 只在鉴权、限流、套餐和业务冲突类错误中出现，程序判断请同时兼容两种结构，不要匹配中文 `message`。\n\n完整说明见 `/docs/open-api`。",
+    "license": {
+      "name": "商业许可",
+      "identifier": "LicenseRef-Proprietary"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://chat.example.com",
+      "description": "替换为你的通语实例地址，生产环境必须使用 HTTPS"
+    }
+  ],
+  "security": [{ "ApiKeyAuth": [] }],
+  "tags": [
+    { "name": "鉴权", "description": "确认密钥、环境与权限" },
+    { "name": "身份", "description": "为已登录用户签发短期身份票据" },
+    { "name": "会话", "description": "读取与更新会话" },
+    { "name": "消息", "description": "按序号游标读取与代发消息" },
+    { "name": "访客", "description": "访客资料与代客建会话" },
+    { "name": "坐席", "description": "企业坐席列表" },
+    { "name": "统计", "description": "与控制台看板同源的企业统计" },
+    { "name": "未读与回执", "description": "未读汇总、回执游标与上报" },
+    { "name": "群聊", "description": "第三方网站建群、管理成员与签发群令牌" },
+    { "name": "访客端", "description": "前端使用访客令牌调用的接口" }
+  ],
+  "paths": {
+    "/api/v1/open/me": {
+      "get": {
+        "tags": ["鉴权"],
+        "summary": "查询当前密钥与企业",
+        "description": "接入联调时先调本接口确认密钥、环境与权限是否正确，再排查业务接口报错。",
+        "operationId": "getOpenMe",
+        "x-tongyu-scope": "read",
+        "x-tongyu-capability": "integrations",
+        "responses": {
+          "200": {
+            "description": "当前密钥与所属企业",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["tenantId", "tenant", "keyName", "scopes"],
+                  "properties": {
+                    "tenantId": { "type": "string", "description": "企业 ID" },
+                    "tenant": { "type": "string", "description": "企业名称" },
+                    "keyName": { "type": "string", "description": "当前密钥名称" },
+                    "scopes": { "type": "array", "items": { "type": "string" }, "description": "当前密钥权限" },
+                    "inboxes": { "type": "integer", "description": "企业客服入口数" },
+                    "agents": { "type": "integer", "description": "生效坐席数" },
+                    "openConversations": { "type": "integer", "description": "未结束会话数" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/api/v1/open/visitor-identity": {
+      "post": {
+        "tags": ["身份"],
+        "summary": "签发访客身份票据",
+        "description": "为已登录的业务用户签发短期票据，票据随后用于换取访客令牌。有效期 300 秒，一次性使用，不落库。必须在你的后端校验当前登录态后再签发。",
+        "operationId": "createVisitorIdentity",
+        "x-tongyu-scope": "write",
+        "x-tongyu-capability": "identity",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["inboxKey", "externalId"],
+                "properties": {
+                  "inboxKey": { "type": "string", "description": "客服入口公开 Key" },
+                  "externalId": { "type": "string", "minLength": 1, "maxLength": 200, "description": "你系统内的用户 ID" },
+                  "displayName": { "type": "string", "description": "展示昵称" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "签发票据成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "identityToken": { "type": "string", "description": "短期身份票据" },
+                    "expiresIn": { "type": "integer", "description": "有效期，秒，固定 300" },
+                    "inboxKey": { "type": "string", "description": "回显入口 Key" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "`externalId` 为空或超长", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "description": "入口不存在或不属于当前企业", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/open/conversations": {
+      "get": {
+        "tags": ["会话"],
+        "summary": "会话列表",
+        "description": "按最后消息时间倒序，无消息的会话按创建时间倒序。",
+        "operationId": "listConversations",
+        "x-tongyu-scope": "read",
+        "x-tongyu-capability": "integrations",
+        "parameters": [
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["OPEN", "PENDING", "RESOLVED"] }, "description": "会话状态，大小写不敏感" },
+          { "name": "inboxId", "in": "query", "schema": { "type": "string", "format": "uuid" }, "description": "按入口 UUID 过滤" },
+          { "name": "assigneeId", "in": "query", "schema": { "type": "string" }, "description": "坐席 UUID；传 `none` 或 `unassigned` 表示未分配" },
+          { "name": "updatedSince", "in": "query", "schema": { "type": "string", "format": "date-time" }, "description": "只返回该时间之后有更新的会话" },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/Offset" }
+        ],
+        "responses": {
+          "200": {
+            "description": "会话分页",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": { "type": "array", "items": { "$ref": "#/components/schemas/Conversation" } },
+                    "total": { "type": "integer" },
+                    "limit": { "type": "integer" },
+                    "offset": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "`assigneeId` 不是 UUID 也不是 `unassigned`，或 `inboxId`、`updatedSince` 格式错误", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/api/v1/open/conversations/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/ConversationId" }],
+      "get": {
+        "tags": ["会话"],
+        "summary": "会话详情",
+        "description": "会话不属于本企业时返回 `404`，不区分「不存在」与「无权限」。",
+        "operationId": "getConversation",
+        "x-tongyu-scope": "read",
+        "x-tongyu-capability": "integrations",
+        "responses": {
+          "200": {
+            "description": "会话对象",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Conversation" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "patch": {
+        "tags": ["会话"],
+        "summary": "更新会话",
+        "description": "本接口不能改派坐席，也不接受 `assigneeId` 字段。成功后发布 `conversation.updated` 实时事件并投递同名 Webhook。",
+        "operationId": "updateConversation",
+        "x-tongyu-scope": "write",
+        "x-tongyu-capability": "integrations",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": { "type": "string", "enum": ["OPEN", "PENDING", "RESOLVED"], "description": "传 `RESOLVED` 时写入结束时间" },
+                  "priority": { "type": "integer", "description": "优先级，数值越大越紧急" },
+                  "subject": { "type": "string", "description": "会话主题，空字符串表示不修改" },
+                  "tags": { "type": "array", "items": { "type": "string" }, "description": "整体替换标签；不传表示不动；不存在的标签自动创建" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "更新后的完整会话对象",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Conversation" } } }
+          },
+          "400": { "description": "`status` 不在三个取值内", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "description": "标签写入失败", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/open/conversations/{id}/messages": {
+      "parameters": [{ "$ref": "#/components/parameters/ConversationId" }],
+      "get": {
+        "tags": ["消息"],
+        "summary": "消息列表",
+        "description": "按会话序号游标增量拉取，是断线重连后补齐消息的标准方式。默认不返回内部备注。",
+        "operationId": "listMessages",
+        "x-tongyu-scope": "read",
+        "x-tongyu-capability": "integrations",
+        "parameters": [
+          { "name": "after", "in": "query", "schema": { "type": "integer", "format": "int64", "default": 0 }, "description": "只返回序号大于该值的消息，用于增量" },
+          { "name": "before", "in": "query", "schema": { "type": "integer", "format": "int64", "default": 0 }, "description": "只返回序号小于该值的消息，用于向上翻页" },
+          { "$ref": "#/components/parameters/Limit" },
+          { "name": "includePrivate", "in": "query", "schema": { "type": "boolean", "default": false }, "description": "为 `true` 时同时返回内部备注" }
+        ],
+        "responses": {
+          "200": {
+            "description": "消息分页",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": { "type": "array", "items": { "$ref": "#/components/schemas/Message" } },
+                    "hasMore": { "type": "boolean", "description": "该方向还有更多数据" },
+                    "hasOlder": { "type": "boolean", "description": "存在更早的消息" },
+                    "firstSequence": { "type": "integer", "format": "int64", "description": "本页最小序号" },
+                    "lastSequence": { "type": "integer", "format": "int64", "description": "本页最大序号；本页为空时返回会话当前最新序号" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "post": {
+        "tags": ["消息"],
+        "summary": "代发消息",
+        "description": "以企业（坐席侧）身份向会话注入消息，用于订单状态、自助答复、机器人回复。消息归属集成机器人坐席，不占用人工接待，不受「先接单再回复」限制。本接口不接受附件字段。",
+        "operationId": "createMessage",
+        "x-tongyu-scope": "write",
+        "x-tongyu-capability": "integrations",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["content"],
+                "properties": {
+                  "content": { "type": "string", "description": "消息正文" },
+                  "messageType": { "type": "string", "default": "TEXT", "enum": ["TEXT", "IMAGE", "FILE", "RICH", "AUDIO", "VIDEO", "LOCATION", "CARD", "EVENT", "SYSTEM", "RATING"] },
+                  "clientMessageId": { "type": "string", "description": "幂等键，同一会话内唯一；相同键不同内容返回 403" },
+                  "senderName": { "type": "string", "description": "覆盖展示署名，写入消息 `metadata.senderName`" },
+                  "metadata": { "type": "object", "additionalProperties": true, "description": "自定义字段；服务端会追加 `source: \"open_api\"`" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "消息对象",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Message" } } }
+          },
+          "400": { "description": "消息类型不支持或字段不合法", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "description": "`CONVERSATION_CLOSED` 会话已结束，或 `MESSAGE_ID_CONFLICT` 幂等键被不同内容占用", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/open/visitors": {
+      "get": {
+        "tags": ["访客"],
+        "summary": "访客列表",
+        "operationId": "listVisitors",
+        "x-tongyu-scope": "read",
+        "x-tongyu-capability": "integrations",
+        "parameters": [
+          { "name": "search", "in": "query", "schema": { "type": "string" }, "description": "按昵称、邮箱或 `externalId` 模糊匹配，大小写不敏感" },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/Offset" }
+        ],
+        "responses": {
+          "200": {
+            "description": "访客分页",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": { "type": "array", "items": { "$ref": "#/components/schemas/Visitor" } },
+                    "total": { "type": "integer" },
+                    "limit": { "type": "integer" },
+                    "offset": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/open/visitors/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/VisitorId" }],
+      "get": {
+        "tags": ["访客"],
+        "summary": "访客详情",
+        "description": "访客列表的单条结构，外加 `conversations` 数组（最近 50 条会话摘要）。",
+        "operationId": "getVisitor",
+        "x-tongyu-scope": "read",
+        "x-tongyu-capability": "integrations",
+        "responses": {
+          "200": {
+            "description": "访客详情",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VisitorDetail" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/v1/open/visitors/{id}/conversations": {
+      "parameters": [{ "$ref": "#/components/parameters/VisitorId" }],
+      "post": {
+        "tags": ["访客"],
+        "summary": "为客户创建会话",
+        "description": "由你的后端主动开启一轮咨询，例如在订单详情页放「联系客服」。投递 `conversation.created` Webhook。",
+        "operationId": "createConversationForVisitor",
+        "x-tongyu-scope": "write",
+        "x-tongyu-capability": "integrations",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["inboxKey"],
+                "properties": {
+                  "inboxKey": { "type": "string", "description": "客服入口 Key，必须属于当前企业" },
+                  "subject": { "type": "string", "description": "会话主题" },
+                  "content": { "type": "string", "description": "非空时立即以坐席身份发出首条消息" },
+                  "priority": { "type": "integer", "default": 0 },
+                  "tags": { "type": "array", "items": { "type": "string" } },
+                  "metadata": { "type": "object", "additionalProperties": true, "description": "首条消息的自定义字段，追加 `source: \"open_api\"`" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "新建的会话对象，`source` 为 `API`",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Conversation" } } }
+          },
+          "400": { "description": "`inboxKey` 为空", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "description": "入口不属于当前企业，或访客不存在", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/open/agents": {
+      "get": {
+        "tags": ["坐席"],
+        "summary": "坐席列表",
+        "description": "返回按姓名排序的坐席，不含集成机器人账号。`id` 可作为会话列表的 `assigneeId` 或回执的 `readerId`。",
+        "operationId": "listAgents",
+        "x-tongyu-scope": "read",
+        "x-tongyu-capability": "integrations",
+        "responses": {
+          "200": {
+            "description": "坐席列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/Agent" } } }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/open/stats": {
+      "get": {
+        "tags": ["统计"],
+        "summary": "企业统计摘要",
+        "description": "数据来源与控制台看板一致，可直接用于你的 BI。",
+        "operationId": "getStats",
+        "x-tongyu-scope": "read",
+        "x-tongyu-capability": "integrations",
+        "parameters": [
+          { "name": "days", "in": "query", "schema": { "type": "integer", "default": 30, "minimum": 1, "maximum": 365 }, "description": "超范围或非法值按 30 处理" }
+        ],
+        "responses": {
+          "200": {
+            "description": "统计摘要",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "days": { "type": "integer" },
+                    "series": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "date": { "type": "string", "description": "自然日，`YYYY-MM-DD`" },
+                          "conversationsStarted": { "type": "integer" },
+                          "conversationsClosed": { "type": "integer" },
+                          "messagesIn": { "type": "integer" },
+                          "messagesOut": { "type": "integer" },
+                          "aiAnswered": { "type": "integer" },
+                          "aiHandoff": { "type": "integer" },
+                          "ratingSum": { "type": "integer" },
+                          "ratingCount": { "type": "integer" }
+                        }
+                      }
+                    },
+                    "totals": {
+                      "type": "object",
+                      "properties": {
+                        "conversationsStarted": { "type": "integer" },
+                        "conversationsClosed": { "type": "integer" },
+                        "messagesIn": { "type": "integer" },
+                        "messagesOut": { "type": "integer" },
+                        "aiAnswered": { "type": "integer" },
+                        "aiHandoff": { "type": "integer" },
+                        "aiDeflectionRate": { "type": "number", "description": "AI 拦截率 = aiAnswered / (aiAnswered + aiHandoff)" },
+                        "avgFirstResponseSeconds": { "type": "number" },
+                        "avgRating": { "type": "number" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/open/unread": {
+      "get": {
+        "tags": ["未读与回执"],
+        "summary": "企业未读汇总",
+        "description": "企业范围合计，不能当作某一个用户的角标。单个用户请用访客端会话列表的 `visitorUnread`。",
+        "operationId": "getUnreadSummary",
+        "x-tongyu-scope": "read",
+        "x-tongyu-capability": "integrations",
+        "responses": {
+          "200": {
+            "description": "未读汇总",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agentUnread": { "type": "integer", "description": "全企业客服侧未读客户消息数合计" },
+                    "visitorUnread": { "type": "integer", "description": "全企业客户侧未读坐席公开消息数合计" },
+                    "unreadConversations": { "type": "integer", "description": "任一侧未读大于 0 的会话数" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/open/conversations/{id}/receipts": {
+      "parameters": [{ "$ref": "#/components/parameters/ConversationId" }],
+      "get": {
+        "tags": ["未读与回执"],
+        "summary": "会话回执游标",
+        "description": "权威游标只认 `readSequence`，不要用 `lastSequence - unread` 反推。",
+        "operationId": "listReceipts",
+        "x-tongyu-scope": "read",
+        "x-tongyu-capability": "integrations",
+        "responses": {
+          "200": {
+            "description": "回执列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/Receipt" } } }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/v1/open/conversations/{id}/read": {
+      "parameters": [{ "$ref": "#/components/parameters/ConversationId" }],
+      "post": {
+        "tags": ["未读与回执"],
+        "summary": "上报已读",
+        "description": "游标只前进，提交更小的值不生效也不报错；大于最新序号时自动夹紧。重复提交不会重复产生 Webhook。",
+        "operationId": "reportRead",
+        "x-tongyu-scope": "write",
+        "x-tongyu-capability": "integrations",
+        "requestBody": { "$ref": "#/components/requestBodies/ReceiptReport" },
+        "responses": {
+          "200": {
+            "description": "与该会话的回执列表完全相同，可直接作为最新权威游标",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/Receipt" } } }
+                }
+              }
+            }
+          },
+          "400": { "description": "`sequence` 不大于 0，或 `readerType` 非法", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "description": "会话不存在，或 `readerId` 与会话 / 企业不匹配", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/open/conversations/{id}/delivered": {
+      "parameters": [{ "$ref": "#/components/parameters/ConversationId" }],
+      "post": {
+        "tags": ["未读与回执"],
+        "summary": "上报送达",
+        "description": "送达与已读分别记录，`deliveredSequence` 大于 `readSequence` 是正常状态。",
+        "operationId": "reportDelivered",
+        "x-tongyu-scope": "write",
+        "x-tongyu-capability": "integrations",
+        "requestBody": { "$ref": "#/components/requestBodies/ReceiptReport" },
+        "responses": {
+          "200": {
+            "description": "与该会话的回执列表完全相同",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/Receipt" } } }
+                }
+              }
+            }
+          },
+          "400": { "description": "`sequence` 不大于 0，或 `readerType` 非法", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "description": "会话不存在，或 `readerId` 与会话 / 企业不匹配", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/open/groups": {
+      "post": {
+        "tags": ["群聊"],
+        "summary": "创建群",
+        "description": "群必须是客户服务群并绑定生效的客服入口。`externalGroupId` 为幂等键，重复且群主一致时返回既有群。",
+        "operationId": "createGroup",
+        "x-tongyu-scope": "write",
+        "x-tongyu-capability": "groups",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["inboxKey", "externalGroupId", "name", "owner"],
+                "properties": {
+                  "inboxKey": { "type": "string" },
+                  "externalGroupId": { "type": "string", "minLength": 1, "maxLength": 200, "description": "你的群唯一标识，用作幂等键" },
+                  "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+                  "owner": { "$ref": "#/components/schemas/GroupPerson" },
+                  "members": { "type": "array", "maxItems": 99, "items": { "$ref": "#/components/schemas/GroupPerson" } },
+                  "maxMembers": { "type": "integer", "minimum": 2, "maximum": 5000, "default": 2000 },
+                  "speakingMode": { "type": "string", "enum": ["ALL", "MANAGERS"], "default": "ALL" },
+                  "requireIdentity": { "type": "boolean", "default": true }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "新建成功，`created` 为 `true`", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GroupCreated" } } } },
+          "200": { "description": "命中已有群，`created` 为 `false`", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GroupCreated" } } } },
+          "400": { "description": "群名、`externalGroupId`、群主或成员字段不合法；初始成员数超过群容量", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "description": "入口不存在或已停用", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "409": { "description": "`externalGroupId` 已存在且群主不一致", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      },
+      "get": {
+        "tags": ["群聊"],
+        "summary": "群列表",
+        "description": "只返回 `externalId` 所在、且由宿主群主管理的群。",
+        "operationId": "listGroups",
+        "x-tongyu-scope": "read",
+        "x-tongyu-capability": "groups",
+        "parameters": [
+          { "name": "externalId", "in": "query", "required": true, "schema": { "type": "string", "minLength": 1, "maxLength": 200 }, "description": "当前登录用户" },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50, "maximum": 100 } },
+          { "$ref": "#/components/parameters/Offset" }
+        ],
+        "responses": {
+          "200": {
+            "description": "群列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": { "type": "array", "items": { "$ref": "#/components/schemas/GroupSummary" } },
+                    "limit": { "type": "integer" },
+                    "offset": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/api/v1/open/groups/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/GroupId" }],
+      "get": {
+        "tags": ["群聊"],
+        "summary": "群详情",
+        "operationId": "getGroup",
+        "x-tongyu-scope": "read",
+        "x-tongyu-capability": "groups",
+        "parameters": [
+          { "name": "externalId", "in": "query", "required": true, "schema": { "type": "string" }, "description": "必须是该群成员，用于鉴权" }
+        ],
+        "responses": {
+          "200": {
+            "description": "群详情与成员",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GroupDetail" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "patch": {
+        "tags": ["群聊"],
+        "summary": "修改群资料",
+        "operationId": "updateGroup",
+        "x-tongyu-scope": "write",
+        "x-tongyu-capability": "groups",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["actorExternalId"],
+                "properties": {
+                  "actorExternalId": { "type": "string", "description": "操作人，必须是群主" },
+                  "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+                  "announcement": { "type": "string", "maxLength": 2000 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Ok" },
+          "400": { "description": "字段不合法", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "操作人不是群主", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/v1/open/groups/{id}/owner": {
+      "parameters": [{ "$ref": "#/components/parameters/GroupId" }],
+      "put": {
+        "tags": ["群聊"],
+        "summary": "转让群主",
+        "operationId": "transferGroupOwner",
+        "x-tongyu-scope": "write",
+        "x-tongyu-capability": "groups",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["actorExternalId", "ownerExternalId"],
+                "properties": {
+                  "actorExternalId": { "type": "string", "description": "当前群主" },
+                  "ownerExternalId": { "type": "string", "description": "新群主，必须是现有成员，否则 400" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Ok" },
+          "400": { "description": "新群主不是现有成员", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "操作人不是群主", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/v1/open/groups/{id}/manager": {
+      "parameters": [{ "$ref": "#/components/parameters/GroupId" }],
+      "put": {
+        "tags": ["群聊"],
+        "summary": "设置群管理员",
+        "operationId": "setGroupManager",
+        "x-tongyu-scope": "write",
+        "x-tongyu-capability": "groups",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["actorExternalId", "externalId", "isManager"],
+                "properties": {
+                  "actorExternalId": { "type": "string", "description": "操作人，必须是群主" },
+                  "externalId": { "type": "string", "description": "目标成员" },
+                  "isManager": { "type": "boolean", "description": "`true` 授权，`false` 取消" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Ok" },
+          "403": { "description": "操作人不是群主", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "description": "目标用户不在群里，需先加人", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/open/groups/{id}/policy": {
+      "parameters": [{ "$ref": "#/components/parameters/GroupId" }],
+      "patch": {
+        "tags": ["群聊"],
+        "summary": "设置群规则",
+        "operationId": "updateGroupPolicy",
+        "x-tongyu-scope": "write",
+        "x-tongyu-capability": "groups",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["actorExternalId"],
+                "properties": {
+                  "actorExternalId": { "type": "string", "description": "操作人，必须是群主" },
+                  "speakingMode": { "type": "string", "enum": ["ALL", "MANAGERS"] },
+                  "maxMembers": { "type": "integer", "minimum": 2, "maximum": 5000, "description": "不能小于当前成员数" },
+                  "requireIdentity": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Ok" },
+          "400": { "description": "发言模式或容量非法", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "操作人不是群主", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "409": { "description": "容量小于现有成员数", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/open/groups/{id}/invite": {
+      "parameters": [{ "$ref": "#/components/parameters/GroupId" }],
+      "post": {
+        "tags": ["群聊"],
+        "summary": "生成入群邀请",
+        "description": "有效期 24 小时，新邀请生成时旧邀请全部失效。",
+        "operationId": "createGroupInvite",
+        "x-tongyu-scope": "write",
+        "x-tongyu-capability": "groups",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["actorExternalId"],
+                "properties": {
+                  "actorExternalId": { "type": "string", "description": "群主或群管理员，否则 403" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "邀请信息",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": { "type": "string", "description": "可直接分享的入群链接" },
+                    "ticket": { "type": "string", "description": "邀请码，用于拼你自己的入群入口" },
+                    "expiresIn": { "type": "integer", "description": "86400 秒" }
+                  }
+                }
+              }
+            }
+          },
+          "403": { "description": "操作人不是群主或管理员", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/v1/open/groups/{id}/members": {
+      "parameters": [{ "$ref": "#/components/parameters/GroupId" }],
+      "post": {
+        "tags": ["群聊"],
+        "summary": "按用户 ID 批量加人",
+        "description": "单次 1～50 人。已是成员时只刷新群昵称。",
+        "operationId": "addGroupMembers",
+        "x-tongyu-scope": "write",
+        "x-tongyu-capability": "groups",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["members"],
+                "properties": {
+                  "members": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/components/schemas/GroupPerson" } },
+                  "actorExternalId": { "type": "string", "description": "宿主群必填，操作人必须是群主" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "加人结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "groupId": { "type": "string" },
+                    "added": { "type": "array", "items": { "$ref": "#/components/schemas/GroupMemberResult" } },
+                    "alreadyMembers": { "type": "array", "items": { "$ref": "#/components/schemas/GroupMemberResult" } },
+                    "skipped": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "externalId": { "type": "string" },
+                          "reason": { "type": "string", "enum": ["externalId 必须为 1 到 200 个字符", "请求内重复", "displayName 最多 120 字", "群成员已达到上限"] }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "群 ID 非法；不是客户服务群；单次人数超出 1～50", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "群主校验不通过，仅群主可添加成员", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "description": "群不存在或不属于当前企业；入口不存在或已停用", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "409": { "description": "群已归档或解散，不能加人", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/open/groups/{id}/members/{externalId}": {
+      "parameters": [
+        { "$ref": "#/components/parameters/GroupId" },
+        { "name": "externalId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "被移除用户" }
+      ],
+      "delete": {
+        "tags": ["群聊"],
+        "summary": "移除成员或退群",
+        "description": "`actorExternalId` 等于路径 `externalId` 时视为本人退群，只需是成员；否则必须是群主。目标用户不存在时按幂等成功处理。",
+        "operationId": "removeGroupMember",
+        "x-tongyu-scope": "write",
+        "x-tongyu-capability": "groups",
+        "parameters": [
+          { "name": "actorExternalId", "in": "query", "required": true, "schema": { "type": "string" }, "description": "操作人" }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Ok" },
+          "403": { "description": "操作人不是群主，也不是本人退群", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "409": { "description": "移除群主，请先转让或解散", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/open/groups/{id}/dissolve": {
+      "parameters": [{ "$ref": "#/components/parameters/GroupId" }],
+      "post": {
+        "tags": ["群聊"],
+        "summary": "解散群",
+        "description": "标记解散并归档、撤销全部邀请、结束进行中的通话。已解散的群重复调用返回成功。",
+        "operationId": "dissolveGroup",
+        "x-tongyu-scope": "write",
+        "x-tongyu-capability": "groups",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["actorExternalId"],
+                "properties": { "actorExternalId": { "type": "string", "description": "群主" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Ok" },
+          "403": { "description": "操作人不是群主", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/v1/open/groups/{id}/member-token": {
+      "parameters": [{ "$ref": "#/components/parameters/GroupId" }],
+      "post": {
+        "tags": ["群聊"],
+        "summary": "为已入群用户签发群会话令牌",
+        "description": "由你的后端校验本站登录态后调用，前端写入 `sessionStorage` 后打开群页。",
+        "operationId": "createGroupMemberToken",
+        "x-tongyu-scope": "write",
+        "x-tongyu-capability": "groups",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["externalId"],
+                "properties": {
+                  "externalId": { "type": "string", "minLength": 1, "maxLength": 200, "description": "已入群用户" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "群会话令牌",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": { "type": "string", "description": "访客令牌，按访客端接口使用" },
+                    "visitorId": { "type": "string" },
+                    "groupId": { "type": "string" },
+                    "expiresIn": { "type": "integer", "description": "由服务端 `WIDGET_TOKEN_TTL` 决定" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "`externalId` 为空或超长", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "套餐未含群聊能力", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "description": "群不存在；用户不是群成员（提示先加人）", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "409": { "description": "群已归档或解散", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/widget/bootstrap": {
+      "post": {
+        "tags": ["访客端"],
+        "summary": "用身份票据换取访客令牌",
+        "description": "匿名咨询只传 `inboxKey`；关联已登录客户时传后端签发的 `identityToken`，`externalId` 由票据决定，前端自报无效。返回的 `token` 用于后续 `Authorization: Bearer`。",
+        "operationId": "widgetBootstrap",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["inboxKey"],
+                "properties": {
+                  "inboxKey": { "type": "string" },
+                  "identityToken": { "type": "string", "description": "登录用户必填" },
+                  "displayName": { "type": "string" },
+                  "email": { "type": "string" },
+                  "phone": { "type": "string" },
+                  "locale": { "type": "string" },
+                  "attributes": { "type": "object", "additionalProperties": true },
+                  "referrer": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "访客令牌与入口配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": { "type": "string", "description": "访客令牌，后续请求放 `Authorization: Bearer`" },
+                    "visitorId": { "type": "string", "description": "访客 ID，即回执接口的 `readerId`" },
+                    "expiresIn": { "type": "integer", "description": "令牌有效期秒数，默认 12 小时" },
+                    "displayName": { "type": "string" },
+                    "inbox": { "type": "object", "additionalProperties": true, "description": "入口名称、欢迎语、离线留言、皮肤配置" },
+                    "aiEnabled": { "type": "boolean" },
+                    "agentsOnline": { "type": "integer" },
+                    "openConversations": { "type": "integer" },
+                    "serverTime": { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "缺少 `inboxKey`", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "description": "`IDENTITY_TOKEN_INVALID` 票据无效或已过期，或 `IDENTITY_TOKEN_REQUIRED` 传了 `externalId` 但没有票据", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "description": "入口不存在或已停用", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/widget/conversations": {
+      "get": {
+        "tags": ["访客端"],
+        "summary": "访客的会话列表",
+        "description": "该用户在该入口下的会话，含 `visitorUnread`，可用于单人未读角标。",
+        "operationId": "widgetListConversations",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "会话列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/Conversation" } } }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      },
+      "post": {
+        "tags": ["访客端"],
+        "summary": "创建会话",
+        "operationId": "widgetCreateConversation",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "additionalProperties": true, "description": "会话创建字段见《访客端 API》" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "新建会话",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Conversation" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/widget/conversations/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/ConversationId" }],
+      "get": {
+        "tags": ["访客端"],
+        "summary": "会话详情",
+        "operationId": "widgetGetConversation",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "会话对象",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Conversation" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/v1/widget/conversations/{id}/messages": {
+      "parameters": [{ "$ref": "#/components/parameters/ConversationId" }],
+      "get": {
+        "tags": ["访客端"],
+        "summary": "增量拉取消息",
+        "description": "按序号游标增量拉取，最多 100 条。",
+        "operationId": "widgetListMessages",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "after", "in": "query", "schema": { "type": "integer", "format": "int64", "default": 0 }, "description": "只返回序号大于该值的消息" },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "maximum": 100 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "消息列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/Message" } } }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      },
+      "post": {
+        "tags": ["访客端"],
+        "summary": "访客发送文本消息",
+        "operationId": "widgetCreateMessage",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["content"],
+                "properties": {
+                  "clientMessageId": { "type": "string", "description": "浏览器生成的幂等 ID" },
+                  "content": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "消息对象",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Message" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "description": "`CONVERSATION_CLOSED` 会话已结束", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/widget/conversations/{id}/search": {
+      "parameters": [{ "$ref": "#/components/parameters/ConversationId" }],
+      "get": {
+        "tags": ["访客端"],
+        "summary": "会话内消息搜索",
+        "operationId": "widgetSearchMessages",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "q", "in": "query", "schema": { "type": "string" }, "description": "搜索关键词" }
+        ],
+        "responses": {
+          "200": {
+            "description": "命中的消息",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/Message" } } }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/widget/conversations/{id}/read": {
+      "parameters": [{ "$ref": "#/components/parameters/ConversationId" }],
+      "post": {
+        "tags": ["访客端"],
+        "summary": "上报已读游标",
+        "operationId": "widgetReportRead",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["sequence"],
+                "properties": { "sequence": { "type": "integer", "format": "int64", "minimum": 1 } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Ok" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/widget/conversations/{id}/delivered": {
+      "parameters": [{ "$ref": "#/components/parameters/ConversationId" }],
+      "post": {
+        "tags": ["访客端"],
+        "summary": "上报送达游标",
+        "operationId": "widgetReportDelivered",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["sequence"],
+                "properties": { "sequence": { "type": "integer", "format": "int64", "minimum": 1 } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Ok" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-TongYu-Key",
+        "description": "服务端密钥，只在创建时显示全文。仅用于 `/api/v1/open/`，不得放入浏览器或 App。"
+      },
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "访客令牌，由 `/api/v1/widget/bootstrap` 或群 `member-token` 换取。"
+      }
+    },
+    "parameters": {
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "schema": { "type": "integer", "default": 50, "maximum": 200 },
+        "description": "每页条数，上限 200"
+      },
+      "Offset": {
+        "name": "offset",
+        "in": "query",
+        "schema": { "type": "integer", "default": 0 }
+      },
+      "ConversationId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string", "format": "uuid" },
+        "description": "会话 UUID"
+      },
+      "VisitorId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string", "format": "uuid" },
+        "description": "访客 UUID，必须属于当前企业"
+      },
+      "GroupId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string", "format": "uuid" },
+        "description": "群 ID"
+      }
+    },
+    "requestBodies": {
+      "ReceiptReport": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": ["readerType", "readerId", "sequence"],
+              "properties": {
+                "readerType": { "type": "string", "enum": ["VISITOR", "AGENT"] },
+                "readerId": { "type": "string", "description": "`VISITOR` 必须是该会话的访客；`AGENT` 必须是当前企业生效坐席" },
+                "sequence": { "type": "integer", "format": "int64", "minimum": 1, "description": "服务端夹紧到会话最新序号" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "Ok": {
+        "description": "操作成功",
+        "content": {
+          "application/json": {
+            "schema": { "type": "object", "properties": { "ok": { "type": "boolean" } } }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "密钥或身份票据缺失、无效、被撤销、过期",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "Forbidden": {
+        "description": "权限、套餐或业务规则拒绝，按 `code` 判断",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "NotFound": {
+        "description": "资源不存在，或属于其他企业（不区分两者，避免探测）",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "RateLimited": {
+        "description": "超过限流额度，按 `Retry-After` 退避",
+        "headers": {
+          "Retry-After": { "schema": { "type": "integer" }, "description": "建议等待秒数" }
+        },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": ["status", "message", "timestamp"],
+        "properties": {
+          "status": { "type": "integer" },
+          "code": { "type": "string", "description": "只在鉴权、限流、套餐和业务冲突类错误中出现", "examples": ["API_KEY_INVALID", "SCOPE_REQUIRED", "PLAN_FEATURE_REQUIRED", "RATE_LIMITED", "CONVERSATION_CLOSED", "MESSAGE_ID_CONFLICT"] },
+          "message": { "type": "string", "description": "面向人工排查，不要匹配文案" },
+          "timestamp": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Conversation": {
+        "type": "object",
+        "description": "带「条件返回」的字段在缺省时不出现。",
+        "required": ["id", "status", "lastSequence", "createdAt", "updatedAt"],
+        "properties": {
+          "id": { "type": "string" },
+          "tenantId": { "type": "string" },
+          "inboxId": { "type": "string" },
+          "visitorId": { "type": "string", "description": "客户 ID，回执 `readerId` 用它" },
+          "subject": { "type": "string", "description": "条件返回" },
+          "status": { "type": "string", "enum": ["OPEN", "PENDING", "RESOLVED"] },
+          "priority": { "type": "integer" },
+          "source": { "type": "string", "examples": ["WEB", "API", "APP"] },
+          "assigneeId": { "type": "string", "description": "当前接待坐席，未分配时不出现" },
+          "assigneeName": { "type": "string", "description": "条件返回" },
+          "acceptedAt": { "type": "string", "format": "date-time" },
+          "assignmentExpiresAt": { "type": "string", "format": "date-time" },
+          "handoffRequestedAt": { "type": ["string", "null"], "format": "date-time" },
+          "closedAt": { "type": "string", "format": "date-time" },
+          "reopenGraceMinutes": { "type": "integer" },
+          "lastSequence": { "type": "integer", "format": "int64" },
+          "lastMessagePreview": { "type": "string" },
+          "lastMessageAt": { "type": "string", "format": "date-time" },
+          "agentUnread": { "type": "integer" },
+          "visitorUnread": { "type": "integer", "description": "不含内部备注" },
+          "visitorName": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "required": ["id", "conversationId", "senderType", "sequence", "messageType", "content", "createdAt"],
+        "properties": {
+          "id": { "type": "string" },
+          "conversationId": { "type": "string" },
+          "senderType": { "type": "string", "enum": ["VISITOR", "AGENT", "SYSTEM"] },
+          "senderId": { "type": "string" },
+          "senderName": { "type": "string" },
+          "clientMessageId": { "type": "string", "description": "幂等键回显" },
+          "sequence": { "type": "integer", "format": "int64", "description": "会话内序号" },
+          "messageType": { "type": "string", "enum": ["TEXT", "IMAGE", "FILE", "RICH", "AUDIO", "VIDEO", "LOCATION", "CARD", "EVENT", "SYSTEM", "RATING"] },
+          "content": { "type": "string" },
+          "metadata": { "type": "object", "additionalProperties": true },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "fileName": { "type": "string" },
+                "contentType": { "type": "string" },
+                "sizeBytes": { "type": "integer" },
+                "url": { "type": "string" }
+              }
+            }
+          },
+          "private": { "type": "boolean", "description": "内部备注标记；客户身份永远为假" },
+          "replyToId": { "type": "string" },
+          "reactions": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+          "editedAt": { "type": "string", "format": "date-time" },
+          "deletedAt": { "type": "string", "format": "date-time" },
+          "pinnedAt": { "type": "string", "format": "date-time" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Visitor": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "displayName": { "type": "string" },
+          "email": { "type": "string" },
+          "phone": { "type": "string" },
+          "locale": { "type": "string" },
+          "country": { "type": "string" },
+          "externalId": { "type": "string", "description": "业务系统用户 ID，未绑定时为空字符串" },
+          "customAttributes": { "type": "object", "additionalProperties": true },
+          "conversations": { "type": "integer", "description": "该访客会话数" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "lastSeenAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "VisitorDetail": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Visitor" },
+          {
+            "type": "object",
+            "properties": {
+              "conversations": {
+                "type": "array",
+                "description": "最近 50 条会话摘要，注意与列表中的 conversations 计数同名但类型不同",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "subject": { "type": "string" },
+                    "status": { "type": "string", "enum": ["OPEN", "PENDING", "RESOLVED"] },
+                    "priority": { "type": "integer" },
+                    "lastSequence": { "type": "integer", "format": "int64" },
+                    "lastMessagePreview": { "type": "string" },
+                    "lastMessageAt": { "type": "string", "format": "date-time" },
+                    "createdAt": { "type": "string", "format": "date-time" },
+                    "updatedAt": { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "Agent": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "可作为会话列表的 `assigneeId` 或回执的 `readerId`" },
+          "displayName": { "type": "string" },
+          "role": { "type": "string" },
+          "status": { "type": "string", "description": "`ACTIVE` 为生效" },
+          "presence": { "type": "string", "enum": ["ONLINE", "OFFLINE"] },
+          "openConversations": { "type": "integer" }
+        }
+      },
+      "Receipt": {
+        "type": "object",
+        "properties": {
+          "readerType": { "type": "string", "enum": ["VISITOR", "AGENT"] },
+          "readerId": { "type": "string" },
+          "readSequence": { "type": "integer", "format": "int64" },
+          "deliveredSequence": { "type": "integer", "format": "int64" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "GroupPerson": {
+        "type": "object",
+        "required": ["externalId"],
+        "properties": {
+          "externalId": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "displayName": { "type": "string", "maxLength": 120 }
+        }
+      },
+      "GroupCreated": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "groupId": { "type": "string", "description": "与 `id` 相同，便于前端直接取用" },
+          "created": { "type": "boolean", "description": "`true` 为新建（201），`false` 为命中已有群（200）" }
+        }
+      },
+      "GroupSummary": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "externalGroupId": { "type": "string" },
+          "ownerExternalId": { "type": "string" },
+          "archived": { "type": "boolean" },
+          "dissolved": { "type": "boolean" }
+        }
+      },
+      "GroupDetail": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "externalGroupId": { "type": "string" },
+          "announcement": { "type": "string" },
+          "ownerExternalId": { "type": "string" },
+          "archived": { "type": "boolean" },
+          "dissolved": { "type": "boolean" },
+          "speakingMode": { "type": "string", "enum": ["ALL", "MANAGERS"] },
+          "maxMembers": { "type": "integer" },
+          "requireIdentity": { "type": "boolean" },
+          "members": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "externalId": { "type": "string" },
+                "displayName": { "type": "string" },
+                "isOwner": { "type": "boolean" },
+                "isManager": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      },
+      "GroupMemberResult": {
+        "type": "object",
+        "properties": {
+          "externalId": { "type": "string" },
+          "visitorId": { "type": "string" },
+          "displayName": { "type": "string" }
+        }
+      }
+    }
+  }
+}

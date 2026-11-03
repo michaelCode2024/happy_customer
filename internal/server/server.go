@@ -107,11 +107,13 @@ func (a *API) Run(ctx context.Context) {
 	go a.webhooks.Run(ctx)
 	go a.retentionLoop(ctx)
 	go a.receptionLoop(ctx)
+	go a.idleCloseLoop(ctx)
 }
 
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
 	a.registerSystem(mux)
+	a.registerDocs(mux)
 	a.registerStatic(mux)
 	a.registerWidget(mux)
 	a.registerConsole(mux)

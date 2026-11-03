@@ -788,8 +788,11 @@ class Conversation {
       isUnassigned ||
       (needsAcceptance && (selfId.isEmpty || assigneeId == selfId));
 
-  /// 公开回复的拦截原因；null 表示可发。已解决会话允许发送（服务端会重新打开）。
+  /// 公开回复的拦截原因；null 表示可发。已结束的一轮不能再回复。
   String? publicReplyBlockReason(String selfId) {
+    if (isResolved) {
+      return '会话已结束。访客再次咨询会开始新会话。';
+    }
     if (isUnassigned) {
       return '请先点击右上角「开始接待」，再回复客户';
     }

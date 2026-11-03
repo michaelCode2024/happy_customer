@@ -126,13 +126,7 @@ func (a *API) canUploadTo(r *http.Request, principal auth.Principal, conversatio
 			conversationID, principal.TenantID, principal.VisitorID).Scan(&exists)
 		return err == nil && exists
 	case auth.KindAgent:
-		var allowed bool
-		err := a.db.QueryRow(r.Context(), `
-			select exists(select 1 from conversation c
-			 where c.id=$1 and c.tenant_id=$2
-			   and (exists (select 1 from agent_inbox ai where ai.inbox_id = c.inbox_id and ai.agent_id = $3)
-			        or c.assignee_id = $3))`, conversationID, principal.TenantID, principal.AgentID).Scan(&allowed)
-		return err == nil && allowed
+		return a.agentCanHandle(r.Context(), principal, conversationID)
 	}
 	return false
 }

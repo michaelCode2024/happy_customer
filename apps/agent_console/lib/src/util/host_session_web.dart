@@ -2,7 +2,26 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:html' as html;
-import 'dart:js_util' as js;
+import 'dart:js_interop';
+
+import 'package:web/web.dart' as web;
+
+@JS('flutter_inappwebview')
+external JSObject? get _flutterInAppWebView;
+
+@JS('__tongyuHostIdentity')
+external JSObject? get _tongyuHostIdentity;
+
+@JS('__tongyuHostIdentity')
+external set _tongyuHostIdentity(JSObject? value);
+
+extension type _InAppWebView(JSObject _) implements JSObject {
+  external void callHandler(JSString handlerName, JSString args);
+}
+
+extension type _HostCredentials(JSObject _) implements JSObject {
+  external JSString? get identityToken;
+}
 
 bool get isHostedConsole => Uri.base.queryParameters['embedded'] == '1';
 void closeHostedConsole() {
@@ -10,48 +29,58 @@ void closeHostedConsole() {
   final event = {'source': 'tongyu', 'type': 'close'};
   if (origin != null && origin != '*') {
     html.window.parent?.postMessage(event, origin);
-  } else if (js.hasProperty(html.window, 'flutter_inappwebview')) {
-    final bridge = js.getProperty<Object>(html.window, 'flutter_inappwebview');
-    js.callMethod<Object?>(
-        bridge, 'callHandler', ['tongyuHost', jsonEncode(event)]);
+  } else {
+    final bridge = _flutterInAppWebView;
+    if (bridge != null) {
+      _InAppWebView(bridge)
+          .callHandler('tongyuHost'.toJS, jsonEncode(event).toJS);
+    }
   }
 }
 
 Stream<String> hostSessions() {
   final stream = StreamController<String>();
   final origin = Uri.base.queryParameters['parentOrigin'];
-  StreamSubscription<html.MessageEvent>? listener;
+  JSFunction? listener;
   stream.onListen = () {
     if (!isHostedConsole) return;
     if (origin != null && origin != '*') {
-      listener = html.window.onMessage.listen((event) {
+      void onMessage(web.Event raw) {
+        final event = raw as web.MessageEvent;
+        final parent = web.window.parent;
         if (event.origin != origin ||
-            !js.callMethod<bool>(js.getProperty(html.window, 'Object'), 'is', [
-              js.getProperty(event, 'source'),
-              js.getProperty(html.window, 'parent')
-            ])) return;
+            parent == null ||
+            event.source != parent) {
+          return;
+        }
         try {
-          final data =
-              event.data is String ? jsonDecode(event.data) : event.data;
+          final rawData = event.data?.dartify();
+          final data = rawData is String ? jsonDecode(rawData) : rawData;
           if (data is Map &&
               data['type'] == 'authenticate' &&
-              data['identityToken'] is String)
+              data['identityToken'] is String) {
             stream.add(data['identityToken'] as String);
+          }
         } catch (_) {}
-      });
+      }
+
+      listener = onMessage.toJS;
+      web.window.addEventListener('message', listener);
       html.window.parent
           ?.postMessage({'source': 'tongyu', 'type': 'host-ready'}, origin);
-    } else if (js.hasProperty(html.window, '__tongyuHostIdentity')) {
-      final credentials =
-          js.getProperty<Object?>(html.window, '__tongyuHostIdentity');
+    } else {
+      final credentials = _tongyuHostIdentity;
       if (credentials != null) {
-        final token = js.getProperty<Object?>(credentials, 'identityToken');
-        if (token is String) stream.add(token);
+        final token = _HostCredentials(credentials).identityToken?.toDart;
+        if (token != null) stream.add(token);
+        _tongyuHostIdentity = null;
       }
-      js.setProperty(html.window, '__tongyuHostIdentity', null);
     }
   };
-  stream.onCancel = () => listener?.cancel();
+  stream.onCancel = () {
+    final current = listener;
+    if (current != null) web.window.removeEventListener('message', current);
+  };
   return stream.stream;
 }
 

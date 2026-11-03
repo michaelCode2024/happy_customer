@@ -93,8 +93,9 @@ func (a *API) adminTenant(w http.ResponseWriter, r *http.Request, p auth.Princip
 	var name, slug, status string
 	var createdAt time.Time
 	var settings []byte
-	err := a.db.QueryRow(r.Context(), `select name, slug, status, coalesce(settings,'{}'::jsonb), created_at
-		from tenant where id = $1`, p.TenantID).Scan(&name, &slug, &status, &settings, &createdAt)
+	var autoClose int
+	err := a.db.QueryRow(r.Context(), `select name, slug, status, coalesce(settings,'{}'::jsonb), created_at, conversation_auto_close_minutes
+		from tenant where id = $1`, p.TenantID).Scan(&name, &slug, &status, &settings, &createdAt, &autoClose)
 	if err != nil {
 		fail(w, 404, "企业不存在")
 		return
@@ -106,24 +107,34 @@ func (a *API) adminTenant(w http.ResponseWriter, r *http.Request, p auth.Princip
 	respond(w, 200, map[string]any{
 		"id": p.TenantID, "name": name, "slug": slug, "status": status,
 		"settings": rawJSON(settings), "createdAt": createdAt,
-		"agentCount": agents, "inboxCount": inboxes, "conversationCount": conversations,
+		"conversationAutoCloseMinutes": autoClose,
+		"agentCount":                   agents, "inboxCount": inboxes, "conversationCount": conversations,
 	})
 }
 
 func (a *API) adminUpdateTenant(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 	var in struct {
-		Name     string         `json:"name"`
-		Settings map[string]any `json:"settings"`
+		Name                         string         `json:"name"`
+		Settings                     map[string]any `json:"settings"`
+		ConversationAutoCloseMinutes *int           `json:"conversationAutoCloseMinutes"`
 	}
 	if !decode(w, r, &in) {
 		return
+	}
+	if in.ConversationAutoCloseMinutes != nil {
+		minutes := *in.ConversationAutoCloseMinutes
+		if minutes != 0 && (minutes < 15 || minutes > 240) {
+			fail(w, 400, "自动结束时长只能是 0（不自动结束），或 15 到 240 分钟")
+			return
+		}
 	}
 	settings, _ := jsonBytes(orEmpty(in.Settings))
 	if _, err := a.db.Exec(r.Context(), `update tenant
 		set name = coalesce(nullif($2,''), name),
 		    settings = settings || $3::jsonb,
+		    conversation_auto_close_minutes = coalesce($4, conversation_auto_close_minutes),
 		    updated_at = now()
-		where id = $1`, p.TenantID, in.Name, settings); err != nil {
+		where id = $1`, p.TenantID, in.Name, settings, in.ConversationAutoCloseMinutes); err != nil {
 		fail(w, 500, "更新企业信息失败")
 		return
 	}

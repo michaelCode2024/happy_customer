@@ -1,4 +1,5 @@
 import '../util/pwa_bridge.dart';
+import 'package:tongyu_agent_console/src/util/in_app_push.dart';
 import 'package:tongyu_agent_console/src/util/message_alert_stub.dart'
     if (dart.library.html) 'package:tongyu_agent_console/src/util/message_alert_web.dart';
 import 'dart:async';
@@ -47,11 +48,17 @@ class WorkbenchController extends ChangeNotifier {
   WorkbenchController({
     required this.api,
     this.selfId = '',
+    this.seesTeam = false,
     this.visitorAlert,
     Set<String> autoAcceptInboxIds = const <String>{},
   }) : _autoAcceptInboxIds = Set<String>.unmodifiable(autoAcceptInboxIds);
 
+  /// 主管能看到同事的会话。归属还未知时不响，避免把别人的消息播出来。
+  final bool seesTeam;
   final void Function(String messageId, String senderName)? visitorAlert;
+
+  /// 站内右上角推送提醒。控制器只负责入队，界面负责渲染与自动消失。
+  final InAppPushManager inAppPush = InAppPushManager();
   final DateTime _alertsSince = DateTime.now();
   final Map<String, int> _notificationSequences = {};
   final Set<String> _checkingNotifications = {};
@@ -117,6 +124,9 @@ class WorkbenchController extends ChangeNotifier {
       if (_closed || generation != _listGeneration) return;
       final queue =
           page.items.where((c) => !c.isResolved && c.canClaim(selfId)).toList();
+      for (final row in queue) {
+        _rememberAssignee(row.id, row.assigneeId);
+      }
       final ids = queue.map((c) => c.id).toSet();
       final baseline = _receptionBaseline;
       // 首次加载只显示常驻提示；重连补拉仍能发现新增待接待，不逐条弹历史。
@@ -143,6 +153,8 @@ class WorkbenchController extends ChangeNotifier {
           if (_closed || generation != _listGeneration) return;
           _receptionNotice = arrival;
           _receptionNoticePreview = preview;
+          _alertQueue(arrival.id, preview,
+              kind: 'reception', senderName: arrival.visitorName);
         }
       }
       _receptionBaseline = ids;
@@ -422,6 +434,9 @@ class WorkbenchController extends ChangeNotifier {
       case 'conversation.closed':
       case 'conversation.handoff':
       case 'conversation.rated':
+        if (event.type == 'conversation.rated') {
+          _applyIncomingRating(event);
+        }
         _scheduleListRefresh();
       default:
         break;
@@ -429,14 +444,13 @@ class WorkbenchController extends ChangeNotifier {
     if (event.type == 'message.created') {
       if (event.data['senderType'] == 'VISITOR' &&
           event.data['private'] != true &&
-          _assignedToMe(event.conversationId)) {
+          _shouldAlertVisitorMessage(event.conversationId)) {
         var senderName = asString(event.data['senderName']);
         if (senderName.trim().isEmpty) {
-          final matches =
-              _conversations.where((c) => c.id == event.conversationId);
-          if (matches.isNotEmpty) senderName = matches.first.visitorName;
+          senderName = _visitorNameOf(event.conversationId);
         }
         _alertVisitor(
+            event.conversationId,
             event.data['id'].toString(),
             senderName,
             messageNoticeBody(
@@ -469,6 +483,22 @@ class WorkbenchController extends ChangeNotifier {
         event.type == 'conversation.status') {
       _patchFromEvent(event);
     }
+    if (event.type == 'conversation.assigned') {
+      final assigneeId = event.data['assigneeId'];
+      if (assigneeId is String &&
+          assigneeId == selfId &&
+          !_consumeSelfClaim(event.conversationId)) {
+        _alertQueue(event.conversationId, '新会话分配给你，请及时接待',
+            kind: 'assigned', senderName: _visitorNameOf(event.conversationId));
+      }
+    }
+    if (event.type == 'conversation.transferred') {
+      final assigneeId = event.data['assigneeId'];
+      if (assigneeId is String && assigneeId == selfId) {
+        _alertQueue(event.conversationId, '有客户转接给你，请及时接待',
+            kind: 'transfer', senderName: _visitorNameOf(event.conversationId));
+      }
+    }
     if (event.type == 'conversation.read') {
       _scheduleListRefresh();
       _applyVisitorReceipt(event, read: true);
@@ -476,6 +506,32 @@ class WorkbenchController extends ChangeNotifier {
     if (event.type == 'conversation.delivered') {
       _applyVisitorReceipt(event, read: false);
     }
+  }
+
+  /// 访客提交评分后，把本次分数写进正在看的会话。列表刷新不会带评分，不能等它覆盖。
+  void _applyIncomingRating(RealtimeEvent event) {
+    final id = event.conversationId;
+    if (id.isEmpty || id != _selectedId) {
+      return;
+    }
+    final score = asInt(event.data['score']);
+    if (score < 1 || score > 5) {
+      return;
+    }
+    final detail = _detail;
+    if (detail == null || detail.conversation.id != id) {
+      return;
+    }
+    _detail = ConversationDetail(
+      conversation: detail.conversation,
+      visitor: detail.visitor,
+      rating: ConversationRating(
+        score: score,
+        comment: asNullableString(event.data['comment']),
+        createdAt: asDate(event.data['createdAt']) ?? DateTime.now(),
+      ),
+    );
+    _notify();
   }
 
   /// 访客端上报送达 / 已读后，推进气泡回执；只处理当前打开的会话。
@@ -662,6 +718,9 @@ class WorkbenchController extends ChangeNotifier {
     final assigneeId = event.data['assigneeId'];
     final assigneeName = event.data['assigneeName'];
     final status = event.data['status'];
+    if (event.data.containsKey('assigneeId')) {
+      _rememberAssignee(id, assigneeId is String ? assigneeId : null);
+    }
     _conversations = _conversations.map((conversation) {
       if (conversation.id != id) {
         return conversation;
@@ -708,6 +767,7 @@ class WorkbenchController extends ChangeNotifier {
         return;
       }
       for (final row in page.items) {
+        _rememberAssignee(row.id, row.assigneeId);
         final previous = _notificationSequences[row.id];
         // 首次打开只建基线；新会话只提醒本次工作台打开后到达的消息。
         if (silent &&
@@ -725,10 +785,14 @@ class WorkbenchController extends ChangeNotifier {
       if (currentDetail != null) {
         for (final row in page.items) {
           if (row.id == _selectedId) {
+            final live = _detail;
             _detail = ConversationDetail(
               conversation: row,
               visitor: currentDetail.visitor,
-              rating: currentDetail.rating,
+              // 列表接口没有本次评分。刷新进行中如果访客刚提交，保留已经写上的分数。
+              rating: live != null && live.conversation.id == row.id
+                  ? (live.rating ?? currentDetail.rating)
+                  : currentDetail.rating,
             );
             break;
           }
@@ -760,30 +824,188 @@ class WorkbenchController extends ChangeNotifier {
     }
   }
 
-  void _alertVisitor(String id, String senderName, String body) {
+  /// 模拟一条站内推送，供设置页预览右上角弹窗效果；不影响真实消息与声音。
+  void previewInAppPush() {
+    inAppPush.push(InAppMessagePush(
+      messageId: 'preview-${DateTime.now().microsecondsSinceEpoch}',
+      conversationId: _selectedId ?? '',
+      sender: '测试客户',
+      preview: '这是一条测试消息，用于预览右上角弹窗提醒效果。',
+    ));
+  }
+
+  void _alertVisitor(
+      String conversationId, String id, String senderName, String body) {
     if (id.isEmpty || !_alertedMessages.add(id)) return;
+    _markSounded(conversationId);
+    final name = senderName.trim().isEmpty ? _visitorNameOf(conversationId) : senderName;
+    final suppressSound = _suppressMessageSound(conversationId);
+    final foregroundNotice =
+        conversationId != _selectedId || !pageVisible() || _conversationIsResolved(_selectedId);
+    // 站内右上角浮层：页面可见、且当前不是在专注阅读这个会话时才弹。
+    // 注意 readingThread 为 false（停在设置/知识库等非会话页）时也要弹，
+    // 否则 _selectedId 残留会让这类消息被漏掉。
+    final showInAppPush = pageVisible() &&
+        (!readingThread ||
+            conversationId != _selectedId ||
+            _conversationIsResolved(_selectedId));
+    if (showInAppPush) {
+      inAppPush.push(InAppMessagePush(
+        messageId: id,
+        conversationId: conversationId,
+        sender: name,
+        preview: body,
+      ));
+    }
     if (visitorAlert != null) {
-      visitorAlert!(id, senderName);
+      visitorAlert!(id, name);
     } else {
-      messageAlert(id, body, senderName: senderName);
+      messageAlert(id, body,
+          senderName: name,
+          foregroundNotice: foregroundNotice,
+          suppressSound: suppressSound);
     }
     if (_alertedMessages.length > 500) {
       _alertedMessages.remove(_alertedMessages.first);
     }
   }
 
-  /// 响铃和系统通知只给当前接待人。未分配或同事的会话仍可出现在列表里，但不能响到别人手机上。
-  bool _assignedToMe(String conversationId) {
-    if (selfId.isEmpty || conversationId.isEmpty) return false;
+  /// 只有正在前台接待「进行中」会话时才静音；看已结束记录不应把其它会话提醒一起关掉。
+  bool _suppressMessageSound(String conversationId) {
+    if (_selectedId != conversationId || !pageVisible()) {
+      return false;
+    }
+    return !_conversationIsResolved(conversationId);
+  }
+
+  bool _conversationIsResolved(String? conversationId) {
+    if (conversationId == null || conversationId.isEmpty) {
+      return false;
+    }
+    final detail = _detail;
+    if (detail != null && detail.conversation.id == conversationId) {
+      return detail.conversation.isResolved;
+    }
     for (final row in _conversations) {
-      if (row.id == conversationId) return row.assigneeId == selfId;
+      if (row.id == conversationId) {
+        return row.isResolved;
+      }
     }
     return false;
   }
 
+  /// 待接待、新分配和转接单独响一次。同一会话刚响过客户消息时不再叠一次。
+  void _alertQueue(String conversationId, String body,
+      {required String kind, required String senderName}) {
+    if (conversationId.isEmpty || selfId.isEmpty || _recentlySounded(conversationId)) {
+      return;
+    }
+    _markSounded(conversationId);
+    final name = senderName.trim().isEmpty
+        ? switch (kind) {
+            'transfer' => '转接客户',
+            'assigned' => '新客户',
+            _ => '待接待客户',
+          }
+        : senderName.trim();
+    final id = '$kind-$conversationId';
+    if (pageVisible()) {
+      inAppPush.push(InAppMessagePush(
+        messageId: id,
+        conversationId: conversationId,
+        sender: name,
+        preview: body,
+      ));
+    }
+    if (visitorAlert != null) {
+      visitorAlert!(id, name);
+    } else {
+      messageAlert(id, body, senderName: name, foregroundNotice: true);
+    }
+  }
+
+  final Map<String, DateTime> _soundedConversationAt = {};
+
+  /// 坐席主动认领的会话：短时间内忽略 assigned 事件，避免「自己接待自己」也弹分配提醒。
+  /// 认领失败残留的过期条目由 [_consumeSelfClaim] 顺手清理。
+  final Map<String, DateTime> _selfClaimedAt = {};
+
+  bool _consumeSelfClaim(String conversationId) {
+    final at = _selfClaimedAt.remove(conversationId);
+    if (at == null) return false;
+    if (DateTime.now().difference(at) > const Duration(seconds: 30)) return false;
+    if (_selfClaimedAt.length > 50) {
+      final cutoff = DateTime.now().subtract(const Duration(minutes: 5));
+      _selfClaimedAt.removeWhere((_, t) => t.isBefore(cutoff));
+    }
+    return true;
+  }
+
+  bool _recentlySounded(String conversationId) {
+    final at = _soundedConversationAt[conversationId];
+    return at != null && DateTime.now().difference(at) < const Duration(seconds: 8);
+  }
+
+  void _markSounded(String conversationId) {
+    if (conversationId.isEmpty) return;
+    _soundedConversationAt[conversationId] = DateTime.now();
+    if (_soundedConversationAt.length > 200) {
+      _soundedConversationAt.remove(_soundedConversationAt.keys.first);
+    }
+  }
+
+  String _visitorNameOf(String conversationId) {
+    for (final row in _conversations) {
+      if (row.id == conversationId && row.visitorName.trim().isNotEmpty) {
+        return row.visitorName.trim();
+      }
+    }
+    for (final row in _receptionQueue) {
+      if (row.id == conversationId && row.visitorName.trim().isNotEmpty) {
+        return row.visitorName.trim();
+      }
+    }
+    final detail = _detail;
+    if (detail != null &&
+        detail.conversation.id == conversationId &&
+        detail.conversation.visitorName.trim().isNotEmpty) {
+      return detail.conversation.visitorName.trim();
+    }
+    return '';
+  }
+
+  /// 已知归属：自己的和待接待要响，同事的不响。
+  /// 当前列表还没有这通会话时，普通坐席收得到就说明是自己的或待接待。
+  final Map<String, String?> _knownAssignee = {};
+
+  void _rememberAssignee(String conversationId, String? assigneeId) {
+    if (conversationId.isEmpty) return;
+    final owner = assigneeId?.trim() ?? '';
+    _knownAssignee[conversationId] = owner.isEmpty ? null : owner;
+  }
+
+  bool _shouldAlertVisitorMessage(String conversationId) {
+    if (selfId.isEmpty || conversationId.isEmpty) return false;
+    if (!_knownAssignee.containsKey(conversationId)) {
+      for (final row in _conversations) {
+        if (row.id == conversationId) {
+          _rememberAssignee(row.id, row.assigneeId);
+          break;
+        }
+      }
+    }
+    if (!_knownAssignee.containsKey(conversationId)) return !seesTeam;
+    final owner = _knownAssignee[conversationId];
+    return owner == null || owner == selfId;
+  }
+
   Future<void> _checkMissedAlerts(Conversation row, int after) async {
-    if (row.assigneeId != selfId || selfId.isEmpty) {
-      // 不是自己的会话直接记住进度，避免下次刷新把同一条消息再判一遍。
+    _rememberAssignee(row.id, row.assigneeId);
+    if (selfId.isEmpty ||
+        (row.assigneeId != null &&
+            row.assigneeId!.isNotEmpty &&
+            row.assigneeId != selfId)) {
+      // 同事的会话记住进度，避免下次刷新把同一条消息再判一遍。
       _notificationSequences[row.id] = row.lastSequence;
       return;
     }
@@ -795,6 +1017,7 @@ class WorkbenchController extends ChangeNotifier {
       for (final message in page.items) {
         if (message.isFromVisitor && !message.isPrivate && !message.isDeleted) {
           _alertVisitor(
+              row.id,
               message.id,
               message.senderName.isEmpty ? row.visitorName : message.senderName,
               message.noticeBody);
@@ -811,6 +1034,9 @@ class WorkbenchController extends ChangeNotifier {
 
   Future<void> setFilter(QueueFilter value) async {
     if (_filter == value) {
+      // 已经在这一档时也重新拉一次：重复点同一个 tab 是「刷新」的直觉，
+      // 直接 return 会让点击彻底没有反馈。
+      await refreshConversations();
       return;
     }
     _filter = value;
@@ -1472,6 +1698,8 @@ class WorkbenchController extends ChangeNotifier {
     _claimingId = id;
     _threadError = null;
     _notify();
+    // 认领成功会收到 assigned 事件，先记下以免被当成「新分配」再响一次。
+    _selfClaimedAt[id] = DateTime.now();
     try {
       await api.claim(id);
       // The claim endpoint only acknowledges, so the assignment is read back
@@ -1560,6 +1788,13 @@ class WorkbenchController extends ChangeNotifier {
   final Map<String, int> _readAcknowledged = {};
   bool _readBusy = false;
   Future<void> markRead(String conversationId) async {
+    final open = selected;
+    if (open != null &&
+        open.id == conversationId &&
+        open.isHeldByOther(selfId) &&
+        !seesTeam) {
+      return;
+    }
     if (!readingThread ||
         !pageVisible() ||
         _selectedId != conversationId ||
@@ -1742,6 +1977,7 @@ class WorkbenchController extends ChangeNotifier {
     _stateSubscription?.cancel();
     _reconnectSubscription?.cancel();
     _socket?.dispose();
+    inAppPush.dispose();
     super.dispose();
   }
 }

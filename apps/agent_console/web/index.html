@@ -258,7 +258,55 @@
         if (tries > 150) clearInterval(timer);
       }, 400);
     })();
-    tongyuAppendBootstrap('flutter_bootstrap.js');
+    function tongyuIsDesktop() {
+      var ua = navigator.userAgent || '';
+      var ios = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      return !ios && !/Android/i.test(ua);
+    }
+    function tongyuBootConsole() {
+      tongyuAppendBootstrap('flutter_bootstrap.js');
+    }
+    // 电脑版有等待中的新版本时，先接管再刷新一次，页面起来就是新包，不弹更新窗。
+    if (!tongyuIsDesktop() || !navigator.serviceWorker) {
+      tongyuBootConsole();
+    } else {
+      var booted = false;
+      function bootOnce() {
+        if (booted) return;
+        booted = true;
+        tongyuBootConsole();
+      }
+      var guard = 'tongyu.pc.silentReload';
+      var wait = setTimeout(bootOnce, 4000);
+      navigator.serviceWorker.getRegistration('/console/').then(function (reg) {
+        if (!reg || !reg.waiting) {
+          clearTimeout(wait);
+          try { sessionStorage.removeItem(guard); } catch (e) {}
+          bootOnce();
+          return;
+        }
+        try {
+          if (sessionStorage.getItem(guard) === '1') {
+            sessionStorage.removeItem(guard);
+            clearTimeout(wait);
+            bootOnce();
+            return;
+          }
+        } catch (e) {}
+        var reloading = false;
+        navigator.serviceWorker.addEventListener('controllerchange', function () {
+          if (reloading) return;
+          reloading = true;
+          clearTimeout(wait);
+          try { sessionStorage.setItem(guard, '1'); } catch (e) {}
+          location.reload();
+        });
+        reg.waiting.postMessage({type: 'ACTIVATE_QUIET'});
+      }).catch(function () {
+        clearTimeout(wait);
+        bootOnce();
+      });
+    }
     setTimeout(function () {
       if (window.tongyuFirstFrameReady || document.getElementById('tongyu-load-retry')) return;
       window.tongyuKickstartMain();
@@ -291,6 +339,10 @@
     // 所以登录页会一直看不到新包。这里在入口页直接询问正在等待的版本。
     (function () {
       if (!navigator.serviceWorker) return;
+      var ua = navigator.userAgent || '';
+      var ios = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      // 电脑版不弹更新窗。刷新时由启动脚本接管已下载的版本。
+      if (!ios && !/Android/i.test(ua)) return;
       var asked = false, pending = false;
       function offer() {
         if (asked || pending) return;
@@ -375,6 +427,34 @@
     })();
   </script>
   <script src="pwa-client.js"></script>
+  <script>
+    // 已打开的旧工作台仍会向页面要更新窗。电脑版在这里拦住，刷新后再换新版本。
+    (function () {
+      var ua = navigator.userAgent || '';
+      var ios = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      if (ios || /Android/i.test(ua) || typeof window.tongyuPwaAction !== 'function') return;
+      var status = window.tongyuPwaStatus;
+      var action = window.tongyuPwaAction;
+      if (typeof status === 'function') {
+        window.tongyuPwaStatus = function () {
+          var raw = status();
+          try {
+            var data = JSON.parse(raw);
+            if (data.desktop === true) return raw;
+            data.update = false;
+            data.desktop = true;
+            return JSON.stringify(data);
+          } catch (e) {
+            return raw;
+          }
+        };
+      }
+      window.tongyuPwaAction = function (name) {
+        if (name === 'claimUpdatePrompt') return Promise.resolve('');
+        return action(name);
+      };
+    })();
+  </script>
   <script src="push-client.js"></script>
 </body>
 </html>

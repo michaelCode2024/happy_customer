@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:tongyu_agent_console/src/util/labels.dart';
 import 'package:tongyu_agent_console/src/util/format.dart';
 import 'package:tongyu_agent_console/src/ui/workspace_layout.dart';
@@ -33,6 +35,8 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
   List<Map<String, dynamic>> _members = [], _inboxes = [], _audit = [];
   Map<String, dynamic> _subscription = {};
   bool _canAI = false;
+  int _autoCloseMinutes = 30;
+  bool _savingAutoClose = false;
   @override
   void initState() {
     super.initState();
@@ -51,6 +55,7 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
         widget.api.adminGet('subscription'),
         widget.api.adminGet('audit'),
         widget.api.entitlements(),
+        widget.api.adminGet('tenant'),
       ]);
       if (!mounted) return;
       final features = Map<String, dynamic>.from(
@@ -61,6 +66,11 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
         _subscription = results[2];
         _audit = asMapList(results[3]['items']);
         _canAI = features['ai'] == true;
+        _autoCloseMinutes = asInt(results[5]['conversationAutoCloseMinutes']);
+        if (_autoCloseMinutes != 0 &&
+            (_autoCloseMinutes < 15 || _autoCloseMinutes > 240)) {
+          _autoCloseMinutes = 30;
+        }
       });
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
@@ -71,6 +81,23 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
 
   void _notice(String text) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+
+  Future<void> _saveAutoClose(int minutes) async {
+    setState(() => _savingAutoClose = true);
+    try {
+      await widget.api.adminWrite('PATCH', 'tenant', {
+        'conversationAutoCloseMinutes': minutes,
+      });
+      if (!mounted) return;
+      setState(() => _autoCloseMinutes = minutes);
+      _notice(minutes == 0 ? '已关闭自动结束' : '自动结束时长已保存');
+    } on ApiException catch (e) {
+      if (mounted) _notice(e.message);
+    } finally {
+      if (mounted) setState(() => _savingAutoClose = false);
+    }
+  }
+
   Future<void> _member([Map<String, dynamic>? member]) async {
     String? initialPassword;
     final saved = await showDialog<bool>(
@@ -157,8 +184,7 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
                           'avatarUrl',
                           'fontFamily',
                           'bubbleRadius',
-                          'customCss',
-                          'reopenGraceMinutes'
+                          'customCss'
                         ]));
                   } else {
                     final id = asString(inbox['id']);
@@ -174,8 +200,7 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
                       'avatarUrl',
                       'fontFamily',
                       'bubbleRadius',
-                      'customCss',
-                      'reopenGraceMinutes'
+                      'customCss'
                     ]);
                     if (_canAI) {
                       payload['aiEnabled'] = data['aiEnabled'];
@@ -480,6 +505,55 @@ class _TenantAdminPageState extends State<TenantAdminPage> {
 
   Widget _inboxList() =>
       ListView(padding: const EdgeInsets.only(bottom: 20), children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+          child: WorkspaceCard(
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('会话自动结束',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontSize: 15)),
+                const SizedBox(height: 4),
+                Text(
+                  '双方都不再发消息达到这个时长后，会话自动结束。转交和内部备注不重新计时。全企业共用。',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<int>(
+                  key: ValueKey('auto-close-$_autoCloseMinutes'),
+                  value: _autoCloseMinutes,
+                  decoration: const InputDecoration(
+                    labelText: '自动结束时长',
+                    isDense: true,
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 0, child: Text('不自动结束')),
+                    DropdownMenuItem(value: 15, child: Text('15 分钟')),
+                    DropdownMenuItem(value: 30, child: Text('30 分钟')),
+                    DropdownMenuItem(value: 45, child: Text('45 分钟')),
+                    DropdownMenuItem(value: 60, child: Text('1 小时')),
+                    DropdownMenuItem(value: 90, child: Text('1.5 小时')),
+                    DropdownMenuItem(value: 120, child: Text('2 小时')),
+                    DropdownMenuItem(value: 180, child: Text('3 小时')),
+                    DropdownMenuItem(value: 240, child: Text('4 小时')),
+                  ],
+                  onChanged: _savingAutoClose
+                      ? null
+                      : (value) {
+                          if (value != null) {
+                            unawaited(_saveAutoClose(value));
+                          }
+                        },
+                ),
+              ],
+            ),
+          ),
+        ),
         _heading('客服入口', '每个入口单独设置接待文案、允许域名，以及「自动分配 / 分配后自动接单」（点进入口编辑）。',
             '创建入口', () => _inbox()),
         for (final inbox in _inboxes)
@@ -825,9 +899,6 @@ class _InboxDialogState extends State<_InboxDialog> {
       TextEditingController(text: asString(widget.inbox?['fontFamily']));
   late final _radius = TextEditingController(
       text: widget.inbox?['bubbleRadius']?.toString() ?? '');
-  // 结束宽限期：访客在时限内再发言回到原会话，超时自动新建会话进大厅。
-  late final _reopenGrace = TextEditingController(
-      text: '${widget.inbox?['reopenGraceMinutes'] ?? 1440}');
   late final _css =
       TextEditingController(text: asString(widget.inbox?['customCss']));
   late bool _auto = widget.inbox?['autoAssign'] != false,
@@ -855,7 +926,6 @@ class _InboxDialogState extends State<_InboxDialog> {
     _avatar.dispose();
     _font.dispose();
     _radius.dispose();
-    _reopenGrace.dispose();
     _css.dispose();
     super.dispose();
   }
@@ -923,20 +993,6 @@ class _InboxDialogState extends State<_InboxDialog> {
                             onChanged: !_auto
                                 ? null
                                 : (v) => setState(() => _autoAccept = v)),
-                        const SizedBox(height: 16),
-                        TextFormField(
-                            controller: _reopenGrace,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
-                                labelText: '再次咨询的宽限期（分钟）',
-                                helperText:
-                                    '结束后此时长内访客再发言，回到原会话并由原客服接待；超时自动新建会话进入待接待大厅，由在线客服抢单。0 表示结束后一律进大厅，默认1440分钟'),
-                            validator: (v) {
-                              final n = int.tryParse((v ?? '').trim());
-                              return n == null || n < 0 || n > 10080
-                                  ? '请输入0到10080之间的整数'
-                                  : null;
-                            }),
                         const SizedBox(height: 16),
                         ExpansionTile(
                             tilePadding: EdgeInsets.zero,
@@ -1063,8 +1119,6 @@ class _InboxDialogState extends State<_InboxDialog> {
                             'fontFamily': _font.text.trim(),
                             'customCss': _css.text,
                             'bubbleRadius': int.tryParse(_radius.text.trim()),
-                            'reopenGraceMinutes':
-                                int.parse(_reopenGrace.text.trim()),
                             'status': _active ? 'ACTIVE' : 'DISABLED',
                             'aiEnabled': _ai,
                             'confidenceThreshold':

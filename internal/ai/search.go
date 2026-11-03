@@ -23,8 +23,11 @@ type knowledgeEntry struct {
 // article carries. Every term in the question is weighted by how rare it is
 // across the tenant's active articles — a term in every article is worth almost
 // nothing, a term in one article is worth a lot — and an article's score is the
-// fraction of that mass it matches. The result is a number between 0 and 1 that
-// means "how much of what makes this question distinctive does this article
+// fraction of that mass it matches. A lone CJK character is a fragment rather
+// than a word, so it carries a quarter of a two-character term's weight; without
+// that discount a question's function characters alone can lift an unrelated
+// article over the confidence threshold. The result is a number between 0 and 1
+// that means "how much of what makes this question distinctive does this article
 // contain", which is the quantity the confidence threshold actually wants to
 // compare against.
 //
@@ -67,7 +70,12 @@ func (s *Service) search(ctx context.Context, tenantID uuid.UUID, question strin
 		    select q.term,
 		           count(c.id)::numeric as docs,
 		           -- 单条知识也必须可检索；全部条目都出现的词不能变成零权重。
-		           greatest(ln((s.total + 1) / (count(c.id) + 1)), 0.05) as idf
+		           -- 单字只算词内片段，不能和双字词同权：中文里「发票怎么开」唯一有信息
+		           -- 量的是「发票」，而「发/票/开」会在「触发」「开通」「门票」这类无关词里
+		           -- 命中。9 篇的库中它们仍有 ln(10/3)≈1.2 的 IDF，六个片段词一起就能把
+		           -- 一篇不相干的文章抬到 0.376，越过 0.35 阈值让机器人答非所问。
+		           greatest(ln((s.total + 1) / (count(c.id) + 1)), 0.05)
+		               * (case when length(q.term) = 1 then 0.25 else 1.0 end) as idf
 		      from q
 		      cross join stats s
 		      left join corpus c

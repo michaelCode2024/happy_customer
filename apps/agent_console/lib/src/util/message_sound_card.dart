@@ -9,12 +9,16 @@ class MessageSoundCard extends StatelessWidget {
       required this.onEnabled,
       required this.onChoice,
       required this.onTest,
+      this.onTestInAppPush,
       this.status});
   final bool enabled;
   final String choice;
   final ValueChanged<bool> onEnabled;
   final ValueChanged<String> onChoice;
   final VoidCallback onTest;
+
+  /// 可选：点一下模拟一条站内弹窗提醒。为 null 时不显示该按钮。
+  final VoidCallback? onTestInAppPush;
   final String? status;
 
   static const options = [
@@ -133,10 +137,18 @@ class MessageSoundCard extends StatelessWidget {
                   }).toList());
             }),
             const SizedBox(height: 16),
-            FilledButton.tonalIcon(
-                onPressed: enabled ? onTest : null,
-                icon: const Icon(Icons.play_arrow_rounded, size: 20),
-                label: const Text('试听当前提醒')),
+            Wrap(spacing: 10, runSpacing: 10, children: [
+              FilledButton.tonalIcon(
+                  onPressed: enabled ? onTest : null,
+                  icon: const Icon(Icons.play_arrow_rounded, size: 20),
+                  label: const Text('试听当前提醒')),
+              if (onTestInAppPush != null)
+                OutlinedButton.icon(
+                    onPressed: onTestInAppPush,
+                    icon: const Icon(Icons.notifications_active_outlined,
+                        size: 18),
+                    label: const Text('测试弹窗提醒')),
+            ]),
             if (status != null)
               Padding(
                   padding: const EdgeInsets.only(top: 8),

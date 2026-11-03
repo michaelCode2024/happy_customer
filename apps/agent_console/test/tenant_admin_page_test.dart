@@ -82,7 +82,8 @@ void main() {
                 (jsonDecode(request.body) as Map)['routing']
                     ['acceptanceTimeoutSeconds'],
                 27);
-            expect((jsonDecode(request.body) as Map)['reopenGraceMinutes'], 30);
+            expect((jsonDecode(request.body) as Map).containsKey('reopenGraceMinutes'),
+                false);
             saves++;
             return http.Response(saves == 1 ? '{"error":"保存测试失败"}' : '{}',
                 saves == 1 ? 400 : 200);
@@ -97,7 +98,6 @@ void main() {
             '/api/v1/admin/inboxes/inbox1' => {
                 'id': 'inbox1',
                 'name': '网站客服',
-                'reopenGraceMinutes': 30,
                 'routing': {'strategy': 'LOAD_BALANCED', 'fixedAgentId': ''}
               },
             '/api/v1/admin/subscription' => {
@@ -133,14 +133,7 @@ void main() {
     expect(saves, 0);
     expect(find.text('请输入10到600之间的整数'), findsOneWidget);
     await tester.enterText(find.widgetWithText(TextFormField, '接单超时（秒）'), '27');
-    await tester.enterText(
-        find.widgetWithText(TextFormField, '再次咨询的宽限期（分钟）'), '10081');
-    await tester.tap(find.text('保存'));
-    await tester.pumpAndSettle();
-    expect(saves, 0, reason: '超出范围的宽限期不应提交');
-    expect(find.text('请输入0到10080之间的整数'), findsOneWidget);
-    await tester.enterText(
-        find.widgetWithText(TextFormField, '再次咨询的宽限期（分钟）'), '30');
+    expect(find.text('再次咨询的宽限期（分钟）'), findsNothing);
     await tester.tap(find.text('保存'));
     await tester.pumpAndSettle();
     expect(find.text('配置客服入口'), findsOneWidget);

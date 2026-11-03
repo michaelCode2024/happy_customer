@@ -52,7 +52,7 @@ Content-Type: application/json
 | `message.created` | 访客发出的公开消息 |
 | `conversation.created` | 会话创建 |
 | `conversation.updated` | 会话更新 |
-| `conversation.closed` | 会话关闭 |
+| `conversation.closed` | 会话结束：坐席手动「标记解决」，或访客与坐席都停止发言满空闲阈值后由系统自动结束（默认 30 分钟，`CONVERSATION_AUTO_CLOSE_MINUTES` 可调，`0` 关闭） |
 | `visitor.created` | 访客创建 |
 | `conversation.read` | 已读游标前进 |
 | `conversation.delivered` | 送达游标前进 |
@@ -100,7 +100,7 @@ X-TongYu-Signature: sha256=<十六进制 HMAC>
 }
 ```
 
-这里没有业务侧用户 ID。`message.created` 的 `senderType` 为 `VISITOR`。已读、送达的正文见 [open-api.md](open-api.md) 的回执一节。测试事件 `webhook.test` 的正文含 `test`、`tenantId`、`sentAt`、`message`。
+这里没有业务侧用户 ID。`message.created` 的 `senderType` 为 `VISITOR`。已读、送达的正文见 [open-api.md](open-api.md) 的回执一节。测试事件 `webhook.test` 的正文含 `test`、`tenantId`、`sentAt`、`message`。`conversation.closed` 的正文含 `conversationId`、`closedBy`、`closedAt`；手动结束时 `closedBy` 是坐席 UUID，系统按空闲自动结束时为 `null`。
 
 ## 从回调找到业务用户
 

@@ -6,8 +6,8 @@ import type { ChannelItem } from "./types.js";
 
 import { requestMicrophone, collectRecordingChunks } from './recording.js';
 import { windowTitle, type ResolvedOptions } from './config.js';
-import { shouldForkAfterGrace, type ChatStore, type Snapshot } from './store.js';
-import type { ChatMessage, SearchHit } from './types.js';
+import { type ChatStore, type Snapshot } from './store.js';
+import type { ChatMessage, Conversation, SearchHit } from './types.js';
 
 type WelcomeSnapshot = Pick<Snapshot, 'messages' | 'loadingThread' | 'conversations' | 'activeId'>;
 
@@ -35,6 +35,110 @@ export function channelBarVisible(
   const c = snapshot.automation;
   const welcomeHasActions = Boolean(c && ((c.guideQuestions?.length ?? 0) > 0 || (c.cards?.length ?? 0) > 0));
   return !(welcomeVisible(snapshot) && welcomeHasActions);
+}
+
+export type HoldTouchDecision = 'begin' | 'recover' | 'ignore';
+
+/**
+ * 「按住说话」的一次 touchstart 该怎么处置还挂着的按下状态。
+ * 嵌进别人的 iframe/WebView 时，宿主弹窗、切后台、iframe 被重排都可能把 touchend/touchcancel
+ * 吞掉，按下状态就永久停在 true，之后每一下都被「已经在录」挡掉——用户只觉越来越点不动。
+ * 屏幕上只剩这一个新触点时，上一根手指必然早就离开了，可以直接收尾重开；
+ * 还留着两个触点就分不清是误触第二根手指还是丢事件，宁可不动作。
+ */
+export function holdTouchDecision(fingerDown: boolean, touches: number, changed: number): HoldTouchDecision {
+  if (changed !== 1) return 'ignore';
+  if (touches === 1) return fingerDown ? 'recover' : 'begin';
+  return 'ignore';
+}
+
+type WaitingSnapshot = Pick<Conversation, 'status' | 'acceptedAt' | 'handoffRequestedAt' | 'assigneeName'>;
+
+/**
+ * 访客已要求人工、但客服还没确认接单时的提示文案。
+ * 这段时间界面上原先毫无痕迹：会话已经落到某个人名下，只等对方点「确认接单」，
+ * 访客看到的却是自己说的话石沉大海，只能反复发「有人在吗」。
+ * 返回空串表示不需要提示——没转人工、客服已接单、或会话已结束。
+ */
+export function waitingForAgentHint(conversation: WaitingSnapshot | undefined): string {
+  if (!conversation || conversation.status === 'RESOLVED') {
+    return '';
+  }
+  if (!conversation.handoffRequestedAt || conversation.acceptedAt) {
+    return '';
+  }
+  const name = conversation.assigneeName?.trim();
+  return name ? `客服「${name}」正在接入，请稍候…` : '正在为您转接人工客服，请稍候…';
+}
+
+/** 键盘至少占掉这么多高度才算「弹起来了」，避免把安全区或导航栏的抖动当成键盘。 */
+const KEYBOARD_MIN_HEIGHT = 120;
+
+/**
+ * 宿主发来 `host-viewport` 时还要确认它真的改过 iframe 盒子：只发消息不改高度，
+ * 组件交出去之后就没人再把输入栏顶到键盘上方了。键盘收起（false）的消息永远可信，
+ * 那只是复位；此时 iframe 还没变矮的「打开」消息先不接，留给组件自己跟。
+ */
+export function hostViewportTrusted(baselineHeight: number, innerHeight: number, keyboardOpen: boolean): boolean {
+  if (!keyboardOpen) return true;
+  const baseline = baselineHeight > 0 ? baselineHeight : innerHeight;
+  return innerHeight < baseline - KEYBOARD_MIN_HEIGHT;
+}
+
+/** 键盘弹起时由谁负责面板高度：视口模型 + 宿主托管状态。 */
+export interface KeyboardMetrics {
+  /** 键盘收起时量到的布局视口高度，0 表示还没量到。 */
+  baselineHeight: number;
+  innerHeight: number;
+  /** visualViewport.height，浏览器不支持时传 0。 */
+  visualHeight: number;
+  visualOffsetTop: number;
+  /** visualViewport.scale，用于识别 iOS 聚焦自动放大。 */
+  scale: number;
+  /** 宿主已经按键盘改过 iframe 盒子，组件只填满容器。 */
+  hostManaged?: boolean;
+  /** 判断「键盘占了 ≥N px」的阈值，默认 120。 */
+  threshold?: number;
+}
+
+export type KeyboardLayoutPlan =
+  | { mode: 'host' }
+  | { mode: 'none' }
+  | { mode: 'zoom' }
+  | { mode: 'layout'; keyboardOpen: boolean }
+  | { mode: 'visual'; height: number; top: number; keyboardOpen: boolean };
+
+/**
+ * 键盘弹起后弹层该怎么摆。同一段代码要同时活在三套模型里：
+ *
+ * - 宿主托管（`host-viewport`）：盒子已经是宿主按键盘改过的，组件再补偿一次就是「补两遍」。
+ * - iOS PWA / Android WebView：键盘会真的缩布局视口（innerHeight 变小），面板填满容器就够，
+ *   再按 visualViewport 缩一遍，输入框会和光标算在两套坐标里，这就是光标乱飘的主因。
+ * - Safari 标签页：布局视口不变、只缩视觉视口，必须自己跟 visualViewport。
+ *
+ * 判定不看浏览器版本，只看「哪一个高度真的变了」，比按 UA 猜稳。
+ */
+export function keyboardViewportPlan(input: KeyboardMetrics): KeyboardLayoutPlan {
+  const threshold = input.threshold ?? KEYBOARD_MIN_HEIGHT;
+  if (input.hostManaged) {
+    return { mode: 'host' };
+  }
+  // 页面被放大时视觉视口本来就比布局视口小，当成键盘会让面板随缩放一起缩。
+  if (input.scale > 1.05) {
+    return { mode: 'zoom' };
+  }
+  const layoutShrank = input.baselineHeight > 0 && input.innerHeight < input.baselineHeight - threshold;
+  if (layoutShrank) {
+    // 布局视口已经跟键盘走了，面板填满容器，键盘盖住的部分由浏览器自己裁。
+    return { mode: 'layout', keyboardOpen: true };
+  }
+  if (input.visualHeight <= 0) {
+    return { mode: 'none' };
+  }
+  const height = Math.round(input.visualHeight);
+  const top = Math.max(0, Math.round(input.visualOffsetTop));
+  const keyboardOpen = height < input.innerHeight - threshold || top > 0;
+  return { mode: 'visual', height, top, keyboardOpen };
 }
 
 const ICONS = {
@@ -216,6 +320,7 @@ export interface UiHandlers {
   onFiles: (files: FileList) => void;
   onRetry: (localId: string) => void;
   onSelectConversation: (id: string) => void;
+  onBeginNew: () => void;
   onBack: () => void;
   onRate: (score: number) => void;
   onTyping: () => void;
@@ -241,6 +346,7 @@ export class WidgetView {
   #messagesNode?: HTMLDivElement;
   #typingNode?: HTMLDivElement;
   #endedNode?: HTMLDivElement;
+  #waitingNode?: HTMLDivElement;
   #listNode?: HTMLDivElement;
   #replyBar?: HTMLDivElement;
   #searchBar?: HTMLDivElement;
@@ -268,6 +374,8 @@ export class WidgetView {
   #reportHoldEnd = false;
   #lastSnapshot?: Snapshot;
   #renderedConversation?: string;
+  /** 正在拉回的进行中会话，避免没有选中项时反复点开同一条。 */
+  #resumeId?: string;
   #atBottom = true;
   #searchOpen = false;
   #recorder?: MediaRecorder;
@@ -287,6 +395,18 @@ export class WidgetView {
   #longPressTimer?: ReturnType<typeof setTimeout>;
   /** 全屏嵌入只绑一次，白标重建面板后仍用同一套监听。 */
   #keyboardPinBound = false;
+  #hostViewportManaged = false;
+  #hostKeyboardOpen = false;
+  #stopKeyboardPin?: () => void;
+  /** 按住收尾的页面级兜底同样只绑一次。 */
+  #holdSafetyBound = false;
+  /** 键盘收起时的布局视口高度，用来分辨「浏览器缩了布局视口」还是「只缩了视觉视口」。 */
+  #baselineHeight = 0;
+  /** 上一次应用的面板盒子，只有真的变了才去强制重绘光标。 */
+  #lastPanelBox = '';
+  #caretReseatTimer?: ReturnType<typeof setTimeout>;
+  /** 输入法组字期间不能碰 selection，否则中文会断字。 */
+  #composing = false;
 
   constructor(root: ShadowRoot, options: ResolvedOptions, store: ChatStore, handlers: UiHandlers) {
     this.#root = root;
@@ -352,12 +472,38 @@ export class WidgetView {
     return this.#recording || this.#requestingMicrophone;
   }
 
+  /** 重建组件前移除旧视口监听，避免旧回调再次改写新输入栏的位置。 */
+  disposeViewport(): void {
+    this.#stopKeyboardPin?.();
+    this.#stopKeyboardPin = undefined;
+    if (this.#caretReseatTimer) {
+      window.clearTimeout(this.#caretReseatTimer);
+      this.#caretReseatTimer = undefined;
+    }
+  }
+
+  /** iframe 由宿主按可视区定位时，组件只负责填满容器和底部安全区。 */
+  setHostViewport(keyboardOpen: boolean): void {
+    if (!this.#options.embedded || window.parent === window) return;
+    // 宿主说键盘开着、但 iframe 盒子并没有真的变矮：多半只抄了 postMessage 那一行。
+    // 这时把布局让给宿主，输入栏会直接停在键盘底下，不如继续自己跟，等它真的改了再接。
+    if (!hostViewportTrusted(this.#baselineHeight, window.innerHeight, keyboardOpen)) {
+      return;
+    }
+    if (!this.#hostViewportManaged) this.disposeViewport();
+    this.#hostViewportManaged = true;
+    this.#hostKeyboardOpen = keyboardOpen;
+    this.#pinComposerToKeyboard();
+  }
+
   /**
-   * iOS 键盘弹起时布局视口高度不变，系统会把聚焦的输入框滚到可视区顶部，
-   * 输入栏和键盘之间就空出一大块。全屏嵌入改为跟 visualViewport，底边贴住键盘。
+   * 键盘弹起后由谁摆弹层，取决于「哪一个视口真的变了」，而不是浏览器版本：
+   * iOS PWA / Android WebView 会缩布局视口，Safari 标签页只缩视觉视口，宿主还可能已经
+   * 自己改过 iframe 盒子。三套模型里补错一次（补两遍），输入框和光标就分处两套坐标，
+   * 用户看到的就是「点这儿、光标在那儿」。
    */
   #bindKeyboardPin(): void {
-    if (this.#keyboardPinBound || !this.#options.embedded || !window.visualViewport) {
+    if (this.#keyboardPinBound || this.#hostViewportManaged || !this.#options.embedded || !window.visualViewport) {
       return;
     }
     this.#keyboardPinBound = true;
@@ -365,37 +511,140 @@ export class WidgetView {
     window.visualViewport.addEventListener('resize', pin);
     window.visualViewport.addEventListener('scroll', pin);
     window.addEventListener('scroll', pin);
-    // 键盘动画晚于 focus，补两次才能贴住。
-    window.addEventListener('focusin', () => {
+    const pending = new Set<number>();
+    const later = (delay: number) => {
+      const timer = window.setTimeout(() => {
+        pending.delete(timer);
+        pin();
+      }, delay);
+      pending.add(timer);
+    };
+    // 键盘动画晚于 focus，顶层页面在动画结束后重新对齐。
+    const focusIn = () => {
       pin();
-      window.setTimeout(pin, 80);
-      window.setTimeout(pin, 320);
-    });
-    window.addEventListener('focusout', () => window.setTimeout(pin, 80));
+      later(80);
+      later(320);
+    };
+    const focusOut = () => later(80);
+    window.addEventListener('focusin', focusIn);
+    window.addEventListener('focusout', focusOut);
+    this.#stopKeyboardPin = () => {
+      window.visualViewport?.removeEventListener('resize', pin);
+      window.visualViewport?.removeEventListener('scroll', pin);
+      window.removeEventListener('scroll', pin);
+      window.removeEventListener('focusin', focusIn);
+      window.removeEventListener('focusout', focusOut);
+      for (const timer of pending) window.clearTimeout(timer);
+      pending.clear();
+    };
     pin();
   }
 
   #pinComposerToKeyboard(): void {
-    const vv = window.visualViewport;
     const panel = this.#root.querySelector('.rd-panel') as HTMLElement | null;
-    if (!vv || !panel || panel.hidden) {
+    if (!panel || panel.hidden) return;
+    if (this.#hostViewportManaged) {
+      // 外层已缩到键盘上沿，不能再用 iframe 内尚未同步的 visualViewport 缩第二次。
+      this.#applyPanelBox(panel, '100%', 0, this.#hostKeyboardOpen);
       return;
     }
-    const top = Math.max(0, Math.round(vv.offsetTop));
-    const height = Math.round(vv.height);
-    if (height < 1) {
-      return;
+    if (!this.#baselineHeight) {
+      this.#baselineHeight = window.innerHeight;
+    } else if (window.innerHeight > this.#baselineHeight) {
+      this.#baselineHeight = window.innerHeight;
     }
-    panel.style.top = '0px';
-    panel.style.bottom = 'auto';
-    panel.style.height = `${height}px`;
-    panel.style.transform = top > 0 ? `translateY(${top}px)` : '';
+    const vv = window.visualViewport;
+    const plan = keyboardViewportPlan({
+      baselineHeight: this.#baselineHeight,
+      innerHeight: window.innerHeight,
+      visualHeight: vv ? vv.height : 0,
+      visualOffsetTop: vv ? vv.offsetTop : 0,
+      scale: vv ? vv.scale : 1,
+    });
+    switch (plan.mode) {
+      case 'host':
+        this.#applyPanelBox(panel, '100%', 0, this.#hostKeyboardOpen);
+        return;
+      case 'none':
+        return;
+      case 'zoom':
+        // 页面被用户放大：面板保持布局尺寸，跟着视觉视口缩只会更错。
+        this.#applyPanelBox(panel, '100%', 0, false);
+        return;
+      case 'layout':
+        // 布局视口已经随键盘缩小，面板填满容器就位，键盘盖住的部分由浏览器自己裁。
+        this.#applyPanelBox(panel, '100%', 0, plan.keyboardOpen);
+        return;
+      case 'visual':
+        this.#applyPanelBox(panel, `${plan.height}px`, plan.top, plan.keyboardOpen);
+        if (window.scrollY !== 0) {
+          window.scrollTo(0, 0);
+        }
+        return;
+    }
+  }
+
+  /**
+   * 只改盒子，绝不用 transform：变换会把 WebKit 绘制光标的坐标系和控件本身拉开，
+   * 而且键盘动画期间每帧更新一次位移，光标就跟着一跳一跳。
+   */
+  #applyPanelBox(panel: HTMLElement, height: string, top: number, keyboardOpen: boolean): void {
+    const key = `${height}|${top}|${keyboardOpen}`;
+    const changed = key !== this.#lastPanelBox;
+    this.#lastPanelBox = key;
+    panel.style.top = `${top}px`;
+    panel.style.bottom = height === '100%' ? '0px' : 'auto';
+    panel.style.height = height;
+    panel.style.transform = '';
     // 键盘盖住底边时不再留 Home 条，否则输入栏会悬在键盘上方一截。
-    const keyboard = window.innerHeight - height - top > 80;
-    panel.classList.toggle('is-keyboard', keyboard);
-    if (window.scrollY !== 0) {
-      window.scrollTo(0, 0);
+    panel.classList.toggle('is-keyboard', keyboardOpen);
+    if (changed) {
+      this.#scheduleCaretReseat();
     }
+  }
+
+  /**
+   * 键盘动画里 WKWebView 会留着一张旧的 caret 矩形：盒子已经换了位置，光标却不重画，
+   * 看起来就是「光标悬在原来的地方」。把当前光标原地重设一次是最轻的强制重绘——
+   * 不动文字、不改变选区起止，只是让内核重新算一次光标位置。
+   */
+  #scheduleCaretReseat(): void {
+    if (this.#caretReseatTimer) {
+      window.clearTimeout(this.#caretReseatTimer);
+    }
+    this.#caretReseatTimer = window.setTimeout(() => {
+      this.#caretReseatTimer = undefined;
+      const input = this.#input;
+      if (!input || this.#composing || document.activeElement !== input) {
+        return;
+      }
+      const start = input.selectionStart;
+      const end = input.selectionEnd;
+      // 组字中和有选区时都不碰：前者会打断中文输入，后者会把选中范围收成光标。
+      if (start === null || end === null || start !== end) {
+        return;
+      }
+      try {
+        input.setSelectionRange(start, end);
+      } catch {
+        // type=search 等类型可能不支持 setSelectionRange，忽略即可。
+      }
+    }, 160);
+  }
+
+  /**
+   * 嵌入宿主页面时最容易丢松手事件：切后台、原生授权框、宿主重排 iframe 都可能让
+   * touchend/touchcancel 永远送不回来。页面一离开视野就先收尾，回到前台还能正常再按。
+   */
+  #bindHoldSafety(): void {
+    if (this.#holdSafetyBound) {
+      return;
+    }
+    this.#holdSafetyBound = true;
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') this.#releaseStuckHold();
+    });
+    window.addEventListener('pagehide', () => this.#releaseStuckHold());
   }
 
   #buildLauncher(): void {
@@ -417,6 +666,10 @@ export class WidgetView {
     const slot = this.#root.querySelector('.rd-panel-slot');
     if (!slot) {
       return;
+    }
+    // 面板刚建时键盘还没弹起，先记下「满高」是多少，后面就靠它判断键盘到底改了哪一层。
+    if (!this.#baselineHeight) {
+      this.#baselineHeight = window.innerHeight;
     }
     const panel = document.createElement('section');
     panel.className = `rd-panel${this.#options.embedded ? ' is-embedded' : ''}`;
@@ -459,6 +712,7 @@ export class WidgetView {
         </div>
       </div>
       <div class="rd-typing" hidden><span></span><span></span><span></span><em>对方正在输入…</em></div>
+      <div class="rd-waiting" hidden aria-live="polite"></div>
       <div class="rd-ended" hidden></div>
       <form class="rd-composer">
         <div class="rd-reply" hidden>
@@ -487,7 +741,6 @@ export class WidgetView {
         <input type="file" class="rd-upload-input" data-kind="camera" accept="image/*" capture="environment" hidden>
       </form>
       <div class="rd-voice-toast" hidden role="status"><b>!</b><span></span></div>
-      <div class="rd-footer"></div>
       <div class="rd-msg-menu" hidden role="menu" aria-label="消息操作">
         <button type="button" role="menuitem" data-msg-action="copy">复制</button>
         <button type="button" role="menuitem" data-msg-action="quote">引用</button>
@@ -541,6 +794,7 @@ export class WidgetView {
     this.#input = panel.querySelector('.rd-input') as HTMLTextAreaElement;
     this.#messagesNode = panel.querySelector('.rd-messages') as HTMLDivElement;
     this.#typingNode = panel.querySelector('.rd-typing') as HTMLDivElement;
+    this.#waitingNode = panel.querySelector('.rd-waiting') as HTMLDivElement;
     this.#endedNode = panel.querySelector('.rd-ended') as HTMLDivElement;
     this.#listNode = panel.querySelector('.rd-list') as HTMLDivElement;
     this.#replyBar = panel.querySelector('.rd-reply') as HTMLDivElement;
@@ -619,7 +873,14 @@ export class WidgetView {
       input.dispatchEvent(new Event('input', { bubbles: true }));
     }));
     this.#input.addEventListener('focus', closePanels);
+    this.#input.addEventListener('compositionstart', () => {
+      this.#composing = true;
+    });
+    this.#input.addEventListener('compositionend', () => {
+      this.#composing = false;
+    });
     this.#bindKeyboardPin();
+    this.#bindHoldSafety();
 
     this.#composer.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -725,10 +986,13 @@ export class WidgetView {
       this.#finishHold(event.pointerId, true);
     });
     hold.addEventListener('touchstart', (event) => {
-      if (event.touches.length !== 1) return;
+      const decision = holdTouchDecision(this.#fingerDown, event.touches.length, event.changedTouches.length);
+      if (decision === 'ignore') return;
       event.preventDefault();
       const touch = event.changedTouches[0];
       if (!touch) return;
+      // 上一根手指早已离开屏幕，只是松手事件没送回来；不收尾就再也按不动了。
+      if (decision === 'recover') this.#releaseStuckHold();
       closePanels();
       this.#beginHold(touch.identifier, touch.clientY, 'touch');
     }, { passive: false });
@@ -766,9 +1030,8 @@ export class WidgetView {
     panel.querySelector('.rd-close')?.addEventListener('click', () => this.#handlers.onClose());
     panel.querySelector('.rd-minimize')?.addEventListener('click', () => this.#handlers.onClose());
     panel.querySelector('.rd-page-back')?.addEventListener('click', () => {
-      if (this.#lastSnapshot && this.#lastSnapshot.conversations.length > 1 && this.#lastSnapshot.activeId) {
-        this.#handlers.onBack();
-      } else if (window.parent === window && window.history.length > 1) {
+      // 返回离开当前页。转接和历史会话都不在这里切成会话列表。
+      if (window.parent === window && window.history.length > 1) {
         window.history.back();
       } else {
         this.#handlers.onClose();
@@ -832,6 +1095,7 @@ export class WidgetView {
     if (!snapshot.open) {
       return;
     }
+    if (this.#hostViewportManaged) this.#pinComposerToKeyboard();
     const subtitle = panel.querySelector('.rd-subtitle') as HTMLElement;
     subtitle.textContent = this.#subtitle(snapshot);
     const serviceSubtitle = panel.querySelector('.rd-service-subtitle') as HTMLElement;
@@ -839,24 +1103,25 @@ export class WidgetView {
     subtitle.classList.toggle('is-online', snapshot.agentsOnline > 0 && snapshot.conversations.find((item) => item.id === snapshot.activeId)?.status !== 'RESOLVED');
 
     const back = panel.querySelector('.rd-back') as HTMLElement;
-    const showList = snapshot.conversations.length > 1;
-    back.hidden = !showList;
-    // With more than one conversation the picker is the landing view; picking
-    // one swaps the thread in without a second panel.
-    this.#listNode!.hidden = !showList || Boolean(snapshot.activeId);
+    // 多条历史不再盖住聊天。进行中的一轮留在当前界面，转接只走底部提示。
+    back.hidden = true;
+    this.#listNode!.hidden = true;
+    this.#resumeOpenConversation(snapshot);
 
-    if (showList && !snapshot.activeId) {
-      this.#renderConversationList(snapshot);
-    }
     this.#renderThread(snapshot);
     this.#syncReplyBar(snapshot);
     this.#syncSearchBar();
     this.#renderResults(snapshot);
     this.#renderPinned(snapshot);
-    this.#syncFooter(snapshot);
+    this.#syncWaitingNotice(snapshot);
     this.#syncEndedNotice(snapshot);
+    const active = snapshot.conversations.find((item) => item.id === snapshot.activeId);
+    const ended = active?.status === 'RESOLVED';
+    if (ended) {
+      this.#setVoiceMode(false);
+    }
     const composer = this.#composer as HTMLFormElement;
-    composer.hidden = showList && !snapshot.activeId;
+    composer.hidden = ended;
     const uploadStatus = composer.querySelector('.rd-upload-status') as HTMLElement;
     uploadStatus.hidden = snapshot.uploading === 0;
     uploadStatus.textContent = snapshot.uploading ? `正在发送 ${snapshot.uploading} 个附件…` : '';
@@ -876,8 +1141,13 @@ export class WidgetView {
       return '正在重连…';
     }
     // 会话结束时先说状态，在线/离线只是客服侧信息，不能盖住「已结束」。
-    if (snapshot.conversations.find((item) => item.id === snapshot.activeId)?.status === 'RESOLVED') {
+    const active = snapshot.conversations.find((item) => item.id === snapshot.activeId);
+    if (active?.status === 'RESOLVED') {
       return '已结束';
+    }
+    // 已转人工但客服还没接单，这段时间比「在线」更要紧，先说等待。
+    if (waitingForAgentHint(active)) {
+      return '转接中';
     }
     if (snapshot.agentsOnline > 0) {
       return '在线';
@@ -885,36 +1155,20 @@ export class WidgetView {
     return '离线';
   }
 
-  #renderConversationList(snapshot: Snapshot): void {
-    const node = this.#listNode;
-    if (!node) {
+  /** 没有选中会话时回到进行中的那一轮，已结束的历史不再铺成列表。 */
+  #resumeOpenConversation(snapshot: Snapshot): void {
+    if (snapshot.activeId) {
+      if (this.#resumeId === snapshot.activeId) {
+        this.#resumeId = undefined;
+      }
       return;
     }
-    node.innerHTML =
-      `<div class="rd-list-head">${escapeHtml('选择会话')}</div>` +
-      snapshot.conversations
-        .map((conversation) => {
-          const title = conversation.subject?.trim() || conversation.lastMessagePreview?.trim() || '新会话';
-          const active = conversation.id === snapshot.activeId ? ' is-active' : '';
-          const unread = conversation.visitorUnread > 0 ? `<span class="rd-dot">${conversation.visitorUnread}</span>` : '';
-          const status = conversation.status === 'RESOLVED' ? '<span class="rd-tag">已结束</span>' : '';
-          return `<button type="button" class="rd-item${active}" data-conversation="${escapeAttr(conversation.id)}">
-            <span class="rd-item-main">
-              <strong>${escapeHtml(title)}</strong>
-              <small>${escapeHtml(conversation.lastMessagePreview ?? '')}</small>
-            </span>
-            <span class="rd-item-meta">${unread}${status}<time>${escapeHtml(conversation.lastMessageAt ? timeLabel(conversation.lastMessageAt) : '')}</time></span>
-          </button>`;
-        })
-        .join('');
-    node.querySelectorAll<HTMLElement>('[data-conversation]').forEach((item) => {
-      item.addEventListener('click', () => {
-        const id = item.dataset.conversation;
-        if (id) {
-          this.#handlers.onSelectConversation(id);
-        }
-      });
-    });
+    const open = snapshot.conversations.find((item) => item.status !== 'RESOLVED');
+    if (!open || this.#resumeId === open.id) {
+      return;
+    }
+    this.#resumeId = open.id;
+    this.#handlers.onSelectConversation(open.id);
   }
 
   #channelItemHtml(i: ChannelItem): string {
@@ -983,11 +1237,12 @@ export class WidgetView {
     const previousCount = node.querySelectorAll('.rd-msg').length;
     const shouldStick = this.#atBottom || conversationChanged || snapshot.messages.length > previousCount;
 
+    const rating = this.#ratingHtml(snapshot);
     if (snapshot.messages.length === 0) {
       // 刷新后短暂无消息：有历史则显示加载，全新会话才显示欢迎语。
-      node.innerHTML = this.#shouldShowWelcome(snapshot)
+      node.innerHTML = (this.#shouldShowWelcome(snapshot)
         ? this.#welcomeHtml(snapshot)
-        : this.#threadLoadingHtml();
+        : this.#threadLoadingHtml()) + rating;
       this.#bindChannelActions(node,snapshot);
     } else {
       // 已有聊天记录时不再置顶欢迎语，避免老会话每次刷新都像新客服开场。
@@ -1014,6 +1269,9 @@ export class WidgetView {
           parts.push(`<div class="rd-unread"><span>以下为新消息</span></div>`);
         }
         parts.push(this.#messageHtml(snapshot, message));
+      }
+      if (rating) {
+        parts.push(rating);
       }
       node.innerHTML = parts.join('');
       this.#bindChannelActions(node, snapshot);
@@ -1047,6 +1305,7 @@ export class WidgetView {
       this.#bindMessageImages(node);
       this.#bindMessageGestures(node);
     }
+    this.#bindRating(node);
     this.#typingNode!.hidden = !snapshot.agentTyping;
     if (shouldStick) {
       requestAnimationFrame(() => this.scrollToBottom(conversationChanged ? 'auto' : 'smooth'));
@@ -1561,22 +1820,29 @@ export class WidgetView {
     });
   }
 
-  #syncFooter(snapshot: Snapshot): void {
-    const footer = this.#root.querySelector('.rd-footer') as HTMLElement | null;
-    if (!footer) {
-      return;
-    }
+  /**
+   * 已结束时评价卡跟在消息流末尾：未评可点星，已评只留下结果。
+   * 原先贴在输入框之下，嵌入后输入框自己占了安全区，评价会落进 Home 指示条。
+   */
+  #ratingHtml(snapshot: Snapshot): string {
     const active = snapshot.conversations.find((item) => item.id === snapshot.activeId);
-    if (!active || active.status !== 'RESOLVED' || snapshot.rated) {
-      footer.hidden = true;
-      footer.innerHTML = '';
-      return;
+    if (!active || active.status !== 'RESOLVED') {
+      return '';
     }
-    footer.hidden = false;
-    footer.innerHTML = `<span>本次服务是否解决了您的问题？</span><span class="rd-stars">${[1, 2, 3, 4, 5]
+    if (snapshot.rated) {
+      const stars = [1, 2, 3, 4, 5]
+        .map((score) => `<span class="rd-star${score <= snapshot.rated! ? ' is-on' : ''}" aria-hidden="true">${ICONS.star}</span>`)
+        .join('');
+      return `<div class="rd-rate is-done" role="status"><p>感谢评价，已记录 ${snapshot.rated} 星</p><span class="rd-stars">${stars}</span></div>`;
+    }
+    const stars = [1, 2, 3, 4, 5]
       .map((score) => `<button type="button" class="rd-star" data-score="${score}" title="${score} 分">${ICONS.star}</button>`)
-      .join('')}</span>`;
-    footer.querySelectorAll<HTMLElement>('[data-score]').forEach((star) => {
+      .join('');
+    return `<div class="rd-rate"><p>本次服务是否解决了您的问题？</p><span class="rd-stars">${stars}</span></div>`;
+  }
+
+  #bindRating(node: HTMLElement): void {
+    node.querySelectorAll<HTMLElement>('[data-score]').forEach((star) => {
       star.addEventListener('click', () => {
         const score = Number(star.dataset.score);
         if (score >= 1 && score <= 5) {
@@ -1586,22 +1852,41 @@ export class WidgetView {
     });
   }
 
-  /** 已结束会话要在输入框上方说清楚「再发言会去哪」，访客才不会以为没人接待。 */
+  /** 转人工后、客服接单前给访客一条等待提示，别让人对着没人应的气泡反复问「在吗」。 */
+  #syncWaitingNotice(snapshot: Snapshot): void {
+    const node = this.#waitingNode;
+    if (!node) {
+      return;
+    }
+    const hint = waitingForAgentHint(snapshot.conversations.find((item) => item.id === snapshot.activeId));
+    node.hidden = hint === '';
+    node.textContent = hint;
+  }
+
+  /** 已结束时收起输入，只留重新发起。继续咨询会另开一轮。 */
   #syncEndedNotice(snapshot: Snapshot): void {
     const node = this.#endedNode;
     if (!node) {
       return;
     }
     const active = snapshot.conversations.find((item) => item.id === snapshot.activeId);
-    if (!active || active.status !== 'RESOLVED') {
-      node.hidden = true;
-      node.textContent = '';
+    const ended = active?.status === 'RESOLVED';
+    node.hidden = !ended;
+    if (!ended) {
+      node.replaceChildren();
       return;
     }
-    node.hidden = false;
-    node.textContent = shouldForkAfterGrace(active, snapshot.reopenGraceMinutes)
-      ? '本次咨询已结束，继续发言会开启新咨询，进入公共队列由在线客服接待。'
-      : '本次咨询已结束，继续发言将重新由原客服接待。';
+    if (node.querySelector('.rd-begin-new')) {
+      return;
+    }
+    const text = document.createElement('span');
+    text.textContent = '本次会话已结束';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'rd-begin-new';
+    button.textContent = '重新发起';
+    button.addEventListener('click', () => this.#handlers.onBeginNew());
+    node.replaceChildren(text, button);
   }
 
   #canRecord(): boolean {
@@ -1609,31 +1894,37 @@ export class WidgetView {
   }
 
   #setVoiceMode(on: boolean): void {
-    if (!on && (this.#fingerDown || this.#recording || this.#requestingMicrophone)) {
-      this.#fingerDown = false;
-      this.#holdCancel = false;
-      this.#holdGen += 1;
-      this.#unwatchHoldPointer();
-      if (this.#recording) this.#stopRecording(true);
-      else this.#releaseLevelMeter();
+    if (!on) {
+      this.#releaseStuckHold();
     }
     if (on === this.#voiceMode) return;
     this.#voiceMode = on;
     this.#syncVoiceChrome();
   }
 
-  /** 换肤会拆掉面板，先停掉还在进行的录音，避免麦克风停不下来。 */
-  #abandonRecording(): void {
+  /**
+   * 松手事件丢了必须强制收尾：按下状态一直挂着的话，之后每一下都被 #beginHold 静默挡掉。
+   * 按取消处理——松手时刻未知，把这段不知道多长的音频发出去更糟。
+   */
+  #releaseStuckHold(): void {
+    if (!this.#fingerDown && !this.#recording && !this.#requestingMicrophone) return;
     this.#fingerDown = false;
     this.#holdCancel = false;
     this.#holdGen += 1;
+    this.#reportHoldEnd = false;
     this.#unwatchHoldPointer();
+    if (this.#recording) this.#stopRecording(true);
+    else this.#releaseLevelMeter();
+    this.#paintVoice();
+  }
+
+  /** 换肤会拆掉面板，先停掉还在进行的录音，避免麦克风停不下来。 */
+  #abandonRecording(): void {
+    this.#releaseStuckHold();
     if (this.#voiceToastTimer) {
       clearTimeout(this.#voiceToastTimer);
       this.#voiceToastTimer = undefined;
     }
-    if (this.#recording) this.#stopRecording(true);
-    else this.#releaseLevelMeter();
     this.#voiceMode = false;
   }
 
@@ -2256,7 +2547,7 @@ ${this.#options.embedded ? `
 .rd-searchbar[hidden] { display: none; }
 .rd-search-input {
   flex: 1; border: 1px solid ${light ? '#e5e7eb' : '#374151'}; border-radius: 12px; padding: 8px 14px;
-  font: inherit; background: ${light ? '#f9fafb' : '#1f2937'}; color: inherit; outline: none; transition: background-color 0.12s, color 0.12s, border-color 0.12s;
+  font: inherit; font-size: 16px; background: ${light ? '#f9fafb' : '#1f2937'}; color: inherit; outline: none; transition: background-color 0.12s, color 0.12s, border-color 0.12s;
 }
 .rd-search-input:focus { border-color: ${accent}; background: ${light ? '#ffffff' : '#111827'}; }
 .rd-body { position: relative; flex: 1; min-height: 0; display: flex; overflow: hidden; background: ${light ? '#f9fafb' : '#111827'}; }
@@ -2426,7 +2717,9 @@ ${this.#options.embedded ? `
 @keyframes rd-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: .5; } 30% { transform: translateY(-4px); opacity: 1; } }
 .rd-list { position: absolute; inset: 0; overflow-y: auto; background: ${light ? '#fff' : '#1b1d22'}; z-index: 2; padding: 8px; }
 .rd-list[hidden] { display: none; }
-.rd-list-head { padding: 8px 10px; font-size: 12px; color: ${light ? '#7a8091' : '#9aa0ad'}; }
+.rd-list-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; font-size: 12px; color: ${light ? '#7a8091' : '#9aa0ad'}; }
+.rd-new-chat { border: 0; border-radius: 999px; padding: 4px 10px; font-size: 12px; cursor: pointer; background: ${light ? '#eef3ff' : '#2a3140'}; color: ${accent}; }
+.rd-item.is-closed { cursor: default; opacity: .72; }
 .rd-item {
   display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; text-align: left;
   border: 0; background: transparent; padding: 10px 12px; border-radius: 12px; cursor: pointer; font: inherit; color: inherit;
@@ -2438,8 +2731,14 @@ ${this.#options.embedded ? `
 .rd-item-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: 11px; color: ${light ? '#939aab' : '#8b91a0'}; }
 .rd-dot { min-width: 18px; height: 18px; border-radius: 999px; background: #ff4d4f; color: #fff; font: 600 11px/18px system-ui; text-align: center; padding: 0 5px; }
 .rd-tag { align-self: flex-end; padding: 1px 7px; border-radius: 999px; font: 500 11px/16px var(--rd-font); color: ${light ? '#8a909e' : '#9aa0ad'}; background: ${light ? '#eef1f6' : '#2b303a'}; }
-.rd-ended { flex-shrink: 0; padding: 7px 16px; font-size: 12px; line-height: 1.4; color: ${light ? '#8a5a12' : '#f0c98a'}; background: ${light ? '#fff7e8' : '#2a2418'}; }
+.rd-ended { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-shrink: 0; padding: 7px 16px; font-size: 12px; line-height: 1.4; color: ${light ? '#8a5a12' : '#f0c98a'}; background: ${light ? '#fff7e8' : '#2a2418'}; }
 .rd-ended[hidden] { display: none; }
+.rd-begin-new { flex: none; border: 0; border-radius: 8px; padding: 6px 12px; font: 600 12px/1.2 var(--rd-font, system-ui); color: #fff; background: var(--rd-accent, #3370ff); cursor: pointer; }
+/* 等待客服接单是一条进行时状态，配色跟企业主色走，加个呼吸点表示「还在跑」而不是卡住。 */
+.rd-waiting { flex-shrink: 0; display: flex; align-items: center; gap: 7px; padding: 7px 16px; font-size: 12px; line-height: 1.4; color: ${light ? '#3370ff' : '#9dbaff'}; background: ${light ? '#f0f5ff' : '#1c2334'}; }
+.rd-waiting::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: rd-waiting-pulse 1.2s ease-in-out infinite; }
+@keyframes rd-waiting-pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .rd-waiting::before { animation: none; } }
 /* 单行输入栏格局对齐微信：左语音、中输入框、右「+」；有文字时「+」换成「发送」。配色仍走企业主色与主题。 */
 .rd-composer { display: flex; flex-direction: column; border-top: 1px solid ${light ? '#e9edf3' : '#303848'}; background: ${light ? '#ffffff' : '#1e1f24'}; }
 .rd-composer[hidden] { display: none; }
@@ -2458,12 +2757,14 @@ ${this.#options.embedded ? `
 .rd-emoji-tabs button { flex:1; border:0; padding:7px 0; border-radius:6px; background:transparent; color:inherit; cursor:pointer; font:inherit; font-size:12px; }
 .rd-emoji-tabs button[aria-selected="true"] { background:#e5edff; color:#3370ff; }
 .rd-emoji-grid { display:grid; grid-template-columns:repeat(8,minmax(0,1fr)); gap:6px; }
-.rd-icon, .rd-emoji, .rd-emoji-tabs button, .rd-tool { touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
+.rd-icon, .rd-emoji, .rd-emoji-tabs button, .rd-tool, .rd-hold { touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
 .rd-composer { flex-shrink:0; }
 .rd-tools { flex-shrink:0; contain:layout paint; }
 .rd-emoji { border: 0; border-radius: 8px; background: transparent; padding: 6px 0; font-size: 24px; cursor: pointer; }
 .rd-emoji:hover { background: ${light ? '#e7ebed' : '#374151'}; }
-.rd-composer-row .rd-input { flex: 1 1 0%; width: 0; min-width: 0; min-height: 44px; max-height: 120px; border: 1px solid ${light ? '#e9edf3' : '#303848'}; border-radius: 8px; background: ${light ? '#ffffff' : '#222733'}; padding: 10px 12px; font-size: 15px; line-height: 20px; }
+/* 16px 是 iOS 的自动缩放阈值：小于它时聚焦会把整页放大，光标按放大后的坐标绘制，
+   表面上就是「点这儿、光标跑到那儿」。宁可字大一点，也不要让浏览器自己缩。 */
+.rd-composer-row .rd-input { flex: 1 1 0%; width: 0; min-width: 0; min-height: 44px; max-height: 120px; border: 1px solid ${light ? '#e9edf3' : '#303848'}; border-radius: 8px; background: ${light ? '#ffffff' : '#222733'}; padding: 10px 12px; font-size: 16px; line-height: 20px; }
 .rd-composer-row .rd-input:focus { border-color: ${accent}; }
 .rd-composer { padding-bottom: env(safe-area-inset-bottom, 0px); }
 .rd-panel.is-keyboard .rd-composer { padding-bottom: 0; }
@@ -2540,12 +2841,22 @@ ${this.#options.embedded ? `
   border: 2px solid #fff; border-radius: 50%; font-size: 22px; font-weight: 600; line-height: 1;
 }
 .rd-voice-toast span { display: block; font-size: 14px; line-height: 1.45; }
-.rd-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 14px 12px; font-size: 12px; color: ${light ? '#5b6172' : '#a8aebb'}; }
-.rd-footer[hidden] { display: none; }
-.rd-stars { display: inline-flex; gap: 2px; }
-.rd-star { border: 0; background: transparent; padding: 0; cursor: pointer; color: ${light ? '#c9cede' : '#4c525d'}; }
-.rd-star svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; }
-.rd-star:hover svg, .rd-star:hover ~ .rd-star svg { fill: #fbbf24; stroke: #fbbf24; }
+.rd-rate {
+  align-self: center; box-sizing: border-box; width: min(100%, 280px); margin: 2px 0 4px;
+  padding: 14px 16px 12px; border-radius: 12px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  background: ${light ? '#ffffff' : '#1e1f24'}; border: 1px solid ${light ? '#e9edf3' : '#303848'};
+  color: ${light ? '#5b6172' : '#a8aebb'}; font-size: 13px; line-height: 1.45;
+}
+.rd-rate p { margin: 0; }
+.rd-stars { display: inline-flex; gap: 4px; }
+.rd-star { border: 0; background: transparent; padding: 6px; cursor: pointer; color: ${light ? '#c9cede' : '#4c525d'}; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.rd-star svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.6; display: block; }
+.rd-rate:not(.is-done) .rd-stars:hover .rd-star svg { fill: #fbbf24; stroke: #fbbf24; }
+.rd-rate:not(.is-done) .rd-star:hover ~ .rd-star svg { fill: none; stroke: currentColor; }
+.rd-rate.is-done .rd-star { cursor: default; padding: 2px; }
+.rd-star.is-on { color: #fbbf24; }
+.rd-star.is-on svg { fill: #fbbf24; stroke: #fbbf24; }
 @media (max-width: 480px) {
   /* 仅非嵌入浮层用 vw/dvh 铺满手机屏；嵌入态保持上面的 100%。 */
   .rd-panel:not(.is-embedded) { ${side}: 0; bottom: 0; width: 100vw; height: 100vh; height: 100dvh; max-width: none; border-radius: 0; border: 0; }

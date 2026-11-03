@@ -14,6 +14,8 @@ import (
 
 func (a *API) registerConsole(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/console/entitlements", a.requireAgent(a.consoleEntitlements))
+	// 接口文档入口：不公开的实例由这里签发短期 Cookie，见 registerDocs。
+	mux.HandleFunc("POST /api/v1/console/docs-access", a.requireAgent(a.consoleDocsAccess))
 	// Authentication
 	mux.HandleFunc("POST /api/v1/console/login", a.limit(a.loginRate, a.consoleLogin))
 	mux.HandleFunc("POST /api/v1/console/logout", a.requireAgent(a.consoleLogout))
@@ -361,6 +363,7 @@ func (a *API) consoleConversations(w http.ResponseWriter, r *http.Request, p aut
 		       coalesce(ag.display_name,''), c.priority, c.source, c.last_sequence,
 		       coalesce(c.last_message_preview,''), c.last_message_at, c.agent_unread, c.visitor_unread,
 		       coalesce(v.display_name,''), c.created_at, c.updated_at, c.accepted_at, c.assignment_expires_at,
+		       c.handoff_requested_at,
 		       c.closed_at,
 		       (select i.reopen_grace_minutes from inbox i where i.id = c.inbox_id)
 		  from conversation c
@@ -393,7 +396,7 @@ func (a *API) consoleConversations(w http.ResponseWriter, r *http.Request, p aut
 		and exists (select 1 from agent_inbox ai where ai.inbox_id=conversation.inbox_id and ai.agent_id=$2)`, p.TenantID, p.AgentID).Scan(&queued)
 	var unread int
 	_ = a.db.QueryRow(r.Context(), `select coalesce(sum(agent_unread),0)::int from conversation
-		where tenant_id=$1 and status <> 'RESOLVED' and `+conversationVisibility("conversation", "$2", auth.CanViewReports(p.Role) && filter == "team")+`
+		where tenant_id=$1 and status <> 'RESOLVED' and `+conversationDuty("conversation", "$2", auth.CanViewReports(p.Role) && filter == "team")+`
 		and exists (select 1 from agent_inbox ai where ai.inbox_id=conversation.inbox_id and ai.agent_id=$2)`, p.TenantID, p.AgentID).Scan(&unread)
 	var receptionWaiting int
 	err = a.db.QueryRow(r.Context(), `select count(*)::int from conversation c
@@ -485,7 +488,7 @@ func (a *API) consoleMessages(w http.ResponseWriter, r *http.Request, p auth.Pri
 }
 
 func (a *API) consoleSend(w http.ResponseWriter, r *http.Request, p auth.Principal) {
-	id, ok := a.consoleConversationScope(w, r, p)
+	id, ok := a.consoleHandleScope(w, r, p)
 	if !ok {
 		return
 	}
@@ -605,7 +608,7 @@ func (a *API) consoleClaim(w http.ResponseWriter, r *http.Request, p auth.Princi
 }
 
 func (a *API) consoleTransfer(w http.ResponseWriter, r *http.Request, p auth.Principal) {
-	id, ok := a.consoleConversationScope(w, r, p)
+	id, ok := a.consoleHandleScope(w, r, p)
 	if !ok {
 		return
 	}
@@ -636,12 +639,37 @@ func (a *API) consoleTransfer(w http.ResponseWriter, r *http.Request, p auth.Pri
 		return
 	}
 	defer tx.Rollback(r.Context())
-	if _, err := tx.Exec(r.Context(), `update conversation set assignee_id=$3, assigned_at=now(), accepted_at=null,bot_paused=true,handoff_requested_at=coalesce(handoff_requested_at,now()),assignment_expires_at=now()+make_interval(secs=>coalesce((select acceptance_timeout_seconds from routing_rule rr where rr.tenant_id=$2 and rr.enabled and (rr.inbox_id=conversation.inbox_id or rr.inbox_id is null) order by rr.inbox_id nulls last limit 1),60)), updated_at=now()
-		where id=$1 and tenant_id=$2`, id, p.TenantID, target); err != nil {
+	var current string
+	if scanErr := tx.QueryRow(r.Context(), `select status from conversation where id=$1 and tenant_id=$2 for update`, id, p.TenantID).Scan(&current); scanErr != nil {
+		fail(w, 404, "会话不存在")
+		return
+	}
+	if current == "RESOLVED" {
+		fail(w, 409, "会话已结束，不能转交")
+		return
+	}
+	// 先记下转出前的接待人。更新归属之后这行只剩接手的人，原客服就无法回看。
+	if _, err = tx.Exec(r.Context(), `insert into conversation_participant(conversation_id, agent_id)
+		select id, assignee_id from conversation where id=$1 and assignee_id is not null
+		on conflict do nothing`, id); err != nil {
 		fail(w, 500, "转接失败")
 		return
 	}
-	if err = receptionNotice(r.Context(), tx, p.TenantID, id, "已分配给客服「"+targetName+"」，等待客服接待。", "ASSIGNED"); err != nil {
+	if _, err = tx.Exec(r.Context(), `insert into conversation_participant(conversation_id, agent_id) values($1,$2),($1,$3) on conflict do nothing`, id, p.AgentID, target); err != nil {
+		fail(w, 500, "转接失败")
+		return
+	}
+	tag, err := tx.Exec(r.Context(), `update conversation set assignee_id=$3, assigned_at=now(), accepted_at=null,bot_paused=true,handoff_requested_at=coalesce(handoff_requested_at,now()),assignment_expires_at=now()+make_interval(secs=>coalesce((select acceptance_timeout_seconds from routing_rule rr where rr.tenant_id=$2 and rr.enabled and (rr.inbox_id=conversation.inbox_id or rr.inbox_id is null) order by rr.inbox_id nulls last limit 1),60)), updated_at=now()
+		where id=$1 and tenant_id=$2 and status <> 'RESOLVED'`, id, p.TenantID, target)
+	if err != nil {
+		fail(w, 500, "转接失败")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		fail(w, 409, "会话已结束，不能转交")
+		return
+	}
+	if err = receptionNotice(r.Context(), tx, p.TenantID, id, "已分配给客服「"+targetName+"」，等待客服接待。", "ASSIGNED", false); err != nil {
 		fail(w, 500, "转接失败")
 		return
 	}
@@ -649,6 +677,7 @@ func (a *API) consoleTransfer(w http.ResponseWriter, r *http.Request, p auth.Pri
 		fail(w, 500, "转接失败")
 		return
 	}
+	a.enqueueTransferAlert(r.Context(), p.TenantID, id, target)
 	a.nudgePush()
 	a.flushReceptionNotices(r.Context())
 
@@ -670,7 +699,7 @@ func (a *API) consoleTransfer(w http.ResponseWriter, r *http.Request, p auth.Pri
 }
 
 func (a *API) consoleStatus(w http.ResponseWriter, r *http.Request, p auth.Principal) {
-	id, ok := a.consoleConversationScope(w, r, p)
+	id, ok := a.consoleHandleScope(w, r, p)
 	if !ok {
 		return
 	}
@@ -686,26 +715,21 @@ func (a *API) consoleStatus(w http.ResponseWriter, r *http.Request, p auth.Princ
 		return
 	}
 	if status == "RESOLVED" {
-		res, err := a.db.Exec(r.Context(), `update conversation
-			set status='RESOLVED', closed_at=now(), updated_at=now(), agent_unread=0
-			where id=$1 and tenant_id=$2 and status <> 'RESOLVED'`, id, p.TenantID)
-		if err != nil {
+		// 重复点「标记解决」不再补一条结束提示，也不再重复计一次收单。
+		if _, err := a.resolveConversation(r.Context(), p.TenantID, id, p.AgentID, endNoticeManual); err != nil {
 			fail(w, 500, "更新状态失败")
 			return
 		}
-		// 重复点「标记解决」不再补一条结束提示。
-		if res.RowsAffected() > 0 {
-			a.appendEndedNotice(r.Context(), p.TenantID, id)
-		}
-		a.bumpDailyStat(r.Context(), p.TenantID, "conversations_closed")
-		a.publish(r.Context(), a.conversationChannels(r.Context(), id), realtime.Event{
-			Type: "conversation.closed", TenantID: p.TenantID.String(), ConversationID: id.String(),
-			Data: map[string]any{"closedBy": p.AgentID},
-		})
-		a.notifyWebhook(r.Context(), p.TenantID, webhook.EventConversationClosed, map[string]any{
-			"conversationId": id, "closedBy": p.AgentID, "closedAt": nowUTC(),
-		})
 		respond(w, 200, map[string]any{"status": "OK"})
+		return
+	}
+	var current string
+	if err := a.db.QueryRow(r.Context(), `select status from conversation where id=$1 and tenant_id=$2`, id, p.TenantID).Scan(&current); err != nil {
+		fail(w, 404, "会话不存在")
+		return
+	}
+	if current == "RESOLVED" {
+		fail(w, 409, "会话已结束，不能重新打开")
 		return
 	}
 	if _, err := a.db.Exec(r.Context(), `update conversation set status=$3, closed_at=null, updated_at=now()
@@ -721,7 +745,7 @@ func (a *API) consoleStatus(w http.ResponseWriter, r *http.Request, p auth.Princ
 }
 
 func (a *API) consoleRead(w http.ResponseWriter, r *http.Request, p auth.Principal) {
-	id, ok := a.consoleConversationScope(w, r, p)
+	id, ok := a.consoleHandleScope(w, r, p)
 	if !ok {
 		return
 	}
@@ -744,7 +768,7 @@ func (a *API) consoleRead(w http.ResponseWriter, r *http.Request, p auth.Princip
 // from reading it so the visitor's client can render a delivered tick while the
 // agent still has the thread open in another tab.
 func (a *API) consoleDelivered(w http.ResponseWriter, r *http.Request, p auth.Principal) {
-	id, ok := a.consoleConversationScope(w, r, p)
+	id, ok := a.consoleHandleScope(w, r, p)
 	if !ok {
 		return
 	}
@@ -764,7 +788,7 @@ func (a *API) consoleDelivered(w http.ResponseWriter, r *http.Request, p auth.Pr
 }
 
 func (a *API) consoleTyping(w http.ResponseWriter, r *http.Request, p auth.Principal) {
-	id, ok := a.consoleConversationScope(w, r, p)
+	id, ok := a.consoleHandleScope(w, r, p)
 	if !ok {
 		return
 	}
@@ -776,7 +800,7 @@ func (a *API) consoleTyping(w http.ResponseWriter, r *http.Request, p auth.Princ
 }
 
 func (a *API) consoleSetTags(w http.ResponseWriter, r *http.Request, p auth.Principal) {
-	id, ok := a.consoleConversationScope(w, r, p)
+	id, ok := a.consoleHandleScope(w, r, p)
 	if !ok {
 		return
 	}
@@ -822,7 +846,7 @@ func (a *API) consoleSetTags(w http.ResponseWriter, r *http.Request, p auth.Prin
 }
 
 func (a *API) consolePriority(w http.ResponseWriter, r *http.Request, p auth.Principal) {
-	id, ok := a.consoleConversationScope(w, r, p)
+	id, ok := a.consoleHandleScope(w, r, p)
 	if !ok {
 		return
 	}
@@ -842,6 +866,19 @@ func (a *API) consolePriority(w http.ResponseWriter, r *http.Request, p auth.Pri
 		return
 	}
 	respond(w, 200, map[string]any{"status": "OK"})
+}
+
+// consoleHandleScope is the write gate. Former assignees can open a transferred thread and cannot change it.
+func (a *API) consoleHandleScope(w http.ResponseWriter, r *http.Request, p auth.Principal) (uuid.UUID, bool) {
+	id, ok := a.consoleConversationScope(w, r, p)
+	if !ok {
+		return uuid.Nil, false
+	}
+	if !a.agentCanHandle(r.Context(), p, id) {
+		fail(w, 403, "会话已交给其他客服，只能查看")
+		return uuid.Nil, false
+	}
+	return id, true
 }
 
 // consoleConversationScope enforces that the conversation belongs to the agent's
@@ -904,6 +941,10 @@ func (a *API) consoleUpdateVisitor(w http.ResponseWriter, r *http.Request, p aut
 	if !a.agentVisitorAccess(w, r, p, id) {
 		return
 	}
+	if !a.agentCanHandleVisitor(r.Context(), p, id) {
+		fail(w, 403, "会话已交给其他客服，只能查看")
+		return
+	}
 	var in struct {
 		DisplayName string         `json:"displayName"`
 		Attributes  map[string]any `json:"attributes"`
@@ -942,6 +983,7 @@ func (a *API) consoleVisitorConversations(w http.ResponseWriter, r *http.Request
 		       coalesce(ag.display_name,''), c.priority, c.source, c.last_sequence,
 		       coalesce(c.last_message_preview,''), c.last_message_at, c.agent_unread, c.visitor_unread,
 		       coalesce(v.display_name,''), c.created_at, c.updated_at, c.accepted_at, c.assignment_expires_at,
+		       c.handoff_requested_at,
 		       c.closed_at,
 		       (select i.reopen_grace_minutes from inbox i where i.id = c.inbox_id)
 		  from conversation c
@@ -974,6 +1016,10 @@ func (a *API) consoleAddNote(w http.ResponseWriter, r *http.Request, p auth.Prin
 		return
 	}
 	if !a.agentVisitorAccess(w, r, p, id) {
+		return
+	}
+	if !a.agentCanHandleVisitor(r.Context(), p, id) {
+		fail(w, 403, "会话已交给其他客服，只能查看")
 		return
 	}
 	var in struct {

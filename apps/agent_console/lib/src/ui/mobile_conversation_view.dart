@@ -173,46 +173,38 @@ class _MobileConversationListViewState
             ),
           ),
           const SizedBox(height: 10),
-          // 胶囊分段筛选条
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            child: Row(
-              children: [
-                _buildFilterChip(
-                  label: '全部',
-                  selected: workbench.filter == QueueFilter.all,
-                  onTap: () => workbench.setFilter(QueueFilter.all),
-                ),
-                const SizedBox(width: 8),
-                _buildFilterChip(
-                  label: '待接待',
-                  count: workbench.receptionWaiting > 0
-                      ? workbench.receptionWaiting
-                      : null,
-                  countIsAlert: true,
-                  selected: workbench.filter == QueueFilter.unassigned,
-                  onTap: () => workbench.setFilter(QueueFilter.unassigned),
-                ),
-                const SizedBox(width: 8),
-                _buildFilterChip(
-                  label: '我的',
-                  count: workbench.unread > 0 ? workbench.unread : null,
-                  selected: workbench.filter == QueueFilter.mine,
-                  onTap: () => workbench.setFilter(QueueFilter.mine),
-                ),
-                const SizedBox(width: 8),
-                _buildFilterChip(
-                  label: '已结束',
-                  selected: workbench.filter == QueueFilter.resolved,
-                  onTap: () => workbench.setFilter(QueueFilter.resolved),
-                ),
-                if (widget.session.inboxes.length > 1) ...[
-                  const SizedBox(width: 8),
-                  _buildInboxFilter(context, workbench),
-                ],
-              ],
-            ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _buildFilterChip(
+                label: '全部',
+                selected: workbench.filter == QueueFilter.all,
+                onTap: () => workbench.setFilter(QueueFilter.all),
+              ),
+              _buildFilterChip(
+                label: '待接待',
+                count: workbench.receptionWaiting > 0
+                    ? workbench.receptionWaiting
+                    : null,
+                countIsAlert: true,
+                selected: workbench.filter == QueueFilter.unassigned,
+                onTap: () => workbench.setFilter(QueueFilter.unassigned),
+              ),
+              _buildFilterChip(
+                label: '我的',
+                count: workbench.unread > 0 ? workbench.unread : null,
+                selected: workbench.filter == QueueFilter.mine,
+                onTap: () => workbench.setFilter(QueueFilter.mine),
+              ),
+              _buildFilterChip(
+                label: '已结束',
+                selected: workbench.filter == QueueFilter.resolved,
+                onTap: () => workbench.setFilter(QueueFilter.resolved),
+              ),
+              if (widget.session.inboxes.length > 1)
+                _buildInboxFilter(context, workbench),
+            ],
           ),
         ],
       ),
@@ -382,7 +374,7 @@ class _MobileConversationListViewState
                 QueueFilter.resolved => '还没有已结束的会话',
               },
         message: workbench.search.isNotEmpty
-            ? '可尝试切换搜索词，或打开「已结束」查看历史会话。'
+            ? '可尝试切换搜索词，或点「已结束」查看接待记录。'
             : workbench.filter == QueueFilter.mine
                 ? '新客户进线后将出现在待接待列表，接单后即可开始沟通。'
                 : workbench.filter == QueueFilter.resolved
@@ -434,9 +426,6 @@ class _MobileConversationListViewState
       case 'resolve':
         widget.workbench.select(conversation.id);
         widget.workbench.setStatus('RESOLVED');
-      case 'reopen':
-        widget.workbench.select(conversation.id);
-        widget.workbench.setStatus('OPEN');
       case 'priority':
         final next = conversation.priority >= 2 ? 0 : 2;
         widget.workbench.select(conversation.id);
@@ -851,16 +840,6 @@ class _MobileConversationCell extends StatelessWidget {
                   onTap: () {
                     Navigator.pop(ctx);
                     onAction('resolve');
-                  },
-                )
-              else
-                ListTile(
-                  leading: const Icon(Icons.lock_open_rounded,
-                      color: RelayTheme.blue),
-                  title: const Text('重新打开'),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    onAction('reopen');
                   },
                 ),
               ListTile(

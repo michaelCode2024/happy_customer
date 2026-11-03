@@ -65,8 +65,11 @@ class _PwaPanelState extends State<PwaPanel> {
     super.dispose();
   }
 
+  bool get _desktopSilent => _status['desktop'] == true;
+
   Future<void> _offerUpdate() async {
-    if (!mounted ||
+    if (_desktopSilent ||
+        !mounted ||
         widget.settingsOnly ||
         _prompting ||
         _status['update'] != true ||
@@ -113,7 +116,7 @@ class _PwaPanelState extends State<PwaPanel> {
                               child: Text('• $note')),
                         const SizedBox(height: 12),
                         const Text(
-                            '更新前会等待文字草稿保存。页面将重新加载，尚未发送的附件需要重新选择；正在录音时请先完成录音。'),
+                            '页面将重新加载。尚未发送的附件需要重新选择；正在录音时请先完成录音。'),
                       ],
                     ))),
                 actions: [
@@ -122,19 +125,11 @@ class _PwaPanelState extends State<PwaPanel> {
                       child: const Text('立即更新')),
                 ])));
     if (ok != true || !mounted) return;
-    // 草稿落盘期间先占住提示，避免另一个入口把同一个更新框再打开。
+    // 更新期间先占住提示，避免另一个入口把同一个更新框再打开。
     await pwaAction('holdUpdate');
     var handedOff = false;
     try {
-      // 等待输入框的草稿防抖与本机存储队列完成，再允许重载。
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-      await widget.api?.offlineStore?.flush();
       if (!mounted) return;
-      if (widget.api?.offlineStore?.writeFailed == true) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('草稿尚未可靠保存，请先复制文字，再更新应用')));
-        return;
-      }
       final message = await pwaAction('update');
       handedOff = message == '正在更新…';
       if (mounted && message.isNotEmpty) {
@@ -265,10 +260,10 @@ class _PwaPanelState extends State<PwaPanel> {
                     child: Text(
                         'iPhone / iPad：使用 Safari 打开工作台，点「分享 → 添加到主屏幕」，然后从桌面图标打开。\n\n'
                         '安卓 / 电脑：点击「安装应用」，或使用浏览器菜单中的安装入口。\n\n'
-                        '首次联网打开后，可在个人设置 → 外观与通知中确认「离线资源已就绪」。离线可查看本账号最近查看过的会话文字，继续编辑草稿；未缓存的会话与附件仍需联网。\n\n'
-                        '应用会在联网启动、回到前台和持续使用时自动检查更新，并在后台下载。新版本就绪后会提示；保存草稿并点击「更新应用」后才会重载，无需重新添加桌面图标。也可点击下方「检查更新」。\n\n'
-                        '离线草稿不会自动发送。联网后先同步会话，确认回复仍适用，再点击发送。首次登录、AI、附件上传、群聊和管理操作需要联网。\n\n'
-                        '会话快照最多保留 24 小时，本机草稿最多保留 7 天，并有容量限制；退出账号会清理本账号离线数据。浏览器或系统清理存储后，需重新联网准备。\n\n'
+                        '首次联网打开后，可在个人设置 → 外观与通知中确认「离线资源已就绪」。离线只能查看本账号最近查看过的会话文字；没发出去的消息不会保存本机草稿，未缓存的会话与附件仍需联网。\n\n'
+                        '应用会在联网启动、回到前台和持续使用时自动检查更新，并在后台下载。新版本就绪后会提示；点击「更新应用」后才会重载，无需重新添加桌面图标。也可点击下方「检查更新」。\n\n'
+                        '离线时不会保存草稿，也不会自动补发消息；联网后先同步会话，确认回复仍适用再发送。首次登录、AI、附件上传、群聊和管理操作需要联网。\n\n'
+                        '会话快照最多保留 24 小时，并有容量限制；退出账号会清理本账号离线数据。未发送的文字不会留在本机。浏览器或系统清理存储后，需重新联网准备。\n\n'
                         '后台通知需登录后在消息中心主动开启，并允许系统通知；iPhone / iPad 需 iOS 16.4 及以上和主屏幕应用。断网期间不能接收新消息。'))),
             actions: [
               TextButton(
@@ -295,7 +290,7 @@ class _PwaPanelState extends State<PwaPanel> {
                           builder: (c) => AlertDialog(
                                   title: const Text('清理本账号离线数据？'),
                                   content:
-                                      const Text('本机的会话快照和未同步草稿将删除，服务端消息不受影响。'),
+                                      const Text('本机的会话快照将删除，服务端消息不受影响。'),
                                   actions: [
                                     TextButton(
                                         onPressed: () =>
@@ -319,7 +314,7 @@ class _PwaPanelState extends State<PwaPanel> {
     if (!kIsWeb) return const SizedBox.shrink();
     final update = _status['update'] == true;
 
-    // 设置 /「更多」页入口：点一下检查；已有 waiting worker 则直接走确认更新。
+    // 手机端点一下检查，已有等待中的版本就确认更新。电脑版只检查，刷新页面后使用。
     if (widget.settingsOnly) {
       return ListTile(
         leading: Icon(
@@ -327,7 +322,9 @@ class _PwaPanelState extends State<PwaPanel> {
           color: update ? const Color(0xFF3263FF) : null,
         ),
         title: const Text('系统更新'),
-        subtitle: Text(update ? '新版本已就绪，请保存草稿后更新' : '检查并安装网页版新版本'),
+        subtitle: Text(_desktopSilent
+            ? (update ? '新版本已下载，刷新页面后使用' : '有新版本时刷新页面即可使用')
+            : (update ? '新版本已就绪，可立即更新' : '检查并安装网页版新版本')),
         trailing: update
             ? const Icon(Icons.circle, size: 10, color: Color(0xFF3263FF))
             : const Icon(Icons.chevron_right),
@@ -335,13 +332,14 @@ class _PwaPanelState extends State<PwaPanel> {
           await _action('checkUpdate');
           if (!mounted) return;
           setState(() => _status = pwaStatus());
-          if (_status['update'] == true) await _confirmUpdate();
+          if (_desktopSilent || _status['update'] != true) return;
+          await _confirmUpdate();
         },
       );
     }
 
     // 仅在有新版本就绪时才展示热更新条
-    if (!update || widget.hideUpdateBanner) {
+    if (!update || widget.hideUpdateBanner || _desktopSilent) {
       return const SizedBox.shrink();
     }
 
@@ -358,7 +356,7 @@ class _PwaPanelState extends State<PwaPanel> {
               const SizedBox(width: 8),
               const Expanded(
                 child: Text(
-                  '通语工作台新版本已就绪，保存草稿后即可立即应用',
+                  '通语工作台新版本已就绪，点击「立即更新」即可应用',
                   style: TextStyle(
                       fontSize: 13,
                       color: Color(0xFF0C1D40),

@@ -29,6 +29,10 @@ self.addEventListener('activate', event => event.waitUntil((async () => {
   await self.clients.claim();
 })()));
 self.addEventListener('message', event => {
+  if (event.data?.type === 'ACTIVATE_QUIET') {
+    // 电脑版刷新时只让新版本接管。不广播重载，已打开的页面继续用到用户自己刷新。
+    event.waitUntil(self.skipWaiting());
+  }
   if (event.data?.type === 'ACTIVATE_UPDATE') {
     event.waitUntil((async () => {
       // 先接管再让页面刷新。先刷新时，新页面起来这份更新还在 waiting，提示会再出现。

@@ -1,6 +1,11 @@
 // ignore_for_file: avoid_web_libraries_in_flutter
 import 'dart:html' as html;
-import 'dart:js_util' as js;
+import 'dart:js_interop';
+
+import 'package:web/web.dart' as web;
+
+@JS('tongyuSyncTheme')
+external JSFunction? get _tongyuSyncTheme;
 
 String _hex(int rgb) =>
     '#${(rgb & 0xffffff).toRadixString(16).padLeft(6, '0')}';
@@ -12,8 +17,10 @@ void syncBrowserTheme(int rgb, bool dark, {int? topRgb, int? bottomRgb}) {
   final top = _hex(topRgb ?? rgb);
   // 没有贴底栏时传空串，网页不要用页面底色去盖 Home 条。
   final bottom = bottomRgb == null ? '' : _hex(bottomRgb);
-  if (js.hasProperty(html.window, 'tongyuSyncTheme')) {
-    js.callMethod(html.window, 'tongyuSyncTheme', [color, dark, top, bottom]);
+  final sync = _tongyuSyncTheme;
+  if (sync != null) {
+    sync.callAsFunction(
+        web.window, color.toJS, dark.toJS, top.toJS, bottom.toJS);
   }
 }
 

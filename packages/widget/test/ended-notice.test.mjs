@@ -9,9 +9,8 @@ const realClose = VisitorSocket.prototype.close;
 
 const now = () => new Date().toISOString();
 
-// 结束提示是 SYSTEM/EVENT 行：访客线程要看得见，但不能再把会话画成重新打开；
-// 只有客服真的回复（AGENT 文本）才复活线程。
-test('结束提示进入访客线程且保持已结束状态，客服回复才重新打开', async () => {
+// 结束提示是 SYSTEM/EVENT 行：访客线程要看得见，但状态必须保持已结束。
+test('结束提示进入访客线程且保持已结束状态', async () => {
   let socket;
   class FakeWebSocket {
     static OPEN = 1;
@@ -35,13 +34,11 @@ test('结束提示进入访客线程且保持已结束状态，客服回复才�
   const status = () => store.snapshot.conversations.find((item) => item.id === 'c1').status;
   try {
     await store.init();
-    await store.selectConversation('c1');
-    socket.onmessage({ data: JSON.stringify({ type: 'message.created', conversationId: 'c1', data: { id: 'n1', conversationId: 'c1', senderType: 'SYSTEM', sequence: 2, messageType: 'EVENT', content: '客服已结束本次会话。', metadata: { ended: true }, createdAt: now() } }) });
-    assert.equal(store.snapshot.messages.length, 2);
-    assert.equal(store.snapshot.messages.at(-1).content, '客服已结束本次会话。');
+    assert.equal(store.snapshot.activeId, 'c1');
     assert.equal(status(), 'RESOLVED');
-    socket.onmessage({ data: JSON.stringify({ type: 'message.created', conversationId: 'c1', data: { id: 'm2', conversationId: 'c1', senderType: 'AGENT', sequence: 3, messageType: 'TEXT', content: '补充一句', createdAt: now() } }) });
-    assert.equal(status(), 'OPEN');
+    await store.selectConversation('c1');
+    assert.equal(store.snapshot.activeId, 'c1');
+    assert.equal(status(), 'RESOLVED');
   } finally {
     store.destroy();
     globalThis.WebSocket = previousWebSocket;

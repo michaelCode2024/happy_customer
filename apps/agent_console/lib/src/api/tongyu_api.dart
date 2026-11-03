@@ -201,6 +201,11 @@ class TongYuApi {
   Future<Map<String, dynamic>> entitlements() =>
       _send('GET', '/api/v1/console/entitlements');
 
+  /// 换一个 /docs 作用域的短期 Cookie 并拿回文档地址。
+  /// 不公开接口文档的实例靠这个 Cookie 放行，所以每次打开文档前都要重新取一次。
+  Future<Map<String, dynamic>> docsAccess() =>
+      _send('POST', '/api/v1/console/docs-access');
+
   Future<Map<String, dynamic>> adminGet(String resource) =>
       _send('GET', '/api/v1/admin/$resource');
 
@@ -307,7 +312,7 @@ class TongYuApi {
     );
   }
 
-  /// 上报工作台是否正被看着。服务端据此跳过推送，避免盯屏时手机重复提醒。
+  /// 上报工作台是否正被看着。推送不因人在看工作台而延后，页面声音和手机一起响。
   Future<void> reportActivity(bool visible) async {
     await _send(
       'POST',
@@ -526,43 +531,25 @@ class TongYuApi {
     return asString((await draftData(conversationId))['content']);
   }
 
+  /// 只读服务端草稿。本机不保留副本，避免离线缓存挡住后续更新。
   Future<Map<String, dynamic>> draftData(String conversationId) async {
-    final local = await offlineStore?.read('draft/$conversationId');
-    if (local != null &&
-        (local['pending'] == true || local['localPrivate'] == true))
-      return local;
-    try {
-      return await _send(
-          'GET', '/api/v1/console/conversations/$conversationId/draft');
-    } on ApiException catch (failure) {
-      if (failure.isNetworkFailure && local != null) return local;
-      rethrow;
-    }
+    return await _send(
+        'GET', '/api/v1/console/conversations/$conversationId/draft');
   }
 
-  /// 先落本地，再同步服务端草稿。离线仅保存草稿，绝不自动补发客户消息。
+  /// 只把草稿更新到服务端。网络失败不落本机，也不补发消息。
   Future<void> saveDraft(String conversationId, String content,
-      {String? assistInteractionId, bool localPrivate = false}) async {
+      {String? assistInteractionId}) async {
     final data = <String, dynamic>{
       'content': content,
       if (assistInteractionId != null)
         'assistInteractionId': assistInteractionId
     };
-    await offlineStore?.write('draft/$conversationId',
-        {...data, 'pending': true, 'localPrivate': localPrivate});
-    // 内部备注草稿只留在本机，避免其他设备按公开回复草稿恢复。
-    if (localPrivate) return;
     try {
       await _send('PUT', '/api/v1/console/conversations/$conversationId/draft',
           body: data);
-      // 请求期间用户可能继续输入；旧请求不能覆盖新的本地草稿。
-      final current = await offlineStore?.read('draft/$conversationId');
-      if (current?['content'] == content &&
-          current?['assistInteractionId'] == assistInteractionId) {
-        await offlineStore?.write('draft/$conversationId',
-            {...data, 'pending': false, 'localPrivate': localPrivate});
-      }
     } on ApiException catch (failure) {
+      // 草稿是便利功能：网络失败不抛到界面，也不在本机留副本。
       if (!failure.isNetworkFailure) rethrow;
     }
   }
@@ -969,7 +956,7 @@ class TongYuApi {
     try {
       if (browserOffline) {
         throw const ApiException(
-            statusCode: 0, code: 'OFFLINE', message: '当前离线，请联网后重试；文字草稿会保存在本机');
+            statusCode: 0, code: 'OFFLINE', message: '当前离线，请联网后重试');
       }
       final data = await _sendOnline(method, path,
           body: body, query: query, origin: origin, authorized: authorized);

@@ -184,7 +184,9 @@ class MobileTopAppBar extends StatelessWidget implements PreferredSizeWidget {
               ),
             ),
             // 声音开关
-            messageSoundButton(api: session.api),
+            messageSoundButton(
+                api: session.api,
+                onTestInAppPush: workbench.previewInAppPush),
             // 通知中心
             NotificationCenter(
               api: session.api,

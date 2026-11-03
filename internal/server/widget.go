@@ -56,7 +56,10 @@ type attachmentView struct {
 }
 
 type conversationView struct {
-	AcceptedAt          *time.Time `json:"acceptedAt,omitempty"`
+	AcceptedAt *time.Time `json:"acceptedAt,omitempty"`
+	// HandoffRequestedAt 标记访客已经要求人工接待。配合 AcceptedAt 为空，
+	// 访客端才能显示「正在为您转接客服」——此前这段时间在界面上完全是空白。
+	HandoffRequestedAt  *time.Time `json:"handoffRequestedAt,omitempty"`
 	AssignmentExpiresAt *time.Time `json:"assignmentExpiresAt,omitempty"`
 	ID                  uuid.UUID  `json:"id"`
 	TenantID            uuid.UUID  `json:"tenantId"`
@@ -79,6 +82,8 @@ type conversationView struct {
 	Tags                []string   `json:"tags,omitempty"`
 	CreatedAt           time.Time  `json:"createdAt"`
 	UpdatedAt           time.Time  `json:"updatedAt"`
+	// Rating 只在访客拉会话时填上。刷新后组件据此知道已经评过，不再把星星重新画出来。
+	Rating *int `json:"rating,omitempty"`
 }
 
 func (a *API) registerWidget(mux *http.ServeMux) {
@@ -263,6 +268,13 @@ func (a *API) createConversation(w http.ResponseWriter, r *http.Request, p auth.
 		return
 	}
 
+	// 纯进线（未带首条消息）时，待接待坐席关掉标签页也要能收到推送；
+	// 带首条消息的进线由 MESSAGE 通知覆盖，这里不重复发。
+	if in.Content == nil || strings.TrimSpace(*in.Content) == "" {
+		a.enqueueReceptionAlert(r.Context(), p.TenantID, conversationID)
+		a.nudgePush()
+	}
+
 	var view conversationView
 	if err := a.queryConversation(r.Context(), conversationID, &view); err != nil {
 		fail(w, 500, "创建会话失败")
@@ -294,6 +306,7 @@ func (a *API) listConversations(w http.ResponseWriter, r *http.Request, p auth.P
 		       coalesce(ag.display_name,''), c.priority, c.source, c.last_sequence,
 		       coalesce(c.last_message_preview,''), c.last_message_at, c.agent_unread, c.visitor_unread,
 		       coalesce(v.display_name,''), c.created_at, c.updated_at, c.accepted_at, c.assignment_expires_at,
+		       c.handoff_requested_at,
 		       c.closed_at, i.reopen_grace_minutes
 		  from conversation c
 		  join visitor v on v.id = c.visitor_id
@@ -316,6 +329,7 @@ func (a *API) listConversations(w http.ResponseWriter, r *http.Request, p auth.P
 		}
 		items = append(items, item)
 	}
+	a.attachRatings(r.Context(), items)
 	var online int
 	var aiEnabled bool
 	var welcome, offline string
@@ -343,7 +357,9 @@ func (a *API) getConversation(w http.ResponseWriter, r *http.Request, p auth.Pri
 		fail(w, 404, "会话不存在")
 		return
 	}
-	respond(w, 200, view)
+	one := []conversationView{view}
+	a.attachRatings(r.Context(), one)
+	respond(w, 200, one[0])
 }
 
 func (a *API) listMessages(w http.ResponseWriter, r *http.Request, p auth.Principal) {
@@ -529,20 +545,75 @@ func (a *API) rateConversation(w http.ResponseWriter, r *http.Request, p auth.Pr
 		fail(w, 400, "评分必须是 1 到 5")
 		return
 	}
-	if _, err := a.db.Exec(r.Context(), `
+	comment := strings.TrimSpace(in.Comment)
+	// 同一会话重复提交只改原记录。日报按第一次计入，避免刷新后再点一次把平均分抬高。
+	inserted, err := a.db.Exec(r.Context(), `
 		insert into conversation_rating(conversation_id, tenant_id, score, comment)
 		values($1,$2,$3,$4)
-		on conflict (conversation_id) do update set score = excluded.score, comment = excluded.comment, created_at = now()`,
-		id, p.TenantID, in.Score, nullable(in.Comment)); err != nil {
+		on conflict (conversation_id) do nothing`,
+		id, p.TenantID, in.Score, nullable(comment))
+	if err != nil {
 		fail(w, 500, "提交评价失败")
 		return
 	}
-	a.bumpDailyStat(r.Context(), p.TenantID, "rating", in.Score)
+	first := inserted.RowsAffected() == 1
+	if !first {
+		if _, err := a.db.Exec(r.Context(), `
+			update conversation_rating
+			   set score = $2, comment = $3, created_at = now()
+			 where conversation_id = $1`,
+			id, in.Score, nullable(comment)); err != nil {
+			fail(w, 500, "提交评价失败")
+			return
+		}
+	}
+	ratedAt := time.Now().UTC()
+	_ = a.db.QueryRow(r.Context(), `select created_at from conversation_rating where conversation_id=$1`, id).Scan(&ratedAt)
+	if first {
+		a.bumpDailyStat(r.Context(), p.TenantID, "rating", in.Score)
+	}
+	payload := map[string]any{"score": in.Score, "comment": comment, "createdAt": ratedAt}
 	a.publish(r.Context(), a.conversationChannels(r.Context(), id), realtime.Event{
 		Type: "conversation.rated", TenantID: p.TenantID.String(), ConversationID: id.String(),
-		Data: map[string]any{"score": in.Score},
+		Data: payload,
 	})
-	respond(w, 201, map[string]any{"status": "OK"})
+	a.notifyWebhook(r.Context(), p.TenantID, webhook.EventRatingCreated, map[string]any{
+		"conversationId": id, "visitorId": p.VisitorID, "score": in.Score, "comment": comment, "createdAt": ratedAt,
+	})
+	respond(w, 201, map[string]any{"status": "OK", "score": in.Score, "createdAt": ratedAt})
+}
+
+// attachRatings 给访客会话补上已有评分。坐席列表仍走原来的查询，不带这个字段。
+func (a *API) attachRatings(ctx handlerContext, items []conversationView) {
+	if len(items) == 0 {
+		return
+	}
+	ids := make([]uuid.UUID, len(items))
+	for i := range items {
+		ids[i] = items[i].ID
+	}
+	rows, err := a.db.Query(ctx, `select conversation_id, score from conversation_rating where conversation_id = any($1)`, ids)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	scores := make(map[uuid.UUID]int, len(items))
+	for rows.Next() {
+		var id uuid.UUID
+		var score int
+		if rows.Scan(&id, &score) != nil {
+			return
+		}
+		scores[id] = score
+	}
+	for i := range items {
+		score, ok := scores[items[i].ID]
+		if !ok {
+			continue
+		}
+		value := score
+		items[i].Rating = &value
+	}
 }
 
 // widgetHandoff lets a visitor ask a human to take over from the AI. It mirrors

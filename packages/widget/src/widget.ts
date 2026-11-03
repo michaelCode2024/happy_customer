@@ -39,6 +39,7 @@ export class TongYuWidgetElement extends HTMLElement {
       onFiles: (files) => void this.#store?.sendFiles(files),
       onRetry: (localId) => void this.#store?.retry(localId),
       onSelectConversation: (id) => void this.#store?.selectConversation(id),
+      onBeginNew: () => void this.#store?.beginNewConsultation(),
       onBack: () => this.#backToList(),
       onRate: (score) => void this.#store?.rate(score),
       onTyping: () => this.#store?.notifyTyping(),
@@ -176,6 +177,7 @@ export class TongYuWidgetElement extends HTMLElement {
         }
       };
       window.addEventListener('message', this.#parentListener);
+      this.#store?.emitHost({ type: 'viewport-ready' });
       if (typeof ResizeObserver !== 'undefined') {
         this.#resizeObserver = new ResizeObserver(() => {
           const height = Math.ceil(document.documentElement?.scrollHeight || document.body?.scrollHeight || 0);
@@ -187,7 +189,13 @@ export class TongYuWidgetElement extends HTMLElement {
   }
 
   #handleHostCommand(payload: string): void {
-    let parsed: { type?: string; content?: string; source?: string; identityToken?: string } = {};
+    let parsed: {
+      type?: string;
+      content?: string;
+      source?: string;
+      identityToken?: string;
+      keyboardOpen?: boolean;
+    } = {};
     try {
       parsed = typeof payload === 'string'
         ? JSON.parse(payload)
@@ -200,6 +208,11 @@ export class TongYuWidgetElement extends HTMLElement {
       return;
     }
     switch (parsed.type) {
+      case 'host-viewport':
+        if (typeof parsed.keyboardOpen === 'boolean') {
+          this.#view?.setHostViewport(parsed.keyboardOpen);
+        }
+        break;
       case 'authenticate':
         // 身份票据通过指定来源宿主传入，不进入 URL、浏览器历史或引荐日志。
         if (typeof parsed.identityToken === 'string' && parsed.identityToken && this.#options?.parentOrigin && this.#options.parentOrigin !== '*') {
@@ -228,6 +241,7 @@ export class TongYuWidgetElement extends HTMLElement {
   }
 
   #teardown(): void {
+    this.#view?.disposeViewport();
     this.#unsubscribe?.();
     this.#unsubscribe = undefined;
     if (this.#parentListener) {

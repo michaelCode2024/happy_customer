@@ -136,14 +136,21 @@ func TestConversationOwnershipIsolation(t *testing.T) {
 	}
 	// Simulate an existing socket subscription surviving a transfer.
 	exec(`update conversation set assignee_id=$2 where id=$1`, ids[0], second)
-	if api.agentConversationAccess(ctx, p1, ids[0]) || !api.agentConversationAccess(ctx, p2, ids[0]) {
-		t.Fatal("transfer did not revoke access")
+	exec(`insert into conversation_participant(conversation_id, agent_id) values($1,$2) on conflict do nothing`, ids[0], first)
+	if !api.agentConversationAccess(ctx, p1, ids[0]) || !api.agentConversationAccess(ctx, p2, ids[0]) {
+		t.Fatal("former assignee lost read access after transfer")
 	}
-	if strings.Contains(string(api.filterConsoleEvent(ctx, p1, payload)), "isolation-secret") {
-		t.Fatal("stale subscription leaked")
+	if !api.agentCanHandle(ctx, p2, ids[0]) || api.agentCanHandle(ctx, p1, ids[0]) {
+		t.Fatal("former assignee can still handle the conversation")
 	}
-	if request(api.consoleMessages, p1, ids[0], "/").Code != 404 {
-		t.Fatal("old owner can read after transfer")
+	if request(api.consoleMessages, p1, ids[0], "/").Code != 200 {
+		t.Fatal("former assignee cannot read after transfer")
 	}
-	t.Log("PASS: bidirectional list/detail/messages/draft/search/visitor/realtime/transfer isolation; supervisor and reception preserved")
+	if request(api.consoleSend, p1, ids[0], "/").Code != 403 {
+		t.Fatal("former assignee can still reply after transfer")
+	}
+	if !strings.Contains(string(api.filterConsoleEvent(ctx, p1, payload)), "isolation-secret") {
+		t.Fatal("former assignee realtime dropped")
+	}
+	t.Log("PASS: bidirectional list/detail/messages/draft/search/visitor/realtime isolation; former assignee can read but not reply")
 }

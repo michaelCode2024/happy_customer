@@ -487,4 +487,66 @@ void main() {
     expect(find.text('检测接入'), findsOneWidget);
     expect(find.text('已接入'), findsNothing);
   });
+
+  /// 接口文档入口：装在「接入渠道」里（主管配完安装代码就能看见），
+  /// 点开之前必须先向服务端换 Cookie——不公开文档的实例靠它放行。
+  testWidgets('api docs entry sits on the channel tab and asks the server first',
+      (tester) async {
+    var docsRequests = 0;
+    final api = TongYuApi(
+      server: 'https://chat.example.com',
+      client: MockClient((request) async {
+        final path = request.url.path;
+        if (path == '/api/v1/console/docs-access') {
+          docsRequests++;
+          return http.Response('{"url":"/docs","expiresIn":43200}', 200);
+        }
+        final data = switch (path) {
+          '/api/v1/admin/inboxes' => {
+              'items': [
+                {'id': 'one', 'name': '官网'}
+              ]
+            },
+          '/api/v1/admin/inboxes/one/snippet' => {
+              'inboxKey': 'site-one',
+              'script': '<script>one</script>',
+              'iframe': 'https://chat.example.com/h5/site-one',
+              'iframeHtml':
+                  '<iframe src="https://chat.example.com/h5/site-one"></iframe>',
+              'openApiBase': 'https://chat.example.com/api/v1/open',
+            },
+          '/api/v1/admin/api-keys' => {'items': []},
+          '/api/v1/admin/webhooks' => {'items': [], 'availableEvents': []},
+          '/api/v1/console/entitlements' => {
+              'plan': 'ENTERPRISE',
+              'features': {
+                'identity': true,
+                'integrations': true,
+                'groups': true,
+              },
+            },
+          _ => throw StateError('unexpected $path'),
+        };
+        return http.Response.bytes(utf8.encode(jsonEncode(data)), 200);
+      }),
+    )..token = 'test-session';
+    addTearDown(api.close);
+    await tester.pumpWidget(MaterialApp(home: IntegrationPage(api: api)));
+    await settleRequests(tester);
+
+    // 默认就落在「接入渠道」，不用切 tab 就能看到入口。
+    expect(find.text('接入渠道'), findsOneWidget);
+    await Scrollable.ensureVisible(tester.element(find.text('开放接口参考')),
+        alignment: 0.5);
+    await tester.pumpAndSettle();
+    expect(find.text('开放接口参考'), findsOneWidget);
+    expect(find.text('打开接口文档'), findsOneWidget);
+    expect(find.text('快速开始'), findsOneWidget);
+    expect(find.text('OpenAPI 规范'), findsOneWidget);
+
+    await tester.tap(find.text('打开接口文档'));
+    await settleRequests(tester);
+    expect(docsRequests, 1);
+    expect(tester.takeException(), isNull);
+  });
 }

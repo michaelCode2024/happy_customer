@@ -80,6 +80,7 @@ export interface Conversation {
   status: ConversationStatus;
   assigneeId?: string;
   acceptedAt?: string;
+  handoffRequestedAt?: string;
   assignmentExpiresAt?: string;
   assigneeName?: string;
   priority: number;
@@ -95,6 +96,8 @@ export interface Conversation {
   updatedAt: string;
   closedAt?: string;
   reopenGraceMinutes?: number | null;
+  /** 已结束会话的评分。有值表示已经评过。 */
+  rating?: number;
 }
 
 export interface ChannelItem { id: string; title: string; description?: string; imageUrl?: string; action: "REPLY" | "LINK" | "HANDOFF"; value: string; }

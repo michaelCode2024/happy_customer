@@ -11,7 +11,17 @@ import (
 
 // Ownership is an authorization boundary, independent of UI queue filters.
 // Unassigned conversations remain available to members of their reception inbox.
+// Former assignees stay on conversation_participant so they can read after a transfer.
 func conversationVisibility(alias, agent string, supervisor bool) string {
+	if supervisor {
+		return agent + "::uuid is not null"
+	}
+	return "(" + conversationDuty(alias, agent, false) + " or exists (select 1 from conversation_participant scope_cp where scope_cp.conversation_id = " + alias + ".id and scope_cp.agent_id = " + agent + "))"
+}
+
+// conversationDuty is the work queue: current assignee, or an unassigned thread in the agent's inbox.
+// Read access is wider; unread badges and replies stay on this narrower set.
+func conversationDuty(alias, agent string, supervisor bool) string {
 	if supervisor {
 		return agent + "::uuid is not null"
 	}
@@ -21,6 +31,28 @@ func conversationVisibility(alias, agent string, supervisor bool) string {
 func (a *API) agentConversationAccess(ctx context.Context, p auth.Principal, id uuid.UUID) bool {
 	var allowed bool
 	err := a.db.QueryRow(ctx, `select exists(select 1 from conversation c where c.id=$1 and c.tenant_id=$2 and `+conversationVisibility("c", "$3", auth.CanViewReports(p.Role))+`)`, id, p.TenantID, p.AgentID).Scan(&allowed)
+	return err == nil && allowed
+}
+
+// agentCanHandle is reply, transfer, and resolve. A former assignee can open the thread and cannot act on it.
+func (a *API) agentCanHandle(ctx context.Context, p auth.Principal, id uuid.UUID) bool {
+	if !a.agentConversationAccess(ctx, p, id) {
+		return false
+	}
+	if auth.CanViewReports(p.Role) {
+		return true
+	}
+	var allowed bool
+	err := a.db.QueryRow(ctx, `select exists(select 1 from conversation c where c.id=$1 and c.tenant_id=$2 and `+conversationDuty("c", "$3", false)+`)`, id, p.TenantID, p.AgentID).Scan(&allowed)
+	return err == nil && allowed
+}
+
+func (a *API) agentCanHandleVisitor(ctx context.Context, p auth.Principal, visitorID uuid.UUID) bool {
+	if auth.CanViewReports(p.Role) {
+		return true
+	}
+	var allowed bool
+	err := a.db.QueryRow(ctx, `select exists(select 1 from conversation c where c.visitor_id=$1 and c.tenant_id=$2 and `+conversationDuty("c", "$3", false)+`)`, visitorID, p.TenantID, p.AgentID).Scan(&allowed)
 	return err == nil && allowed
 }
 

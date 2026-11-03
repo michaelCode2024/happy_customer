@@ -85,6 +85,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
     expect(find.text('含已解决'), findsNothing);
+    expect(find.text('客户消息'), findsNothing);
     expect(find.text('已结束'), findsWidgets);
     expect(find.byTooltip('含已解决'), findsNothing);
   });

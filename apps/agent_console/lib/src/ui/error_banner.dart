@@ -57,11 +57,15 @@ class ErrorBanner extends StatelessWidget {
 
 /// Copies a value to the clipboard and confirms it. Used for the ids and
 /// generated passwords an operator has to hand to someone else.
+///
+/// [onCopied] 让会话内的小组件（气泡、附件卡）把确认改成本地小提示，不必再弹
+/// 底部黑条；不传时仍用 SnackBar 作为默认反馈。
 Future<void> copyToClipboard(
   BuildContext context,
   String value,
-  String label,
-) async {
+  String label, {
+  VoidCallback? onCopied,
+}) async {
   try {
     await Clipboard.setData(ClipboardData(text: value));
   } catch (_) {
@@ -91,6 +95,10 @@ Future<void> copyToClipboard(
     return;
   }
   if (!context.mounted) {
+    return;
+  }
+  if (onCopied != null) {
+    onCopied();
     return;
   }
   ScaffoldMessenger.of(context).showSnackBar(

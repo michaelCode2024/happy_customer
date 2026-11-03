@@ -1,17 +1,21 @@
 import 'dart:async';
 import 'dart:html' as html;
-import 'dart:js_util' as js_util;
+import 'dart:js_interop';
 
 import 'package:flutter/material.dart';
 import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
 import 'package:tongyu_agent_console/src/util/message_sound_card.dart';
 import 'package:tongyu_agent_console/src/util/push_bridge_web.dart';
+import 'package:web/web.dart' as web;
 
-/// Flutter 3.24 的 dart:html Document 未声明 hasFocus，走 JS 互操作；失败则只看可见性。
+@JS('tongyuClaimMessageAlert')
+external JSPromise<JSBoolean> _claimMessageAlert(JSString name);
+
+/// dart:html 的 Document 没有 hasFocus；查询失败时只看可见性。
 bool pageVisible() {
   if (html.document.visibilityState != 'visible') return false;
   try {
-    return js_util.callMethod(html.document, 'hasFocus', []) as bool? ?? true;
+    return web.document.hasFocus();
   } catch (_) {
     return true;
   }
@@ -139,8 +143,23 @@ Future<void> _playSound() async {
     if (!completed.isCompleted) completed.complete();
   }
 
+  var spoke = false;
+  var fellBack = false;
+  Future<void> fallBack() async {
+    if (fellBack ||
+        spoke ||
+        generation != _speechGeneration ||
+        !_soundEnabled.value) {
+      return;
+    }
+    fellBack = true;
+    synthesis.cancel();
+    await _playTone();
+  }
+
   utterance.onStart.listen((_) {
     if (generation != _speechGeneration) return;
+    spoke = true;
     _ready = true;
     _pendingSound = false;
     _audio.dataset['playback'] = 'speaking';
@@ -151,19 +170,23 @@ Future<void> _playSound() async {
     finish();
   });
   utterance.onError.listen((_) {
-    if (generation == _speechGeneration && _soundEnabled.value) {
-      unawaited(_playTone());
-    }
+    unawaited(fallBack());
     finish();
   });
   try {
     synthesis.speak(utterance);
-    await completed.future.timeout(const Duration(seconds: 12));
-  } catch (_) {
-    if (generation == _speechGeneration && _soundEnabled.value) {
-      synthesis.cancel();
-      await _playTone();
+    // 语音迟迟不开口时改响铃声。有的电脑没有中文语音，会一直静音。
+    await Future.any<void>([
+      completed.future,
+      Future<void>.delayed(const Duration(milliseconds: 800)),
+    ]);
+    if (!spoke) {
+      await fallBack();
+    } else {
+      await completed.future.timeout(const Duration(seconds: 12));
     }
+  } catch (_) {
+    await fallBack();
   } finally {
     if (generation == _speechGeneration) _playRequested = false;
   }
@@ -283,22 +306,32 @@ void rememberDeskAlerts() {
   _publishDeskAlerts();
 }
 
-void messageAlert(String name, String body, {String senderName = ''}) {
-  unawaited(_dispatchMessageAlert(name, body, senderName: senderName));
+void messageAlert(String name, String body,
+    {String senderName = '',
+    bool foregroundNotice = false,
+    bool suppressSound = false}) {
+  unawaited(_dispatchMessageAlert(name, body,
+      senderName: senderName,
+      foregroundNotice: foregroundNotice,
+      suppressSound: suppressSound));
 }
 
+bool _desktopNoticeOn() =>
+    html.Notification.supported &&
+    html.Notification.permission == 'granted' &&
+    html.window.localStorage['tongyu.desktopAlerts'] != 'off';
+
 Future<void> _dispatchMessageAlert(String name, String body,
-    {String senderName = ''}) async {
+    {String senderName = '',
+    bool foregroundNotice = false,
+    bool suppressSound = false}) async {
   if (_quietUntil?.isAfter(DateTime.now()) == true) return;
   initializeMessageAlerts();
   if (name.isNotEmpty) {
-    if (js_util.hasProperty(html.window, 'tongyuClaimMessageAlert')) {
-      try {
-        final claimed = await js_util.promiseToFuture<bool>(
-            js_util.callMethod(html.window, 'tongyuClaimMessageAlert', [name]));
-        if (!claimed) return;
-      } catch (_) {/* 老页面缺少桥接时沿用原去重。 */}
-    }
+    try {
+      final claimed = (await _claimMessageAlert(name.toJS).toDart).toDart;
+      if (!claimed) return;
+    } catch (_) {/* 老页面缺少桥接时沿用原去重。 */}
     if (html.window.localStorage['tongyu.lastMessageAlert'] == name) return;
     html.window.localStorage['tongyu.lastMessageAlert'] = name;
   }
@@ -306,15 +339,12 @@ Future<void> _dispatchMessageAlert(String name, String body,
   if (name.isNotEmpty && DateTime.now().difference(_last).inMilliseconds < 1500)
     return;
   _last = DateTime.now();
-  if (_soundEnabled.value) {
+  if (_soundEnabled.value && !suppressSound) {
     _pendingSender = senderName;
     _pendingSound = true;
     if (!_priming) unawaited(_playSound());
   }
-  if (!pageVisible() &&
-      html.Notification.supported &&
-      html.Notification.permission == 'granted' &&
-      html.window.localStorage['tongyu.desktopAlerts'] == 'on') {
+  if ((foregroundNotice || !pageVisible()) && _desktopNoticeOn()) {
     // 页面还在、只是切到后台时，系统通知和手机推送用同一套：谁发的、发了什么。
     final sender = senderName.trim().isEmpty ? '客户' : senderName.trim();
     final text = body.trim().isEmpty ? '发来一条消息' : body.trim();
@@ -322,7 +352,8 @@ Future<void> _dispatchMessageAlert(String name, String body,
   }
 }
 
-Widget messageSoundButton({TongYuApi? api}) => ValueListenableBuilder<bool>(
+Widget messageSoundButton({TongYuApi? api, VoidCallback? onTestInAppPush}) =>
+    ValueListenableBuilder<bool>(
       valueListenable: _soundEnabled,
       builder: (context, enabled, _) => IconButton(
         tooltip: enabled
@@ -338,7 +369,15 @@ Widget messageSoundButton({TongYuApi? api}) => ValueListenableBuilder<bool>(
                   content: SizedBox(
                       width: 430,
                       child: SingleChildScrollView(
-                          child: messageAlertSettings(api: api))),
+                          child: messageAlertSettings(
+                              api: api,
+                              onTestInAppPush: onTestInAppPush == null
+                                  ? null
+                                  : () {
+                                      // 浮层在工作台 body（对话框之下），先关弹窗再弹卡片。
+                                      Navigator.pop(ctx);
+                                      onTestInAppPush();
+                                    }))),
                   actions: [
                     TextButton(
                         onPressed: () => Navigator.pop(ctx),
@@ -348,11 +387,13 @@ Widget messageSoundButton({TongYuApi? api}) => ValueListenableBuilder<bool>(
       ),
     );
 
-Widget messageAlertSettings({TongYuApi? api}) => _AlertSettings(api: api);
+Widget messageAlertSettings({TongYuApi? api, VoidCallback? onTestInAppPush}) =>
+    _AlertSettings(api: api, onTestInAppPush: onTestInAppPush);
 
 class _AlertSettings extends StatefulWidget {
-  const _AlertSettings({this.api});
+  const _AlertSettings({this.api, this.onTestInAppPush});
   final TongYuApi? api;
+  final VoidCallback? onTestInAppPush;
   @override
   State<_AlertSettings> createState() => _AlertSettingsState();
 }
@@ -387,6 +428,7 @@ class _AlertSettingsState extends State<_AlertSettings> {
                   setState(() => _soundStatus =
                       _ready ? '试听已触发，请确认是否听到声音' : '浏览器暂未允许声音，请点击页面后重试');
               },
+              onTestInAppPush: widget.onTestInAppPush,
               status: _soundStatus,
             ),
             const SizedBox(height: 12),

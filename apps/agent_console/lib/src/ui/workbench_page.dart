@@ -10,6 +10,7 @@ import 'package:tongyu_agent_console/src/util/group_window_stub.dart'
     if (dart.library.html) 'package:tongyu_agent_console/src/util/group_window_web.dart';
 import 'package:tongyu_agent_console/src/ui/groups_page.dart';
 import 'notification_center.dart';
+import 'in_app_push_overlay.dart';
 import '../util/push_bridge_stub.dart'
     if (dart.library.html) '../util/push_bridge_web.dart';
 import '../util/website.dart';
@@ -159,6 +160,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     _workbench = WorkbenchController(
       api: widget.session.api,
       selfId: widget.session.agent?.id ?? '',
+      seesTeam: widget.session.agent?.role == 'SUPERVISOR',
       autoAcceptInboxIds: _autoAcceptInboxIdsOf(widget.session),
     );
     _picker = widget.picker ?? ImageAttachmentPicker();
@@ -200,6 +202,28 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
   void _openNotificationConversation(String id) {
     setState(() => _section = WorkbenchSection.conversations);
     unawaited(_workbench.select(id));
+  }
+
+  /// 「查看待接待」的统一入口：切到客户会话页、窄屏让出列表位，并给一次即时反馈。
+  /// 队列内容常和「全部」一模一样，只换 tab 高亮的话，点下去像什么都没发生。
+  void _openReceptionQueue({double? width}) {
+    final waiting = _workbench.receptionWaiting;
+    setState(() => _section = WorkbenchSection.conversations);
+    final effectiveWidth = width ?? MediaQuery.sizeOf(context).width;
+    if (effectiveWidth < 980) _workbench.clearSelection();
+    unawaited(_workbench.showReceptionQueue());
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(waiting > 0
+            ? '已切到待接待队列 · $waiting 位客户在等待'
+            : '待接待队列已清空'),
+        duration: const Duration(milliseconds: 1600),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      ));
   }
 
   final Set<String> noticedCalls = {};
@@ -722,6 +746,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
       case WorkbenchSection.settings:
         return SettingsPage(
           session: widget.session,
+          workbench: _workbench,
           themeMode: widget.themeMode,
           onThemeModeChanged: widget.onThemeModeChanged,
         );
@@ -781,11 +806,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
             // 传递实际剩余宽度，避免展开侧栏后仍按整屏宽度强行显示客户资料。
             final content = ReceptionGuidance(
               workbench: _workbench,
-              onShowQueue: () {
-                setState(() => _section = WorkbenchSection.conversations);
-                if (width < 980) _workbench.clearSelection();
-                unawaited(_workbench.showReceptionQueue());
-              },
+              onShowQueue: () => _openReceptionQueue(width: width),
               onOpen: (conversation) {
                 setState(() => _section = WorkbenchSection.conversations);
                 _workbench.dismissReceptionNotice();
@@ -831,7 +852,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                     hostedThread || _section != WorkbenchSection.conversations
                         ? null
                         : _compactAppBar(agent),
-                body: body,
+                body: _withPushOverlay(body),
                 bottomNavigationBar: hostedThread
                     ? null
                     : MobileBottomNavBar(
@@ -851,7 +872,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
               );
             }
             return Scaffold(
-              body: Row(children: [
+              body: _withPushOverlay(Row(children: [
                 ListenableBuilder(
                     listenable: _workbench,
                     builder: (context, _) => ConsoleIconRail(
@@ -937,18 +958,41 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                             await _workbench.select(id);
                           },
                         ),
-                        messageSoundButton(api: widget.session.api),
+                        messageSoundButton(
+                            api: widget.session.api,
+                            onTestInAppPush: _workbench.previewInAppPush),
                         const SizedBox(width: 8),
                         Text(agent?.displayName ?? '',
                             style: const TextStyle(fontSize: 12))
                       ])),
                   Expanded(child: body),
                 ])),
-              ]),
+              ])),
             );
           },
         );
       },
+    );
+  }
+
+  /// 把页面主体包一层 Stack，让站内推送浮层能浮在最上层。
+  /// 浮层只占用右上角卡片区域，其余空白不拦截点击。
+  Widget _withPushOverlay(Widget child) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        child,
+        Positioned.fill(
+          child: InAppPushOverlay(
+            manager: _workbench.inAppPush,
+            onOpen: (conversationId) {
+              if (!mounted || conversationId.isEmpty) return;
+              setState(() => _section = WorkbenchSection.conversations);
+              unawaited(_workbench.select(conversationId));
+            },
+          ),
+        ),
+      ],
     );
   }
 
@@ -1008,6 +1052,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
       case WorkbenchSection.settings:
         return SettingsPage(
           session: widget.session,
+          workbench: _workbench,
           themeMode: widget.themeMode,
           onThemeModeChanged: widget.onThemeModeChanged,
         );
@@ -1181,10 +1226,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
         workbench: _workbench,
         title: '客户会话',
         onNotificationConversation: _openNotificationConversation,
-        onShowQueue: () {
-          _workbench.clearSelection();
-          unawaited(_workbench.showReceptionQueue());
-        },
+        onShowQueue: _openReceptionQueue,
         onTapAvatar: () => setState(() => _section = WorkbenchSection.settings),
       );
     }

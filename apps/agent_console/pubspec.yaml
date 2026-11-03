@@ -2,7 +2,7 @@ name: tongyu_agent_console
 description: TongYu cross-platform agent and operations console.
 publish_to: none
 # 与 web/pwa-release.json 同一发版号：名称取前三段，+ 后为去掉点的完整号。
-version: 2026.11.01+2026110102
+version: 2026.11.03+2026110301
 
 # One codebase, four shapes: the desktop build is what an agent sits in all day,
 # the phone build is for on-call shifts, and the web build is a zero-install
@@ -19,6 +19,7 @@ dependencies:
     sdk: flutter
   uuid: ^4.5.1
   http: ^1.2.0
+  web: ^1.1.0
   web_socket_channel: ^2.4.0
   shared_preferences: ^2.2.3
   # 安卓安装包版本号。应用内下载后交给系统安装；网页仍用 url_launcher 打开下载页。

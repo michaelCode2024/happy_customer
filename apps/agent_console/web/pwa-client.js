@@ -1,7 +1,8 @@
-/* 安装与更新必须由用户主动触发；更新不刷新未提交的回复。 */
+/* 手机端更新由用户确认。电脑版不弹窗，刷新页面时再换上已下载的版本。 */
 (function(){
   let installEvent=null, registration=null, failure='', updating=false, reloading=false, shellReady=false, waitingVersion='', waitingRelease={};
   const ios=()=>/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+  const desktop=()=>!ios()&&!/Android/i.test(navigator.userAgent);
   const embedded=()=>/MicroMessenger|QQ\/|FBAN|FBAV|Instagram|Line\//i.test(navigator.userAgent);
   const installed=()=>matchMedia('(display-mode: standalone)').matches||matchMedia('(display-mode: fullscreen)').matches||navigator.standalone===true;
   const installChanged=()=>window.dispatchEvent(new CustomEvent('tongyu:installchange'));
@@ -106,11 +107,13 @@
   });
   window.tongyuPwaStatus=()=>JSON.stringify({supported:!!navigator.serviceWorker&&isSecureContext,offline:!navigator.onLine,
     installed:installed(),canInstall:!!installEvent,ready:shellReady,
-    update:!!registration?.waiting,updateVersion:waitingVersion,updateRelease:waitingRelease,error:failure,ios:ios(),embedded:embedded(),android:/Android/i.test(navigator.userAgent)});
+    update:!!registration?.waiting,updateVersion:waitingVersion,updateRelease:waitingRelease,error:failure,ios:ios(),desktop:desktop(),embedded:embedded(),android:/Android/i.test(navigator.userAgent)});
   window.tongyuPwaAction=async action=>{
     if(action==='holdUpdate'){updating=true;return '';}
     if(action==='releaseUpdate'){if(!reloading)updating=false;return '';}
     if(action==='claimUpdatePrompt'){
+      // 电脑版不弹更新窗，等用户刷新页面再换版本。
+      if(desktop())return '';
       // 工作台每 2 秒领一次。同一份已下载的壳只弹一次，否则对话框关掉就会马上再开。
       if(updating||reloading||!registration?.waiting)return '';
       const version=waitingVersion;
@@ -134,7 +137,8 @@
     }
     if(action==='checkUpdate'){
       const reg=await window.tongyuPwaReady;await reg.update();
-      return reg.waiting?'新版本已下载，保存草稿后点击「更新应用」':reg.installing?'正在下载新版本，完成后会显示更新提示':'当前没有可用更新';
+      if(desktop())return reg.waiting?'新版本已在后台准备好，刷新页面后即可使用':reg.installing?'正在后台下载新版本，完成后刷新页面即可使用':'当前没有可用更新';
+      return reg.waiting?'新版本已下载，点击「更新应用」':reg.installing?'正在下载新版本，完成后会显示更新提示':'当前没有可用更新';
     }
     if(action==='update'){
       const reg=await window.tongyuPwaReady;

@@ -55,6 +55,23 @@ class ChatPanel extends StatefulWidget {
   State<ChatPanel> createState() => _ChatPanelState();
 }
 
+/// 让深层的小组件（气泡里的复制按钮、附件卡等）也能弹会话内的小提示，
+/// 不用把回调一层层传下去。
+class _ChatTipScope extends InheritedWidget {
+  const _ChatTipScope({required this.showTip, required super.child});
+
+  final ValueChanged<String> showTip;
+
+  static void show(BuildContext context, String message) {
+    context
+        .dependOnInheritedWidgetOfExactType<_ChatTipScope>()
+        ?.showTip(message);
+  }
+
+  @override
+  bool updateShouldNotify(_ChatTipScope oldWidget) => false;
+}
+
 class _ChatPanelState extends State<ChatPanel> {
   final _composer = TextEditingController();
   final _composerFocus = FocusNode();
@@ -71,6 +88,26 @@ class _ChatPanelState extends State<ChatPanel> {
   bool _uploading = false;
   String? _uploadError;
   final Map<String, int> _voiceDurations = {};
+
+  /// 会话区里的一句话提示（发送被拦截、发送失败、已转发等）。
+  ///
+  /// 做成浮在消息区底部的小胶囊，而不是 SnackBar：不需要占满宽度、不会盖住
+  /// 输入框，几秒后自己消失。卡片的计时和淡入淡出由 [_ChatTipCard] 自己管，
+  /// 这里只负责把文案换掉、让同一时刻最多只有一条。
+  String? _tip;
+  int _tipSeq = 0;
+
+  void _showTip(String message) {
+    setState(() {
+      _tip = message;
+      _tipSeq++;
+    });
+  }
+
+  void _hideTip() {
+    if (!mounted || _tip == null) return;
+    setState(() => _tip = null);
+  }
 
   /// 标记解决后的小提示：挂在窗口右上角的浮层里，几秒后自动消失。
   /// 走 root overlay 而不是会话区，是为了不挤占布局、也不盖住聊天内容。
@@ -245,11 +282,10 @@ class _ChatPanelState extends State<ChatPanel> {
       toast.remove();
       toast.dispose();
     }
-    if (_draftLoaded && _draftConversationId != null) {
+    if (_draftLoaded && _draftConversationId != null && !_noteMode) {
       unawaited(widget.workbench.api.saveDraft(
           _draftConversationId!, _composer.text,
-          assistInteractionId: _noteMode ? null : _assistInteractionId,
-          localPrivate: _noteMode));
+          assistInteractionId: _assistInteractionId));
     }
     _draftDebounce?.cancel();
     _flashTimer?.cancel();
@@ -278,6 +314,8 @@ class _ChatPanelState extends State<ChatPanel> {
       _stickToBottom = true;
       _userScrolling = false;
       _lastStickMaxExtent = null;
+      // 换会话后旧提示没有意义，也不该浮在另一个会话的消息区上。
+      _tip = null;
       _scrollToBottom();
     }
     if (lastId != _lastMessageId) {
@@ -293,15 +331,15 @@ class _ChatPanelState extends State<ChatPanel> {
   Future<void> _syncDraft(String? conversationId) async {
     _draftDebounce?.cancel();
     final previous = _draftConversationId;
-    if (_draftLoaded && previous != null) {
+    if (_draftLoaded && previous != null && !_noteMode) {
       unawaited(widget.workbench.api.saveDraft(previous, _composer.text,
-          assistInteractionId: _noteMode ? null : _assistInteractionId,
-          localPrivate: _noteMode));
+          assistInteractionId: _assistInteractionId));
     }
     _draftConversationId = conversationId;
     _draftLoaded = false;
     _isAiDraft = false;
     _assistInteractionId = null;
+    _noteMode = false;
     _composer.clear();
     if (conversationId == null) {
       _draftLoaded = true;
@@ -322,7 +360,6 @@ class _ChatPanelState extends State<ChatPanel> {
       _scheduleDraftSave(_composer.text);
       return;
     }
-    _noteMode = draftData['localPrivate'] == true;
     _composer.text = draft;
     final restoredAssist = asString(draftData['assistInteractionId']);
     _assistInteractionId = restoredAssist.isEmpty ? null : restoredAssist;
@@ -333,18 +370,17 @@ class _ChatPanelState extends State<ChatPanel> {
   }
 
   void _scheduleDraftSave(String value) {
-    if (!_draftLoaded) {
+    // 内部备注不写入服务端草稿，也不落本机。
+    if (!_draftLoaded || _noteMode) {
       return;
     }
     _draftDebounce?.cancel();
-    final assistID = _noteMode ? null : _assistInteractionId;
+    final assistID = _assistInteractionId;
     final conversationId = _draftConversationId;
-    final noteMode = _noteMode;
     _draftDebounce = Timer(const Duration(milliseconds: 350), () {
       if (conversationId != null) {
         unawaited(widget.workbench.api
-            .saveDraft(conversationId, value,
-                assistInteractionId: assistID, localPrivate: noteMode)
+            .saveDraft(conversationId, value, assistInteractionId: assistID)
             .catchError((Object _) {}));
       }
     });
@@ -468,10 +504,13 @@ class _ChatPanelState extends State<ChatPanel> {
       final name = conversation.assigneeName.trim().isEmpty
           ? '其他客服'
           : conversation.assigneeName.trim();
+      if (!widget.workbench.seesTeam) {
+        return '该会话已交给「$name」，你只能查看记录';
+      }
       return '该会话由「$name」接待中，请先转派给自己后再回复；内部备注仍可发送。';
     }
     if (conversation.isResolved) {
-      return '会话已结束。发送回复将自动重新打开会话。';
+      return '会话已结束。访客再次咨询会开始新会话。';
     }
     return null;
   }
@@ -486,26 +525,24 @@ class _ChatPanelState extends State<ChatPanel> {
     }
     final workbench = widget.workbench;
     if (workbench.api.isOffline) {
-      final id = workbench.selectedId;
-      if (id != null)
-        await workbench.api.saveDraft(id, _composer.text,
-            assistInteractionId: _noteMode ? null : _assistInteractionId,
-            localPrivate: _noteMode);
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(workbench.api.offlineStore?.writeFailed == true
-                ? '本机存储不可用，未能保存草稿，请勿关闭页面'
-                : '当前离线，回复已保存为本机草稿；联网后请确认再发送')));
+      // 不做离线草稿：离线就是没发出去。文字留在输入框里，联网后自己再发，
+      // 不再写本机草稿，也不承诺「已保存」。
+      if (mounted) _showTip('当前离线，消息未发送；联网后再发送');
       return;
     }
     final conversation = workbench.selected;
-    // 未接待 / 他人会话时先提示、不清空输入，避免只看到「发送失败」。
+    if (conversation != null &&
+        conversation.isHeldByOther(workbench.selfId) &&
+        !workbench.seesTeam) {
+      _showTip('该会话已交给其他客服，只能查看记录');
+      return;
+    }
+    // 未接待 / 他人会话 / 已结束时先提示、不清空输入，避免只看到「发送失败」。
+    // 提示浮在消息区底部（见 _ChatTipCard），不再弹底部通栏黑条。
     if (!_noteMode && conversation != null) {
       final block = conversation.publicReplyBlockReason(workbench.selfId);
       if (block != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(block)),
-        );
+        _showTip(block);
         return;
       }
     }
@@ -545,12 +582,8 @@ class _ChatPanelState extends State<ChatPanel> {
     } else {
       // 优先展示服务端/拦截的具体原因；没有时再退回气泡重试引导。
       final reason = workbench.threadError?.trim();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            reason != null && reason.isNotEmpty ? reason : '消息发送失败，可在气泡上重试',
-          ),
-        ),
+      _showTip(
+        reason != null && reason.isNotEmpty ? reason : '消息发送失败，可在气泡上重试',
       );
     }
   }
@@ -734,9 +767,7 @@ class _ChatPanelState extends State<ChatPanel> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(ok ? '已转发' : '转发失败，请稍后重试')),
-    );
+    _showTip(ok ? '已转发' : '转发失败，请稍后重试');
   }
 
   /// Tells the visitor the agent is typing. Throttled to one frame every few
@@ -819,7 +850,7 @@ class _ChatPanelState extends State<ChatPanel> {
         if (conversation == null) {
           return const _EmptyThread();
         }
-        return Column(
+        final chat = Column(
           children: <Widget>[
             _ThreadHeader(
               conversation: conversation,
@@ -850,31 +881,57 @@ class _ChatPanelState extends State<ChatPanel> {
                 onUnpin: workbench.togglePin,
               ),
             Expanded(
-              // 消息区浅灰底：对齐微信 / 腾讯 IM，和白底列表、白底输入区分层。
-              child: ColoredBox(
-                color: MediaQuery.sizeOf(context).width < 760 &&
-                        Theme.of(context).brightness == Brightness.light
-                    ? const Color(0xFFF2F3F5)
-                    : RelayTheme.chatCanvas(Theme.of(context).colorScheme),
-                child: NotificationListener<Notification>(
-                  onNotification: _onThreadNotification,
-                  child: _MessageList(
-                    key: ValueKey<String>(conversation.id),
-                    workbench: workbench,
-                    scroll: _scroll,
-                    flashSequence: _flashSequence,
-                    onRetry: workbench.retry,
-                    onLoadOlder: workbench.loadOlder,
-                    onQuote: workbench.quote,
-                    onEdit: _editMessage,
-                    onRecall: _recallMessage,
-                    onReact: _pickReaction,
-                    onPin: workbench.togglePin,
-                    onForward: _forwardMessage,
-                    showJumpToBottom: !_stickToBottom,
-                    onJumpToBottom: () => _scrollToBottom(force: true),
+              child: Stack(
+                children: <Widget>[
+                  Positioned.fill(
+                    // 消息区浅灰底：对齐微信 / 腾讯 IM，和白底列表、白底输入区分层。
+                    child: ColoredBox(
+                      color: MediaQuery.sizeOf(context).width < 760 &&
+                              Theme.of(context).brightness == Brightness.light
+                          ? const Color(0xFFF2F3F5)
+                          : RelayTheme.chatCanvas(Theme.of(context).colorScheme),
+                      child: NotificationListener<Notification>(
+                        onNotification: _onThreadNotification,
+                        child: _MessageList(
+                          key: ValueKey<String>(conversation.id),
+                          workbench: workbench,
+                          scroll: _scroll,
+                          flashSequence: _flashSequence,
+                          onRetry: workbench.retry,
+                          onLoadOlder: workbench.loadOlder,
+                          onQuote: workbench.quote,
+                          onEdit: _editMessage,
+                          onRecall: _recallMessage,
+                          onReact: _pickReaction,
+                          onPin: workbench.togglePin,
+                          onForward: _forwardMessage,
+                          showJumpToBottom: !_stickToBottom,
+                          onJumpToBottom: () => _scrollToBottom(force: true),
+                        ),
+                      ),
+                    ),
                   ),
-                ),
+                  // 轻提示浮在消息区底部、输入框上方：不占布局、不挡输入，
+                  // 同一时刻只有一条（见 _ChatTipCard）。
+                  if (_tip != null)
+                    Positioned(
+                      left: 16,
+                      right: 16,
+                      bottom: 12,
+                      child: IgnorePointer(
+                        child: Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 460),
+                            child: _ChatTipCard(
+                              message: _tip!,
+                              seq: _tipSeq,
+                              onClosed: _hideTip,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
             if (workbench.threadError != null)
@@ -975,6 +1032,21 @@ class _ChatPanelState extends State<ChatPanel> {
                 conversation: conversation,
                 busy: workbench.claiming,
                 onWriteNote: () => setState(() => _noteMode = true),
+                // 倒计时到 0 时服务端可能已把会话收回重派，重新读一次真实归属。
+                onExpired: () {
+                  unawaited(workbench.reloadSelected());
+                  unawaited(workbench.refreshConversations(silent: true));
+                  if (!mounted) return;
+                  final messenger = ScaffoldMessenger.maybeOf(context);
+                  messenger
+                    ?..hideCurrentSnackBar()
+                    ..showSnackBar(const SnackBar(
+                      content: Text('接单已超时，会话正在重新分配'),
+                      duration: Duration(milliseconds: 2200),
+                      behavior: SnackBarBehavior.floating,
+                      margin: EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    ));
+                },
                 onClaim: () async {
                   await workbench.claim();
                   if (mounted &&
@@ -1000,8 +1072,11 @@ class _ChatPanelState extends State<ChatPanel> {
               supportsFiles: widget.picker.supportsArbitraryFiles,
               quote: workbench.replyTo,
               statusHint: _composerHint(conversation, workbench.selfId),
-              lockPublicReply: !_noteMode &&
-                  conversation.publicReplyBlockReason(workbench.selfId) != null,
+              lockPublicReply: (conversation.isHeldByOther(workbench.selfId) &&
+                      !workbench.seesTeam) ||
+                  (!_noteMode &&
+                      conversation.publicReplyBlockReason(workbench.selfId) !=
+                          null),
               aiOpen: false,
               aiPanel: null,
               onOpenSearch: () {
@@ -1010,9 +1085,15 @@ class _ChatPanelState extends State<ChatPanel> {
                 }
               },
               onChanged: _onComposerChanged,
-              onToggleNote: (value) => setState(() {
-                _noteMode = value;
-              }),
+              onToggleNote: (value) {
+                if (conversation.isHeldByOther(workbench.selfId) &&
+                    !workbench.seesTeam) {
+                  return;
+                }
+                setState(() {
+                  _noteMode = value;
+                });
+              },
               onPickImage: () => _pickImage(),
               onPickCamera: () => _pickImage(camera: true),
               onPickFile: () => _pickImage(document: true),
@@ -1037,6 +1118,8 @@ class _ChatPanelState extends State<ChatPanel> {
             ),
           ],
         );
+        // 复制等操作在气泡里也能弹小提示。
+        return _ChatTipScope(showTip: _showTip, child: chat);
       },
     );
   }
@@ -1050,9 +1133,7 @@ class _ChatPanelState extends State<ChatPanel> {
       // The message is outside the retained window. Older history is loaded on
       // demand, so the honest answer is that it is not loaded yet rather than
       // silently doing nothing.
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('这条消息不在已加载的范围内')),
-      );
+      _showTip('这条消息不在已加载的范围内');
       return;
     }
     _stickToBottom = false;
@@ -1134,6 +1215,11 @@ class _ThreadHeader extends StatelessWidget {
     final theme = Theme.of(context);
     final compact = MediaQuery.sizeOf(context).width < 760;
     final status = MediaQuery.paddingOf(context).top;
+    final sessionRating = workbench.detail?.conversation.id == conversation.id
+        ? workbench.detail?.rating
+        : null;
+    final watchingOnly = conversation.isHeldByOther(workbench.selfId) &&
+        !workbench.seesTeam;
     final barColor = theme.colorScheme.surface;
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: BrowserChrome.overlayFor(barColor),
@@ -1197,10 +1283,21 @@ class _ThreadHeader extends StatelessWidget {
                       ),
                       if (MediaQuery.sizeOf(context).width >= 760) ...<Widget>[
                         const SizedBox(width: 8),
-                        if (conversation.isResolved)
+                        if (conversation.isResolved) ...<Widget>[
                           const _HeaderChip(
-                              label: '已结束', tone: _ChipTone.neutral)
-                        else if (conversation.isUnassigned)
+                              label: '已结束', tone: _ChipTone.neutral),
+                          if (sessionRating != null) ...<Widget>[
+                            const SizedBox(width: 6),
+                            _HeaderChip(
+                              label: '${sessionRating.score} 星',
+                              tone: sessionRating.score <= 2
+                                  ? _ChipTone.warn
+                                  : sessionRating.score == 3
+                                      ? _ChipTone.neutral
+                                      : _ChipTone.info,
+                            ),
+                          ],
+                        ] else if (conversation.isUnassigned)
                           const _HeaderChip(label: '待接待', tone: _ChipTone.warn)
                         else if (conversation.needsAcceptance)
                           _HeaderChip(
@@ -1233,7 +1330,9 @@ class _ThreadHeader extends StatelessWidget {
                   Text(
                     MediaQuery.sizeOf(context).width < 760
                         ? (conversation.isResolved
-                            ? '已结束'
+                            ? (sessionRating == null
+                                ? '已结束'
+                                : '已结束 · ${sessionRating.score} 星')
                             : conversation.isUnassigned
                                 ? '待接待'
                                 : conversation.needsAcceptance
@@ -1259,23 +1358,14 @@ class _ThreadHeader extends StatelessWidget {
                 ],
               ),
             ),
-            if (!conversation.isUnassigned &&
+            if (!watchingOnly &&
+                !conversation.isResolved &&
+                !conversation.isUnassigned &&
                 !conversation.needsAcceptance &&
                 MediaQuery.sizeOf(context).width >= 760)
               Padding(
                   padding: const EdgeInsets.only(left: 8),
-                  child: conversation.isResolved
-                      ? Semantics(
-                          button: true,
-                          label: '重新打开',
-                          identifier: 'desk.resolve.reopen',
-                          child: OutlinedButton(
-                            key: const ValueKey('desk-resolve-reopen'),
-                            onPressed: () => workbench.setStatus('OPEN'),
-                            child: const Text('重新打开'),
-                          ),
-                        )
-                      : Semantics(
+                  child: Semantics(
                           button: true,
                           label: '标记解决',
                           identifier: 'desk.resolve.mark',
@@ -1308,7 +1398,9 @@ class _ThreadHeader extends StatelessWidget {
                           ),
                         )),
             // 接待入口改到底部操作坞，顶栏不再重复「开始接待」。
-            if (MediaQuery.sizeOf(context).width >= 760)
+            if (!watchingOnly &&
+                !conversation.isResolved &&
+                MediaQuery.sizeOf(context).width >= 760)
               Padding(
                 // Keep clear of top-bar notification bell hit area.
                 padding: const EdgeInsets.only(left: 10, right: 6),
@@ -1360,8 +1452,6 @@ class _ThreadHeader extends StatelessWidget {
                     onOpenProfile?.call();
                   case 'resolve':
                     _markResolved(context);
-                  case 'reopen':
-                    workbench.setStatus('OPEN');
                   case 'pending':
                     workbench.setStatus('PENDING');
                   case 'priority0':
@@ -1375,14 +1465,16 @@ class _ThreadHeader extends StatelessWidget {
                   case 'tags':
                     _showTags(context);
                   case 'copy':
-                    copyToClipboard(context, conversation.id, '会话 ID');
+                    copyToClipboard(context, conversation.id, '会话 ID',
+                        onCopied: () =>
+                            _ChatTipScope.show(context, '会话 ID 已复制'));
                 }
               },
               itemBuilder: (context) => <PopupMenuEntry<String>>[
                 if (MediaQuery.sizeOf(context).width < 760 &&
                     onOpenProfile != null)
                   const PopupMenuItem(value: 'profile', child: Text('客户资料')),
-                if (!conversation.isResolved)
+                if (!watchingOnly && !conversation.isResolved)
                   const PopupMenuItem<String>(
                     key: ValueKey('desk-menu-resolve'),
                     value: 'resolve',
@@ -1391,56 +1483,49 @@ class _ThreadHeader extends StatelessWidget {
                       leading: Icon(Icons.check_circle_outline, size: 18),
                       title: Text('标记解决'),
                     ),
-                  )
-                else
+                  ),
+                if (!watchingOnly) ...<PopupMenuEntry<String>>[
                   const PopupMenuItem<String>(
-                    key: ValueKey('desk-menu-reopen'),
-                    value: 'reopen',
+                    value: 'pending',
                     child: ListTile(
                       dense: true,
-                      leading: Icon(Icons.lock_open_outlined, size: 18),
-                      title: Text('重新打开'),
+                      leading: Icon(Icons.hourglass_empty, size: 18),
+                      title: Text('标记等待中'),
                     ),
                   ),
-                const PopupMenuItem<String>(
-                  value: 'pending',
-                  child: ListTile(
-                    dense: true,
-                    leading: Icon(Icons.hourglass_empty, size: 18),
-                    title: Text('标记等待中'),
+                  const PopupMenuDivider(),
+                  const PopupMenuItem<String>(
+                    value: 'priority2',
+                    child: Text('优先级：高'),
                   ),
-                ),
-                const PopupMenuDivider(),
-                const PopupMenuItem<String>(
-                  value: 'priority2',
-                  child: Text('优先级：高'),
-                ),
-                const PopupMenuItem<String>(
-                  value: 'priority1',
-                  child: Text('优先级：普通偏高'),
-                ),
-                const PopupMenuItem<String>(
-                  value: 'priority0',
-                  child: Text('优先级：普通'),
-                ),
-                const PopupMenuDivider(),
-                const PopupMenuItem<String>(
-                  key: ValueKey('desk-menu-transfer'),
-                  value: 'transfer',
-                  child: ListTile(
-                    dense: true,
-                    leading: Icon(Icons.swap_horiz, size: 18),
-                    title: Text('转交'),
+                  const PopupMenuItem<String>(
+                    value: 'priority1',
+                    child: Text('优先级：普通偏高'),
                   ),
-                ),
-                const PopupMenuItem<String>(
-                  value: 'tags',
-                  child: ListTile(
-                    dense: true,
-                    leading: Icon(Icons.sell_outlined, size: 18),
-                    title: Text('编辑标签'),
+                  const PopupMenuItem<String>(
+                    value: 'priority0',
+                    child: Text('优先级：普通'),
                   ),
-                ),
+                  const PopupMenuDivider(),
+                  if (!conversation.isResolved)
+                    const PopupMenuItem<String>(
+                      key: ValueKey('desk-menu-transfer'),
+                      value: 'transfer',
+                      child: ListTile(
+                        dense: true,
+                        leading: Icon(Icons.swap_horiz, size: 18),
+                        title: Text('转交'),
+                      ),
+                    ),
+                  const PopupMenuItem<String>(
+                    value: 'tags',
+                    child: ListTile(
+                      dense: true,
+                      leading: Icon(Icons.sell_outlined, size: 18),
+                      title: Text('编辑标签'),
+                    ),
+                  ),
+                ],
                 const PopupMenuItem<String>(
                   value: 'copy',
                   child: ListTile(
@@ -1485,6 +1570,134 @@ class _ThreadHeader extends StatelessWidget {
     await showDialog<void>(
       context: context,
       builder: (context) => _TagDialog(workbench: workbench),
+    );
+  }
+}
+
+/// 会话区底部的小胶囊提示（发送被拦截、失败、已转发等）。
+///
+/// 替代原来那条底部通栏 SnackBar：浅色小卡片、宽度随文案收窄、贴消息区底部，
+/// 不盖住输入框；淡入后停留 3 秒自己淡出，下一次提示会重置计时并重新入场。
+/// 同一时刻只有一条，[seq] 变化表示又弹了一次。
+class _ChatTipCard extends StatefulWidget {
+  const _ChatTipCard({
+    required this.message,
+    required this.seq,
+    required this.onClosed,
+  });
+
+  final String message;
+
+  /// 每弹一次自增；同一条文案重复弹出时也重新计时、重新入场。
+  final int seq;
+
+  /// 淡出结束，浮层可以移除了。
+  final VoidCallback onClosed;
+
+  @override
+  State<_ChatTipCard> createState() => _ChatTipCardState();
+}
+
+class _ChatTipCardState extends State<_ChatTipCard>
+    with SingleTickerProviderStateMixin {
+  static const Duration _linger = Duration(seconds: 3);
+
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 180),
+  );
+  late final CurvedAnimation _curve =
+      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic);
+  late final Animation<Offset> _slide =
+      Tween<Offset>(begin: const Offset(0, .3), end: Offset.zero)
+          .animate(_curve);
+  Timer? _timer;
+  bool _closing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.forward();
+    _restartTimer();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ChatTipCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.seq == oldWidget.seq) return;
+    if (_closing) {
+      // 正在淡出时又弹了新提示：取消退出，直接以新文案重新入场。
+      _closing = false;
+      _controller.forward(from: 0);
+    }
+    _restartTimer();
+  }
+
+  void _restartTimer() {
+    _timer?.cancel();
+    _timer = Timer(_linger, _close);
+  }
+
+  Future<void> _close() async {
+    if (_closing) return;
+    _closing = true;
+    _timer?.cancel();
+    await _controller.reverse();
+    if (mounted) widget.onClosed();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _curve.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return FadeTransition(
+      opacity: _curve,
+      child: SlideTransition(
+        position: _slide,
+        child: Semantics(
+          container: true,
+          liveRegion: true,
+          label: widget.message,
+          excludeSemantics: true,
+          child: Material(
+            key: const ValueKey('desk-chat-tip'),
+            color: scheme.surface,
+            elevation: 4,
+            shadowColor: Colors.black.withAlpha(36),
+            shape: StadiumBorder(
+              side: BorderSide(color: scheme.outlineVariant),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 8, 16, 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Icon(Icons.info_outline, size: 15, color: scheme.primary),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      widget.message,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurface,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -2282,8 +2495,10 @@ class _MessageBubble extends StatelessWidget {
                 ? null
                 : () {
                     final actions = <String, VoidCallback>{
-                      '复制': () =>
-                          copyToClipboard(context, message.content, '消息内容'),
+                      '复制': () => copyToClipboard(
+                          context, message.content, '消息内容',
+                          onCopied: () =>
+                              _ChatTipScope.show(context, '消息内容已复制')),
                       '引用回复': onQuote,
                       '添加回应': onReact,
                       '置顶': onPin,
@@ -2451,10 +2666,7 @@ class _CommerceCard extends StatelessWidget {
             TextButton(
                 onPressed: () async {
                   await Clipboard.setData(ClipboardData(text: link.toString()));
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context)
-                        .showSnackBar(const SnackBar(content: Text('链接已复制')));
-                  }
+                  if (context.mounted) _ChatTipScope.show(context, '链接已复制');
                 },
                 child: Text('复制${order ? '订单' : '商品'}链接')),
         ]));
@@ -3408,10 +3620,10 @@ class _FileChip extends StatelessWidget {
             iconSize: 16,
             visualDensity: VisualDensity.compact,
             onPressed: () {
-              copyToClipboard(context, url, '下载链接');
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('下载链接已复制（含访问令牌）')),
-              );
+              // 复制成功的确认走会话内小提示，不再额外弹第二条 SnackBar。
+              copyToClipboard(context, url, '下载链接',
+                  onCopied: () => _ChatTipScope.show(
+                      context, '下载链接已复制（含访问令牌）'));
             },
             icon: const Icon(Icons.link),
           ),
@@ -4665,32 +4877,54 @@ class _TransferDialogState extends State<_TransferDialog> {
                                 child: const Text('取消'),
                               ),
                               const SizedBox(width: 8),
-                              DecoratedBox(
-                                decoration: BoxDecoration(
-                                  gradient: RelayTheme.actionGradient,
-                                  borderRadius: BorderRadius.circular(12),
-                                  boxShadow: RelayTheme.popShadow(),
-                                ),
-                                child: FilledButton(
-                                  key: const ValueKey('desk-transfer-confirm'),
-                                  onPressed: _agentId == null
-                                      ? null
-                                      : () => Navigator.of(context).pop(
-                                            (_agentId!, _note.text.trim()),
-                                          ),
-                                  style: FilledButton.styleFrom(
-                                    backgroundColor: Colors.transparent,
-                                    disabledBackgroundColor: Colors.transparent,
-                                    shadowColor: Colors.transparent,
-                                    foregroundColor: Colors.white,
-                                    elevation: 0,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
+                              Builder(builder: (context) {
+                                final canConfirm = _agentId != null;
+                                final label =
+                                    assigning ? '确认分配' : '确认转交';
+                                return DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    // 没选同事时不要留蓝底。禁用文字是浅灰，叠在渐变上会看不见。
+                                    color: canConfirm
+                                        ? RelayTheme.blueDeep
+                                        : scheme.surfaceContainerHighest,
+                                    borderRadius: BorderRadius.circular(12),
+                                    boxShadow: canConfirm
+                                        ? RelayTheme.popShadow()
+                                        : null,
+                                  ),
+                                  child: FilledButton(
+                                    key: const ValueKey(
+                                        'desk-transfer-confirm'),
+                                    onPressed: canConfirm
+                                        ? () => Navigator.of(context).pop(
+                                              (_agentId!, _note.text.trim()),
+                                            )
+                                        : null,
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: Colors.transparent,
+                                      disabledBackgroundColor:
+                                          Colors.transparent,
+                                      shadowColor: Colors.transparent,
+                                      foregroundColor: Colors.white,
+                                      disabledForegroundColor:
+                                          scheme.onSurface,
+                                      elevation: 0,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      label,
+                                      style: TextStyle(
+                                        color: canConfirm
+                                            ? Colors.white
+                                            : scheme.onSurface,
+                                        fontWeight: FontWeight.w600,
+                                      ),
                                     ),
                                   ),
-                                  child: Text(assigning ? '确认分配' : '确认转交'),
-                                ),
-                              ),
+                                );
+                              }),
                             ],
                           ),
                         ],

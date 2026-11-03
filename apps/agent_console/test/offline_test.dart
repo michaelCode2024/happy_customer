@@ -66,7 +66,7 @@ void main() {
     api.close();
   });
 
-  testWidgets('已保存的离线草稿进入会话时显示在真实输入框', (tester) async {
+  testWidgets('公开回复草稿不再离线保存，进会话时输入框为空', (tester) async {
     final api = TongYuApi(
         server: 'https://offline.example',
         client: MockClient((r) async {
@@ -87,7 +87,9 @@ void main() {
         }))
       ..token = 'local-test';
     api.configureOffline(tenant: 't', agent: 'a');
-    await api.saveDraft('c1', '需要恢复的离线草稿');
+    await api.saveDraft('c1', '不该被保存的公开草稿');
+    // 同一存储实例上检查，避免新建存储时把草稿键清掉，看不出是否写过。
+    expect(await api.offlineStore!.read('draft/c1'), isNull);
     final controller = WorkbenchController(api: api, selfId: 'a');
     await controller.select('c1');
     await tester.pumpWidget(MaterialApp(
@@ -97,12 +99,25 @@ void main() {
                 picker: TestPicker(),
                 showInlineAssist: false))));
     await tester.pumpAndSettle();
+    // 不会把本机草稿回填进输入框。
     expect(
         find.byWidgetPredicate(
-            (w) => w is TextField && w.controller?.text == '需要恢复的离线草稿'),
-        findsOneWidget);
+            (w) => w is TextField && w.controller?.text == '不该被保存的公开草稿'),
+        findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();
+    api.close();
+  });
+
+  test('离线不保存草稿，读取草稿也不会回退本机副本', () async {
+    final api = TongYuApi(
+        server: 'https://one.example',
+        client: MockClient((r) async => throw http.ClientException('offline')))
+      ..token = 't';
+    api.configureOffline(tenant: 't', agent: 'a');
+    await api.saveDraft('c1', '公开草稿');
+    expect(await api.offlineStore!.read('draft/c1'), isNull);
+    await expectLater(api.draftData('c1'), throwsA(isA<ApiException>()));
     api.close();
   });
   test('服务、企业、账号隔离，退出清除且旧请求不能写回', () async {
@@ -123,10 +138,10 @@ void main() {
     final pending = a.write('another', {'value': 1});
     await a.clear();
     await pending;
-    await a.write('draft/c1', {'content': '旧请求'});
+    await a.write('row/c1', {'content': '旧请求'});
     expect(
         await OfflineStore('https://one.example', 'tenant', 'alice')
-            .read('draft/c1'),
+            .read('row/c1'),
         isNull);
   });
   test('过期快照不再返回', () async {
@@ -177,27 +192,21 @@ void main() {
     expect((await api.conversations()).items.single.id, 'permitted');
     api.close();
   });
-  test('离线草稿重启恢复，不补发客户消息，管理接口不读缓存', () async {
-    var requests = 0;
+  test('离线草稿不会在重启后恢复，管理接口不读缓存', () async {
     final client = MockClient((r) async {
-      requests++;
       throw http.ClientException('offline');
     });
     final api = TongYuApi(server: 'https://one.example', client: client)
       ..token = 'test';
     api.configureOffline(tenant: 't', agent: 'a');
-    await api.saveDraft('c1', '尚未发送的备注', localPrivate: true);
+    await api.saveDraft('c1', '尚未发送的回复');
+    expect(await api.offlineStore!.read('draft/c1'), isNull);
     final restored = TongYuApi(server: 'https://one.example', client: client)
       ..token = 'test';
     restored.configureOffline(tenant: 't', agent: 'a');
-    final before = requests;
-    final draft = await restored.draftData('c1');
-    expect(draft['content'], '尚未发送的备注');
-    expect(draft['localPrivate'], isTrue);
-    expect(requests, before);
+    await expectLater(restored.draftData('c1'), throwsA(isA<ApiException>()));
     await expectLater(restored.integrationKeys(), throwsA(isA<ApiException>()));
-    await restored.clearOfflineData();
-    expect(await OfflineStore('https://one.example', 't', 'a').read('draft/c1'),
-        isNull);
+    api.close();
+    restored.close();
   });
 }

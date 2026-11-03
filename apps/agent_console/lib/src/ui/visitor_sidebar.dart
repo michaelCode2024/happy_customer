@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:tongyu_agent_console/src/theme.dart';
 
@@ -36,11 +38,22 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
   List<VisitorNote> _notes = const <VisitorNote>[];
   List<Conversation> _history = const <Conversation>[];
   VisitorProfile? _profile;
+
+  bool get _watchingOnly {
+    final conversation = widget.workbench.selected;
+    if (conversation == null) {
+      return false;
+    }
+    return conversation.isHeldByOther(widget.workbench.selfId) &&
+        !widget.workbench.seesTeam;
+  }
   int _loadRevision = 0;
   bool _loading = false;
   bool _savingNote = false;
   String? _loadedVisitorId;
   String? _error;
+  bool _sawSessionRating = false;
+  String? _sessionRatingKey;
 
   @override
   void dispose() {
@@ -65,6 +78,8 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
     }
     _savingNote = false;
     _loadedVisitorId = visitorId;
+    _sawSessionRating = false;
+    _sessionRatingKey = null;
     _profile = null;
     _notes = const <VisitorNote>[];
     _history = const <Conversation>[];
@@ -189,6 +204,8 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
           WidgetsBinding.instance.addPostFrameCallback(
             (_) => _ensureLoaded(visitor.id),
           );
+        } else if (_profile?.id == visitor.id) {
+          _noteSessionRating(visitor.id);
         }
         final scheme = Theme.of(context).colorScheme;
         return Column(
@@ -226,6 +243,12 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
                   ],
                   const SizedBox(height: 16),
                   _facts(context, visitor),
+                  if (widget.workbench.detail?.conversation.id ==
+                          widget.workbench.selectedId &&
+                      widget.workbench.detail?.rating != null) ...<Widget>[
+                    const SizedBox(height: 18),
+                    _sessionRating(context, widget.workbench.detail!.rating!),
+                  ],
                   if (widget.workbench.cannedForSelection.isNotEmpty) ...[
                     const SizedBox(height: 18),
                     const Divider(),
@@ -271,12 +294,13 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
                   const SizedBox(height: 8),
                   TextField(
                     controller: _displayName,
+                    readOnly: _watchingOnly,
                     decoration: InputDecoration(
                       labelText: '昵称',
                       suffixIcon: IconButton(
                         tooltip: '保存',
                         icon: const Icon(Icons.check),
-                        onPressed: _saveDisplayName,
+                        onPressed: _watchingOnly ? null : _saveDisplayName,
                       ),
                     ),
                   ),
@@ -285,10 +309,13 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
                   const SizedBox(height: 8),
                   TextField(
                     controller: _note,
+                    readOnly: _watchingOnly,
                     minLines: 2,
                     maxLines: 4,
                     decoration: InputDecoration(
-                      hintText: '记录只有同事可见的信息：订单号、承诺、投诉背景…',
+                      hintText: _watchingOnly
+                          ? '已交给其他客服，只能查看'
+                          : '记录只有同事可见的信息：订单号、承诺、投诉背景…',
                       suffixIcon: IconButton(
                         tooltip: '添加备注',
                         icon: _savingNote
@@ -299,7 +326,7 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
                                     CircularProgressIndicator(strokeWidth: 2),
                               )
                             : const Icon(Icons.add_comment_outlined),
-                        onPressed: _addNote,
+                        onPressed: _watchingOnly ? null : _addNote,
                       ),
                     ),
                   ),
@@ -366,6 +393,84 @@ class _VisitorSidebarState extends State<VisitorSidebar> {
           ],
         );
       },
+    );
+  }
+
+  /// 资料已经打开后才到达的评分，要重新取平均分。打开当下已有的分数由客户接口带上。
+  void _noteSessionRating(String visitorId) {
+    if (_profile?.id != visitorId) {
+      return;
+    }
+    final detail = widget.workbench.detail;
+    final rating = detail?.rating;
+    final key = detail?.conversation.id == widget.workbench.selectedId &&
+            rating != null
+        ? '${detail!.conversation.id}:${rating.score}:${rating.createdAt?.millisecondsSinceEpoch}'
+        : null;
+    if (!_sawSessionRating) {
+      _sawSessionRating = true;
+      _sessionRatingKey = key;
+      return;
+    }
+    if (key == null || key == _sessionRatingKey) {
+      return;
+    }
+    _sessionRatingKey = key;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _loadedVisitorId == visitorId) {
+        unawaited(_refreshAverage(visitorId));
+      }
+    });
+  }
+
+  Future<void> _refreshAverage(String visitorId) async {
+    try {
+      final profile = await widget.workbench.api.visitor(visitorId);
+      if (!mounted || _loadedVisitorId != visitorId) {
+        return;
+      }
+      setState(() => _profile = profile);
+    } catch (_) {
+      // 平均分刷新失败时保留已显示的资料，本次评分仍在会话详情里。
+    }
+  }
+
+  Widget _sessionRating(BuildContext context, ConversationRating rating) {
+    final theme = Theme.of(context);
+    final comment = rating.comment?.trim();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        _sectionTitle(context, '本次评价'),
+        const SizedBox(height: 8),
+        Row(
+          children: <Widget>[
+            for (var star = 1; star <= 5; star++)
+              Icon(
+                star <= rating.score
+                    ? Icons.star_rounded
+                    : Icons.star_outline_rounded,
+                size: 18,
+                color: const Color(0xFFF59E0B),
+              ),
+            const SizedBox(width: 8),
+            Text('${rating.score} 星', style: theme.textTheme.bodyMedium),
+          ],
+        ),
+        if (comment != null && comment.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 6),
+          Text(comment, style: theme.textTheme.bodySmall),
+        ],
+        if (rating.createdAt != null) ...<Widget>[
+          const SizedBox(height: 4),
+          Text(
+            relativeTime(rating.createdAt),
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ],
     );
   }
 

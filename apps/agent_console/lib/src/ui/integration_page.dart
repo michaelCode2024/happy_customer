@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:tongyu_agent_console/src/theme.dart';
 import 'package:tongyu_agent_console/src/ui/code_block.dart';
 import 'package:tongyu_agent_console/src/ui/console_form_dialog.dart';
@@ -100,6 +101,29 @@ class _IntegrationPageState extends State<IntegrationPage> {
 
   void _notice(String text) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+
+  /// 打开接口文档。不公开文档的实例（DOCS_ENABLED=false）靠服务端签发的短期
+  /// Cookie 放行，所以先换一次 Cookie 再开新标签：直接给地址只会跳回首页。
+  Future<void> _openDocs([String path = '/docs']) async {
+    try {
+      final access = await widget.api.docsAccess();
+      final docs = Uri.parse(widget.api.server)
+          .resolve(asString(access['url'] ?? '/docs'));
+      final target = path == '/docs' ? docs : docs.resolve(path);
+      final opened =
+          await launchUrl(target, mode: LaunchMode.externalApplication);
+      if (!opened && mounted) {
+        _notice('浏览器拦截了新窗口，请允许弹出窗口后重试');
+      }
+    } on ApiException catch (e) {
+      if (mounted) _notice(e.message);
+    } catch (_) {
+      // 打不开浏览器（无平台通道、被系统拦截）不该让整页报错，提示手动访问即可。
+      if (mounted) {
+        _notice('当前环境无法打开浏览器，请手动访问 ${widget.api.server}/docs');
+      }
+    }
+  }
 
   Future<void> _copy(String value) async {
     await copyToClipboard(context, value, '内容');
@@ -325,6 +349,10 @@ class _IntegrationPageState extends State<IntegrationPage> {
             icon: Icons.link_rounded,
             actions: [
               OutlinedButton.icon(
+                  onPressed: () => _openDocs(),
+                  icon: const Icon(Icons.menu_book_outlined, size: 16),
+                  label: const Text('接口文档')),
+              OutlinedButton.icon(
                   onPressed: _loading ? null : _load,
                   icon: const Icon(Icons.refresh, size: 16),
                   label: const Text('刷新'))
@@ -466,6 +494,23 @@ location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent
           '访客 Token：组件自动管理。'),
       step('消息没有收到时'),
       body('先看「客户消息 → 全部 / 待接待」，确认成员已分配到该入口、账号启用并在线。断线后会自动重同步。APIKey 不能替坐席登录。'),
+      step('完整接口文档'),
+      body('上面是接入要点。全量接口、请求与响应参数、错误码、回调正文和 cURL / JavaScript / Python / Go 示例都在接口文档里，随当前实例同源发布，打开即可对照调试。'),
+      const SizedBox(height: 12),
+      Wrap(spacing: 10, runSpacing: 8, children: [
+        FilledButton.tonalIcon(
+            onPressed: () => _openDocs(),
+            icon: const Icon(Icons.menu_book_outlined, size: 18),
+            label: const Text('打开接口文档')),
+        OutlinedButton.icon(
+            onPressed: () => _openDocs('/docs/quickstart'),
+            icon: const Icon(Icons.rocket_launch_outlined, size: 18),
+            label: const Text('快速开始')),
+        OutlinedButton.icon(
+            onPressed: () => _openDocs('/docs/openapi.json'),
+            icon: const Icon(Icons.data_object_rounded, size: 18),
+            label: const Text('OpenAPI 规范')),
+      ]),
     ]);
   }
 
@@ -502,6 +547,7 @@ location.href = '${widget.api.server}/groups.html?groupId=' + encodeURIComponent
           _channelSection(theme),
           const SizedBox(height: 22),
           _contentSection(theme),
+          ..._docsEntry(),
           ..._otherWays(),
         ],
       ],
@@ -834,6 +880,57 @@ useEffect(() => {
     if (diff.inMinutes < 60) return '${diff.inMinutes} 分钟前';
     if (diff.inHours < 24) return '${diff.inHours} 小时前';
     return '${diff.inDays} 天前';
+  }
+
+  /// 接口文档入口。装在「接入渠道」里而不是只放页头：主管配完安装代码，
+  /// 下一步就是照文档对接服务端，入口要在他正看着的地方。
+  List<Widget> _docsEntry() {
+    final scheme = Theme.of(context).colorScheme;
+    return [
+      const SizedBox(height: 22),
+      _sectionLabel('接口文档'),
+      Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        decoration: BoxDecoration(
+          color: scheme.surface,
+          borderRadius: BorderRadius.circular(RelayTheme.radiusMd),
+          border: Border.all(color: scheme.outlineVariant),
+        ),
+        child:
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(Icons.menu_book_outlined, size: 18, color: scheme.primary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('开放接口参考',
+                  style: RelayTheme.uiText(
+                      fontSize: 13, fontWeight: FontWeight.w600)),
+            ),
+          ]),
+          const SizedBox(height: 6),
+          Text(
+              '服务端密钥、回调验签、会话与消息接口的完整参数、错误码和 cURL / JavaScript / Python / Go 示例，随当前实例同源发布。',
+              style: RelayTheme.uiText(
+                  fontSize: 11.5, height: 1.6, color: scheme.onSurfaceVariant)),
+          const SizedBox(height: 12),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            FilledButton.tonalIcon(
+                onPressed: () => _openDocs(),
+                icon: const Icon(Icons.open_in_new, size: 16),
+                label: const Text('打开接口文档')),
+            OutlinedButton.icon(
+                onPressed: () => _openDocs('/docs/quickstart'),
+                icon: const Icon(Icons.rocket_launch_outlined, size: 16),
+                label: const Text('快速开始')),
+            OutlinedButton.icon(
+                onPressed: () => _openDocs('/docs/openapi.json'),
+                icon: const Icon(Icons.data_object_rounded, size: 16),
+                label: const Text('OpenAPI 规范')),
+          ]),
+        ]),
+      ),
+    ];
   }
 
   /// iframe 与开放 API 是同一件事的次要贴法，收进折叠区，不让它们和安装代码

@@ -286,7 +286,7 @@ class SessionController extends ChangeNotifier {
       const Duration(minutes: 4),
       (_) => setPresence(_session?.agent.presence ?? 'ONLINE'),
     );
-    // 活跃状态只用于「跳过推送」，比在线状态变化快得多：服务端 90 秒算过期。
+    // 可见状态单独上报，不改坐席自己选的在线或离开。推送不因人在看工作台而延后。
     _activityRefresh?.cancel();
     _activityRefresh = Timer.periodic(
       const Duration(seconds: 45),

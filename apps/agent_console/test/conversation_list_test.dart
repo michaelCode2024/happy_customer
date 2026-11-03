@@ -37,6 +37,8 @@ void main() {
                   }
                 ],
                 'queued': 999,
+                // 角标读的是 receptionWaiting（待领取/待确认），不是 queued。
+                'receptionWaiting': 999,
               })),
               200,
             )),

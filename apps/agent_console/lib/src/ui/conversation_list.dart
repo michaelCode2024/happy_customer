@@ -37,7 +37,9 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
   final _search = TextEditingController();
   final _scroll = ScrollController();
   Timer? _searchDebounce;
+  Timer? _queueFlashTimer;
   int _receptionQueueRequest = 0;
+  bool _queueFlash = false;
 
   @override
   void initState() {
@@ -48,9 +50,26 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
   @override
   void dispose() {
     _searchDebounce?.cancel();
+    _queueFlashTimer?.cancel();
     _search.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  /// 切到待接待时给一次看得见的反馈：滚回顶部 + 列表底色闪一下。
+  /// 「全部」和「待接待」的内容经常一模一样，只换 tab 高亮的话，点「查看待接待」
+  /// 和什么都没发生没区别。
+  void _flashQueueChange() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) return;
+      _scroll.jumpTo(0);
+    });
+    _queueFlashTimer?.cancel();
+    _queueFlash = true;
+    _queueFlashTimer = Timer(const Duration(milliseconds: 900), () {
+      if (!mounted) return;
+      setState(() => _queueFlash = false);
+    });
   }
 
   /// Pulls the next page when the agent nears the bottom. The queue is capped at
@@ -80,25 +99,17 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
           _receptionQueueRequest = workbench.receptionQueueRequest;
           _searchDebounce?.cancel();
           _search.clear();
+          _flashQueueChange();
         }
         final multiInbox = widget.session.inboxes.length > 1;
         return Column(
           children: <Widget>[
-            // B：标题并入筛选行，搜索与入口同行，给列表多腾出约一条高度。
+            // 侧栏标题与页面标题重复。去掉后同一行放得下「已结束」。
             Padding(
-              padding: const EdgeInsets.fromLTRB(10, 6, 2, 0),
+              padding: const EdgeInsets.fromLTRB(4, 6, 2, 0),
               child: Row(
                 children: [
-                  Text(
-                    '客户消息',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      height: 1.1,
-                    ),
-                  ),
-                  const SizedBox(width: 2),
-                  // 窄侧栏时 Tab 可横滑，避免和角标、刷新挤爆。
+                  // 窄侧栏（约 300px）时四个 tab 加角标会挤爆一行，Tab 区可横滑。
                   Expanded(
                     child: SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
@@ -244,7 +255,16 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
               ),
             ),
             const Divider(height: 1),
-            Expanded(child: _body(theme)),
+            Expanded(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOut,
+                color: _queueFlash
+                    ? const Color(0xFFFFF6E9)
+                    : Colors.transparent,
+                child: _body(theme),
+              ),
+            ),
           ],
         );
       },
@@ -297,7 +317,7 @@ class _ConversationListPanelState extends State<ConversationListPanel> {
                 QueueFilter.resolved => '还没有已结束的会话',
               },
         message: workbench.search.isNotEmpty
-            ? '搜索仅在当前筛选和客服入口内进行，可切换「全部」或「已结束」。'
+            ? '搜索只覆盖当前这一档。要查已经结束的接待，点「已结束」。'
             : workbench.filter == QueueFilter.mine
                 ? '新客户进线后会出现在待接待列表。也可以先整理知识库。'
                 : workbench.filter == QueueFilter.resolved
@@ -579,8 +599,6 @@ class _QueueChip extends StatelessWidget {
   }
 }
 
-/// An empty or failed pane. Empty states in a support tool are read hundreds of
-/// times a day, so they say what to do next rather than only what is missing.
 /// 收件箱筛选：定稿用下划线 Tab，而不是分段按钮。
 class _InboxFilterTab extends StatelessWidget {
   const _InboxFilterTab({
@@ -600,13 +618,15 @@ class _InboxFilterTab extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Padding(
-        // 与标题同行时压矮，给列表腾高度。
-        padding: const EdgeInsets.fromLTRB(7, 4, 7, 0),
+        padding: const EdgeInsets.fromLTRB(5, 4, 5, 0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
               label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
@@ -630,6 +650,8 @@ class _InboxFilterTab extends StatelessWidget {
   }
 }
 
+/// An empty or failed pane. Empty states in a support tool are read hundreds of
+/// times a day, so they say what to do next rather than only what is missing.
 class _Notice extends StatelessWidget {
   const _Notice({
     required this.icon,

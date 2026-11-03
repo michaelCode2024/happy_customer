@@ -48,7 +48,53 @@ iframe.contentWindow.postMessage({ type: 'say', content: '你好' }, 'https://ch
 iframe.contentWindow.postMessage({ type: 'authenticate', identityToken }, 'https://chat.example.com');
 ```
 
+### 键盘弹起与光标位置（iOS PWA / WebView）
+
+iOS 上键盘弹起有两套模型：Safari 标签页只缩视觉视口（布局视口不变），PWA 和 WebView 会真的缩布局视口。两边各补偿一次，或者宿主和页面都改一次 iframe 高度，输入框和光标就落在两套坐标里，表现为「点这儿、光标在那儿」，越补越歪。
+
+组件现在按「哪个高度真的变了」自行判断，只补一次，并且只用 `top` / `height` 定位，不再用 `transform`：
+
+- 输入框字号 16px，避免 iOS 聚焦时自动放大整页（放大后光标坐标必错）；
+- 键盘动画结束后把光标原地重设一次，逼内核重绘，不改文字也不动选区；
+- 宿主通过 `host-viewport` 托管时，组件不再做第二次补偿。
+
+需要宿主配合的只有两条，属于 iframe 写法而不是接口：
+
+1. iframe 容器 `position: fixed; inset: 0`，聊天打开时宿主页面自身不滚动；
+2. iframe 的祖先节点不要留 `transform` / `filter` / `will-change: transform`——它们会改变 `fixed` 的包含块，iOS 会把光标画到另一个坐标系里。弹窗的 `scale(1)` 动画结束后记得清掉。
+
+要做到「输入栏永远贴住键盘」，宿主可以额外把可视区高度发过来；不实现也不会飘，只是键盘上方可能留白：
+
+```js
+const frame = document.getElementById('tongyu');
+const vv = window.visualViewport;
+const sync = () => {
+  frame.style.height = `${vv.height}px`;
+  frame.style.top = `${vv.offsetTop}px`;
+  frame.contentWindow.postMessage(
+    { type: 'host-viewport', keyboardOpen: vv.height < window.innerHeight - 80 },
+    'https://chat.example.com',
+  );
+};
+vv.addEventListener('resize', sync);
+vv.addEventListener('scroll', sync);
+sync();
+```
+
+宿主托管后不要再让页面自己跟随键盘，也不要把 iframe 放进会滚动的容器里：两边同时改高度就是上面说的「补两遍」。另外，`keyboardOpen: true` 只有在该 iframe 盒子确实已经变矮时才会生效——只发消息不改高度，组件会忽略这条消息、继续自己跟，避免输入栏停在键盘底下。
+
 CSP：服务端对 `/h5` 设置 `Content-Security-Policy: frame-ancestors …`，由环境变量 `FRAME_ANCESTORS` 控制（默认 `*`）。CORS / WebSocket Origin 仍由 `ALLOWED_ORIGINS` 控制。
+
+## 嵌入后会话什么时候结束
+
+访客端界面自带这些状态，宿主页面不需要额外开发，但要知道它们会发生：
+
+- **等待人工**：访客要求人工或 AI 转接后，若还没有客服领取，聊天区显示「正在为您转接人工客服，请稍候…」，标题栏显示「转接中」。这段时间不再有静默空白。
+- **空闲自动结束**：访客和客服都停止发言满 `CONVERSATION_AUTO_CLOSE_MINUTES`（默认 30 分钟，设为 `0` 关闭）后，系统结束会话，效果与客服手动「标记解决」完全一致——写入结束时间、在消息流里插入「较长时间没有收到新消息，本次咨询已自动结束。」、计入当日收单、发出 `conversation.closed`（Webhook 里 `closedBy` 为 `null`）。判定只看最后一条消息时间，客服转接和内部备注不会延长会话。
+- **结束后再发言**：原来的一轮保持结束。访客再次发言会另开一轮，出现在对应入口的待接待中，并按该入口的分配规则接待。客服不能把已结束的一轮改回进行中。
+- **排队提示不会被系统消息冲掉**：接入、超时重分配这类系统消息留在已结束的原会话上，不会另开一轮，也不会把结束状态改掉。
+
+按住说话的语音消息依赖麦克风权限。iframe 必须写 `allow="microphone;clipboard-write"`，缺失时浏览器直接拒绝授权，语音按钮点了没有反应；`/widget.js` 直接嵌在宿主页面里则沿用宿主自己的权限。iframe 场景里指针的“松开”事件偶尔传不进组件（页面被切走、宿主弹层盖住、手势被系统打断），旧版本会停在“按住中”，下一次点击就失灵。现在页面隐藏或卸载会先把录音安全收尾，检测到残留的按住状态也会先复位再开始新的按住。宿主页面只是短暂抢走焦点时不会中断正在进行的录音。
 
 ## 商城、店主与福利群接入（2026-10-14）
 
@@ -72,9 +118,9 @@ CSP：服务端对 `/h5` 设置 `Content-Security-Policy: frame-ancestors …`�
 
 ### 福利群与店员身份
 
-服务端商城接口以 `/api/v1/marketplace/shops/{shopId}/groups` 为Base：POST建群；`/{id}/members`批量加人；`/{id}/invite`生成邀请；`/{id}/manager`通过PUT授权管理员；`/{id}/policy`通过PATCH设置发言模式/容量。请求体与[第三方群聊接入](第三方群聊接入.md)一致，入口由shopId自动选择。建群群主与新授权管理员必须是本店有效店主或店员；业务后端还需验证当前操作者本人、禁止买家代指定群主。买家必须主动确认加入，不自动导入整店客户。
+服务端商城接口以 `/api/v1/marketplace/shops/{shopId}/groups` 为Base：POST建群；`/{id}/members`批量加人；`/{id}/invite`生成邀请；`/{id}/manager`通过PUT授权管理员；`/{id}/policy`通过PATCH设置发言模式/容量。请求体与[开放 API](open-api.md)的群聊接口一致，入口由shopId自动选择。建群群主与新授权管理员必须是本店有效店主或店员；业务后端还需验证当前操作者本人、禁止买家代指定群主。买家必须主动确认加入，不自动导入整店客户。
 
-同一Base还提供GET群列表（externalId、limit、offset）、GET `/{id}`详情（externalId）、PATCH `/{id}`资料、PUT `/{id}/owner`转让、DELETE `/{id}/members/{externalId}`移除/退出，以及POST `/{id}/dissolve`解散；请求字段与第三方群聊接入文档一致。福利群只能转让给本店有效店员。店员在自有后台显示群列表时由自己的后端代理GET，打开群再使用绑定客服登录的群会话；外部用户群不会自动变成普通agent成员群。
+同一Base还提供GET群列表（externalId、limit、offset）、GET `/{id}`详情（externalId）、PATCH `/{id}`资料、PUT `/{id}/owner`转让、DELETE `/{id}/members/{externalId}`移除/退出，以及POST `/{id}/dissolve`解散；请求字段与 [open-api.md](open-api.md) 的群聊接口一致。福利群只能转让给本店有效店员。店员在自有后台显示群列表时由自己的后端代理GET，打开群再使用绑定客服登录的群会话；外部用户群不会自动变成普通agent成员群。
 
 买家已入群后，用买家token调用 `POST /api/v1/marketplace/buyer/groups/{id}/session`。店员用真实客服token调用 `POST /api/v1/marketplace/staff/groups/{id}/session`。返回token、groupId、visitorId、expiresIn:3600；前端用该token调用groups消息接口或通过postMessage交接群页面。这两类群身份绑定原登录会话，退出或停用会失效。旧服务端member-token仍可用于独立宿主集成，但它不是绑定商城买家登录的会话；商城应用优先使用新的群会话接口。
 

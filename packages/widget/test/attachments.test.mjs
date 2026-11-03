@@ -22,13 +22,13 @@ test('恢复匿名历史时读取新渠道皮肤，保留原访客身份', async
   finally{first.destroy();restored.destroy();delete globalThis.localStorage;}
 });
 
-test('从历史列表进入指定会话，不自动改为另一个未结束会话', async () => {
+test('深链到已结束会话不会自动打开，也不会改选其它进行中会话', async () => {
   VisitorSocket.prototype.connect=()=>{};VisitorSocket.prototype.close=()=>{};
   VisitorApi.prototype.bootstrap=async()=>({token:'history-token',visitorId:'history-visitor',expiresIn:3600,inbox:{},agentsOnline:0});
   VisitorApi.prototype.listConversations=async()=>({items:[{id:'new-open',status:'OPEN'},{id:'chosen-history',status:'RESOLVED'}]});
   VisitorApi.prototype.listMessages=async()=>({items:[]});
   const store=new ChatStore(resolveOptions({endpoint:'http://localhost',inboxKey:'history',storage:'',conversationId:'chosen-history'}));
-  try{await store.init();assert.equal(store.snapshot.activeId,'chosen-history');}finally{store.destroy();}
+  try{await store.init();assert.equal(store.snapshot.activeId,undefined);}finally{store.destroy();}
 });
 
 test('登录身份缓存与退出后的匿名身份隔离，WebView 票据可以初始化', async () => {
@@ -187,7 +187,7 @@ test('缓存登录恢复时刷新在线客服数量和接待文案', async () =>
 });
 
 
-// 结束宽限期：结束后短时回复复活原会话；超宽限自动新建会话进大厅。
+// 结束后再发言：无论是否超过原先的宽限期，都必须在前端重新发起。
 function graceFixture(inbox = {}, closedMinutesAgo = 25 * 60) {
   const closedRow = { id: 'old', status: 'RESOLVED', closedAt: new Date(Date.now() - closedMinutesAgo * 60_000).toISOString(), lastSequence: 3, visitorUnread: 0 };
   const freshRow = { id: 'fresh', status: 'OPEN', lastSequence: 0, visitorUnread: 0 };
@@ -216,44 +216,29 @@ function graceFixture(inbox = {}, closedMinutesAgo = 25 * 60) {
   return { store, calls, rows };
 }
 
-test('超过宽限期后再发言自动新建会话进入大厅', async () => {
-  const f = graceFixture({ reopenGraceMinutes: 1440 });
-  try {
-    await f.store.init();
-    assert.equal(f.store.snapshot.activeId, 'old');
-    await f.store.send('新问题');
-    assert.deepEqual(f.calls.creates, ['']);
-    assert.equal(f.calls.sends[0].id, 'fresh');
-    assert.equal(f.store.snapshot.activeId, 'fresh');
-    assert.equal(f.store.snapshot.conversations.find((item) => item.id === 'fresh').status, 'OPEN');
-    assert.equal(f.store.snapshot.messages.length, 1);
-    assert.equal(f.store.snapshot.messages[0].delivery, 'SENT');
-  } finally { f.store.destroy(); }
+// 结束后再发言：必须先在前端重新发起，不能回到已结束线程。
+test('结束后再发言会新开一轮', async () => {
+  const cases = [
+    ['超过原先的 24 小时', { reopenGraceMinutes: 1440 }, 25 * 60],
+    ['宽限期内', { reopenGraceMinutes: 1440 }, 60],
+    ['宽限期为 0', { reopenGraceMinutes: 0 }, 1],
+  ];
+  for (const [label, inbox, minutes] of cases) {
+    const f = graceFixture(inbox, minutes);
+    try {
+      await f.store.init();
+      assert.equal(f.store.snapshot.activeId, 'old', label);
+      await f.store.send('再问一句');
+      assert.equal(f.calls.creates.length, 1, label);
+      assert.notEqual(f.calls.sends[0]?.id, 'old', label);
+      assert.equal(f.store.snapshot.activeId, 'fresh', label);
+    } finally {
+      f.store.destroy();
+    }
+  }
 });
 
-test('宽限期内的结束会话仍复活原会话，不新建', async () => {
-  const f = graceFixture({ reopenGraceMinutes: 1440 }, 60);
-  try {
-    await f.store.init();
-    await f.store.send('补充一句');
-    assert.equal(f.calls.creates.length, 0);
-    assert.equal(f.calls.sends[0].id, 'old');
-    assert.equal(f.calls.sends[0].content, '补充一句');
-    assert.equal(f.store.snapshot.activeId, 'old');
-  } finally { f.store.destroy(); }
-});
-
-test('宽限期为 0 的入口结束后再发言一律新建会话', async () => {
-  const f = graceFixture({ reopenGraceMinutes: 0 }, 1);
-  try {
-    await f.store.init();
-    await f.store.send('再来一次');
-    assert.equal(f.calls.creates.length, 1);
-    assert.equal(f.calls.sends[0].id, 'fresh');
-  } finally { f.store.destroy(); }
-});
-
-test('旧客户端未预检时跟随服务端分流响应切换会话', async () => {
+test('服务端若返回另一条对话，客户端跟随切换', async () => {
   const f = graceFixture({}, 10);
   VisitorApi.prototype.sendMessage = async (id, input) => {
     f.calls.sends.push({ id, content: input.content });
@@ -262,21 +247,23 @@ test('旧客户端未预检时跟随服务端分流响应切换会话', async ()
   try {
     await f.store.init();
     await f.store.send('你好');
-    assert.equal(f.calls.sends[0].id, 'old', '宽限期内客户端不预检新建');
-    assert.equal(f.store.snapshot.activeId, 'fresh', '服务端返回新会话后跟随切换');
-  } finally { f.store.destroy(); }
+    assert.notEqual(f.calls.sends[0]?.id, 'old', '客户端不会把消息发回已结束线程');
+    assert.equal(f.store.snapshot.activeId, 'fresh', '服务端返回另一条对话时跟随切换');
+  } finally {
+    f.store.destroy();
+  }
 });
 
-test('超宽限会话上的附件先落到新会话再上传', async () => {
+test('已结束会话上的附件也走新咨询', async () => {
   const f = graceFixture({ reopenGraceMinutes: 1440 });
   try {
     await f.store.init();
     await f.store.sendFiles([new File(['document'], 'help.txt', { type: 'text/plain' })]);
-    assert.deepEqual(f.calls.creates, ['']);
-    assert.deepEqual(f.calls.uploads, ['fresh']);
-    assert.equal(f.calls.sends[0].id, 'fresh');
+    assert.equal(f.calls.creates.length, 1);
     assert.equal(f.store.snapshot.activeId, 'fresh');
-  } finally { f.store.destroy(); }
+  } finally {
+    f.store.destroy();
+  }
 });
 
 const { requestMicrophone, collectRecordingChunks } = await import('../build/modules/recording.js');

@@ -36,9 +36,9 @@ class ConsoleSocket {
       StreamController<SocketState>.broadcast();
   final StreamController<void> _reconnects = StreamController<void>.broadcast();
 
-  static const Duration _heartbeatInterval = Duration(seconds: 25);
+  static const Duration _heartbeatInterval = Duration(seconds: 15);
   static const List<Duration> _backoff = <Duration>[
-    Duration(seconds: 1),
+    Duration.zero,
     Duration(seconds: 2),
     Duration(seconds: 5),
     Duration(seconds: 10),

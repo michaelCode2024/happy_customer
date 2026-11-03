@@ -294,7 +294,7 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('已解决会话提示发送会重新打开 $width', (tester) async {
+    testWidgets('已结束会话不能在原会话里继续回复 $width', (tester) async {
       tester.view.physicalSize = Size(width, 800);
       tester.view.devicePixelRatio = 1;
       addTearDown(() {
@@ -340,7 +340,8 @@ void main() {
                   showInlineAssist: false))));
       await tester.pumpAndSettle();
       expect(find.text('已结束'), findsOneWidget);
-      expect(find.textContaining('重新打开会话'), findsOneWidget);
+      expect(find.textContaining('开始新会话'), findsOneWidget);
+      expect(find.text('重新打开'), findsNothing);
       expect(tester.takeException(), isNull);
     });
   }
