@@ -19,17 +19,17 @@ enum AlertCardStage { enable, openSettings, finishPush }
 
 /// 决定是否弹卡、弹哪一版。
 ///
-/// 核对推送状态期间（[pushChecked] 为 false）先不弹，避免工作台刚打开时闪一下。
+/// 通知权限已经允许时不弹。Chrome 不会再次弹出授权框。
+/// [pushChecked] 与 [pushOff] 仍留给调用方传入，不再单独决定弹卡。
 AlertCardStage? alertCardStage({
   required String permission,
   required bool pushChecked,
   required bool pushOff,
 }) {
-  if (permission == 'unsupported') return null;
+  if (permission == 'unsupported' || permission == 'granted') return null;
   if (permission == 'denied') return AlertCardStage.openSettings;
   if (permission == 'default') return AlertCardStage.enable;
-  if (!pushChecked) return null;
-  return pushOff ? AlertCardStage.finishPush : null;
+  return null;
 }
 
 class _CardCopy {
@@ -357,10 +357,11 @@ class _AlertEnableCardHostState extends State<AlertEnableCardHost>
       final granted = await showBrowserNotificationSettings(ctx);
       if (!granted) return '还没有检测到通知权限，请按步骤开启后重试';
     }
-    // 授权弹窗必须留在这次点击里。先单独请求权限再订阅，页面开久后浏览器不再弹窗。
+    // 授权和订阅必须留在这次点击里。先播声音，Chrome 不再弹窗。
+    final opening = enableBackgroundPush(widget.api);
     turnMessageSoundOn();
+    final message = await opening;
     rememberDeskAlerts();
-    final message = await enableBackgroundPush(widget.api);
     // 不靠返回文案判断成败：回读一次订阅状态，失败时把原因留在卡片上。
     var stillOff = true;
     try {

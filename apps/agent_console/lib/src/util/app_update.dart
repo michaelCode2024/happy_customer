@@ -153,27 +153,51 @@ int _asInt(dynamic value) {
   return int.tryParse('$value') ?? 0;
 }
 
-/// 比较远端与本机：优先 buildNumber；否则按 x.y.z 版本段比较。
+/// 覆盖安装只看构建号。构建号缺失时，把四段日期号折成构建号；
+/// 仍然缺一边时只比前三段，避免线上多一段序号时装完还提示更新。
 bool isRemoteNewer({
   required String localVersion,
   required int localBuild,
   required String remoteVersion,
   required int remoteBuild,
 }) {
-  if (remoteBuild > 0 && localBuild > 0) {
-    return remoteBuild > localBuild;
-  }
-  return _compareVersion(remoteVersion, localVersion) > 0;
+  final installed = _resolvedBuild(localVersion, localBuild);
+  final published = _resolvedBuild(remoteVersion, remoteBuild);
+  if (installed > 0 && published > 0) return published > installed;
+  return _compareVersion(_threePart(remoteVersion), _threePart(localVersion)) > 0;
 }
 
+int _resolvedBuild(String version, int build) {
+  if (build > 0) return build;
+  final parts = _versionParts(version);
+  if (parts.length >= 4 &&
+      parts[0] >= 2024 &&
+      parts[1] >= 1 &&
+      parts[1] <= 12 &&
+      parts[2] >= 1 &&
+      parts[2] <= 31 &&
+      parts[3] >= 0 &&
+      parts[3] < 100) {
+    return parts[0] * 1000000 + parts[1] * 10000 + parts[2] * 100 + parts[3];
+  }
+  return 0;
+}
+
+String _threePart(String version) {
+  final parts = _versionParts(version);
+  if (parts.length <= 3) return version;
+  return parts.take(3).join('.');
+}
+
+List<int> _versionParts(String raw) => raw
+    .split(RegExp(r'[^0-9]+'))
+    .where((part) => part.isNotEmpty)
+    .map((part) => int.tryParse(part) ?? 0)
+    .toList(growable: false);
+
 int _compareVersion(String a, String b) {
-  List<int> parts(String raw) => raw
-      .split(RegExp(r'[^0-9]+'))
-      .where((p) => p.isNotEmpty)
-      .map((p) => int.tryParse(p) ?? 0)
-      .toList(growable: false);
-  final left = parts(a);
-  final right = parts(b);
+  final left = _versionParts(a);
+  final right = _versionParts(b);
   final n = left.length > right.length ? left.length : right.length;
   for (var i = 0; i < n; i++) {
     final l = i < left.length ? left[i] : 0;

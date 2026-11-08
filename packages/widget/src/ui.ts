@@ -414,6 +414,11 @@ export class WidgetView {
   #hostWantsKeyboard = false;
   /** 宿主当前把 iframe 收成的像素高，0 表示没带。 */
   #hostBoxHeight = 0;
+  /**
+   * 宿主固定 iframe 不动、只告诉我们可视区（相对 iframe 的 top/height）。
+   * iOS 不会同步被移动的跨域 iframe 里的光标，所以位移全在框内做。
+   */
+  #hostFrame?: { top: number; height: number; keyboardOpen: boolean };
   #stopKeyboardPin?: () => void;
   /** 按住收尾的页面级兜底同样只绑一次。 */
   #holdSafetyBound = false;
@@ -501,10 +506,25 @@ export class WidgetView {
 
   /** 宿主声明键盘状态。盒子没变矮时不接管，输入栏继续跟 iframe 自己的可视区。 */
   setHostViewport(keyboardOpen: boolean, boxHeight = 0): void {
-    if (!this.#options.embedded || window.parent === window) return;
+    if (!this.#options.embedded || window.parent === window || this.#hostFrame) return;
     this.#hostWantsKeyboard = keyboardOpen;
     this.#hostBoxHeight = boxHeight;
     this.#reconcileHostViewport();
+  }
+
+  /** 宿主固定 iframe 模式：父页和框内可视区取交集，iframe 自身不移动。 */
+  setHostFrameViewport(top: number, height: number, keyboardOpen: boolean): void {
+    if (!this.#options.embedded || window.parent === window) return;
+    if (!(height > 0)) return;
+    if (this.#hostViewportManaged) {
+      this.disposeViewport();
+      this.#hostViewportManaged = false;
+      this.#keyboardPinBound = false;
+    }
+    this.#hostFrame = { top: Math.max(0, Math.round(top)), height: Math.round(height), keyboardOpen };
+    // 跨域输入时父页可能收不到视口变化，保留框内监听作为可视区补充。
+    this.#bindKeyboardPin();
+    this.#pinComposerToKeyboard();
   }
 
   #viewportClientHeight(): number {
@@ -598,6 +618,23 @@ export class WidgetView {
   #pinComposerToKeyboard(): void {
     const panel = this.#root.querySelector('.rd-panel') as HTMLElement | null;
     if (!panel || panel.hidden) return;
+    if (this.#hostFrame) {
+      const frame = this.#hostFrame;
+      const vv = window.visualViewport;
+      const localVisible = vv && vv.height > 0 && Math.abs(vv.scale - 1) < 0.01;
+      const top = localVisible ? Math.max(frame.top, vv.offsetTop) : frame.top;
+      const bottom = localVisible
+        ? Math.min(frame.top + frame.height, vv.offsetTop + vv.height)
+        : frame.top + frame.height;
+      // 两个可视区取交集，不能把两边的键盘高度相加。
+      if (bottom <= top) return;
+      const keyboardOpen = frame.keyboardOpen ||
+        !!(localVisible && window.innerHeight - vv.height > 120);
+      this.#applyPanelBox(panel, `${bottom - top}px`, top, keyboardOpen);
+      // iOS 聚焦时可能把框内文档滚走，面板坐标按 0 滚动算。
+      if (window.scrollY !== 0) window.scrollTo(0, 0);
+      return;
+    }
     // 宿主消息可能早于 iframe 布局。盒子随后变矮时再交出去，避免一直按旧的可视区缩。
     if (this.#hostWantsKeyboard && !this.#hostViewportManaged && this.#hostBoxIsShort()) {
       this.#reconcileHostViewport();
@@ -1155,7 +1192,7 @@ export class WidgetView {
     if (!snapshot.open) {
       return;
     }
-    if (this.#hostViewportManaged) this.#pinComposerToKeyboard();
+    if (this.#hostViewportManaged || this.#hostFrame) this.#pinComposerToKeyboard();
     const subtitle = panel.querySelector('.rd-subtitle') as HTMLElement;
     subtitle.textContent = this.#subtitle(snapshot);
     const serviceSubtitle = panel.querySelector('.rd-service-subtitle') as HTMLElement;

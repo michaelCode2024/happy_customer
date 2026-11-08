@@ -707,9 +707,29 @@ class TongYuApi {
         contentType: _parseMediaType(contentType),
       ),
     );
-    final streamed = await _client.send(request).timeout(_uploadTimeout);
-    final body = await _decode(streamed);
-    return UploadedFile.fromJson(body);
+    try {
+      final streamed = await _client.send(request).timeout(_uploadTimeout);
+      final body = await _decode(streamed);
+      return UploadedFile.fromJson(body);
+    } on ApiException {
+      rethrow;
+    } on TimeoutException {
+      throw const ApiException(
+        statusCode: 0,
+        code: 'TIMEOUT',
+        message: '上传超时，请检查网络后重试',
+      );
+    } catch (error) {
+      final text = error.toString();
+      if (text.contains('Failed to fetch') || text.contains('ClientException')) {
+        throw const ApiException(
+          statusCode: 0,
+          code: 'NETWORK_ERROR',
+          message: '上传没有得到服务器回应。文件可能超过网关允许的大小，或网络中断',
+        );
+      }
+      rethrow;
+    }
   }
 
   /// --------------------------------------------------------- customer records

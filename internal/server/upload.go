@@ -8,7 +8,6 @@ import (
 	"mime"
 	"net/http"
 	"os"
-	"path"
 	"strings"
 	"time"
 
@@ -56,7 +55,9 @@ func (a *API) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, a.cfg.Upload.MaxBytes+1<<20)
+	if a.cfg.Upload.MaxBytes > 0 {
+		r.Body = http.MaxBytesReader(w, r.Body, a.cfg.Upload.MaxBytes+1<<20)
+	}
 	if err := r.ParseMultipartForm(4 << 20); err != nil {
 		fail(w, 400, "上传内容过大或格式不正确")
 		return
@@ -67,7 +68,7 @@ func (a *API) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
-	if header.Size > a.cfg.Upload.MaxBytes {
+	if a.cfg.Upload.MaxBytes > 0 && header.Size > a.cfg.Upload.MaxBytes {
 		fail(w, 413, "文件超过大小限制")
 		return
 	}
@@ -82,7 +83,11 @@ func (a *API) upload(w http.ResponseWriter, r *http.Request) {
 
 	attachmentID := uuid.New()
 	key := storage.BuildKey(principal.TenantID.String(), parsedConversation.String(), attachmentID.String(), header.Filename)
-	if err := a.store.Save(r.Context(), key, io.LimitReader(file, a.cfg.Upload.MaxBytes), contentType); err != nil {
+	body := io.Reader(file)
+	if a.cfg.Upload.MaxBytes > 0 {
+		body = io.LimitReader(file, a.cfg.Upload.MaxBytes)
+	}
+	if err := a.store.Save(r.Context(), key, body, contentType); err != nil {
 		a.logger.Error("store upload failed", "error", err)
 		fail(w, 500, "保存文件失败")
 		return
@@ -132,33 +137,9 @@ func (a *API) canUploadTo(r *http.Request, principal auth.Principal, conversatio
 }
 
 func (a *API) allowedUploadType(contentType, fileName string) bool {
+	// 坐席要粘贴任意文件。空类型仍然拒绝，避免没有文件名的空请求落库。
 	contentType = strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
-	if contentType == "application/octet-stream" {
-		switch strings.ToLower(path.Ext(fileName)) {
-		case ".woff":
-			contentType = "font/woff"
-		case ".woff2":
-			contentType = "font/woff2"
-		case ".ttf":
-			contentType = "font/ttf"
-		case ".otf":
-			contentType = "font/otf"
-		}
-	}
-	if strings.HasPrefix(contentType, "image/") {
-		switch contentType {
-		case "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp":
-			return true
-		default:
-			return false
-		}
-	}
-	for _, allowed := range a.cfg.Upload.AllowedTypes {
-		if strings.EqualFold(allowed, contentType) {
-			return true
-		}
-	}
-	return false
+	return contentType != "" && strings.TrimSpace(fileName) != ""
 }
 
 // downloadFile streams an attachment to a visitor or agent who can prove access.
@@ -275,7 +256,12 @@ func principalActorID(p auth.Principal) any {
 // 聊天图片和音视频可直接预览，文档使用下载响应并保留中文文件名。
 func contentDisposition(fileName, contentType string) string {
 	disposition := "attachment"
-	if (strings.HasPrefix(contentType, "image/") && contentType != "image/svg+xml") || strings.HasPrefix(contentType, "audio/") || strings.HasPrefix(contentType, "video/") {
+	inline := (strings.HasPrefix(contentType, "image/") && contentType != "image/svg+xml") ||
+		strings.HasPrefix(contentType, "audio/") ||
+		strings.HasPrefix(contentType, "video/") ||
+		strings.HasPrefix(contentType, "text/") ||
+		contentType == "application/pdf"
+	if inline {
 		disposition = "inline"
 	}
 	safe := strings.ReplaceAll(strings.ReplaceAll(fileName, "\r", "_"), "\n", "_")

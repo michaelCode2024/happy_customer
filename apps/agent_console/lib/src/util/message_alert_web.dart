@@ -482,20 +482,13 @@ class _AlertSettingsState extends State<_AlertSettings> {
                     setState(() => _status = '当前浏览器不支持桌面通知');
                     return;
                   }
-                  final permission = await html.Notification.requestPermission()
-                      .timeout(const Duration(seconds: 8),
-                          onTimeout: () => 'default');
-                  if (!mounted) return;
-                  final granted = permission == 'granted';
-                  setState(() {
-                    html.window.localStorage['tongyu.desktopAlerts'] =
-                        granted ? 'on' : 'off';
-                    _status = granted ? '正在打开浏览器推送…' : '浏览器未允许通知；提示音和未读角标仍可使用';
-                  });
-                  _publishDeskAlerts();
                   final api = widget.api;
-                  if (!granted || api == null) return;
-                  final message = await enableBackgroundPush(api);
+                  if (api == null) return;
+                  final opening = enableBackgroundPush(api);
+                  setState(() => _status = '请在 Chrome 弹窗中允许通知');
+                  final message = await opening;
+                  if (!mounted) return;
+                  rememberDeskAlerts();
                   if (!mounted) return;
                   setState(() => _status = message);
                   notifyPushStateChanged();

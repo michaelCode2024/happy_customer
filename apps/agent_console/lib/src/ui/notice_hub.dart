@@ -9,7 +9,7 @@ import 'package:tongyu_agent_console/src/util/notice.dart';
 /// 统一规格的卡片或胶囊。
 ///
 /// - 贴在窗口右下角，窄屏抬到导航栏上方；
-/// - 卡片固定 320px、左侧主题色竖条，胶囊宽度自适应；
+/// - 卡片与短提示都固定在同一宽度内，左侧主题色竖条，圆角一致；
 /// - 新的一条靠下，最多 [NoticeHubController.maxVisible] 张；
 /// - 到点自动收起，鼠标悬停暂停计时。
 class NoticeHub extends StatelessWidget {
@@ -206,43 +206,11 @@ class _NoticeTileState extends State<_NoticeTile>
                     _NoticeGlyph(item: item, accent: accent),
                     const SizedBox(width: 9),
                     Expanded(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  item.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: RelayTheme.uiText(
-                                    fontSize: 13.5,
-                                    fontWeight: FontWeight.w600,
-                                    color: scheme.onSurface,
-                                  ),
-                                ),
-                              ),
-                              if (item.count > 1) ...[
-                                const SizedBox(width: 6),
-                                _CountBadge(item: item, accent: accent),
-                              ],
-                            ],
-                          ),
-                          if (body.isNotEmpty) ...[
-                            const SizedBox(height: 2),
-                            Text(
-                              body,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: RelayTheme.uiText(
-                                fontSize: 12,
-                                color: scheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ],
+                      child: _CardCopy(
+                        item: item,
+                        body: body,
+                        accent: accent,
+                        scheme: scheme,
                       ),
                     ),
                     if (item.actionLabel != null) ...[
@@ -282,60 +250,172 @@ class _NoticeTileState extends State<_NoticeTile>
     final scheme = Theme.of(context).colorScheme;
     final item = widget.item;
     final accent = item.accent ?? scheme.primary;
-    return Material(
-      color: scheme.surface,
-      elevation: 4,
-      shadowColor: Colors.black.withAlpha(30),
-      shape: StadiumBorder(side: BorderSide(color: scheme.outlineVariant)),
-      child: InkWell(
-        onTap: item.dismissible ? () => unawaited(_dismiss()) : null,
-        borderRadius: BorderRadius.circular(999),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 7, 6, 7),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(item.icon ?? Icons.info_outline, size: 15, color: accent),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  item.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: RelayTheme.uiText(
-                    fontSize: 12.5,
-                    color: scheme.onSurface,
-                  ),
-                ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : 320.0;
+        return Material(
+          color: scheme.surface,
+          elevation: 8,
+          shadowColor: Colors.black.withAlpha(40),
+          borderRadius: BorderRadius.circular(14),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: item.dismissible ? () => unawaited(_dismiss()) : null,
+            child: Container(
+              width: maxWidth,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: accent.withAlpha(38)),
               ),
-              if (item.actionLabel != null) ...[
-                const SizedBox(width: 2),
-                TextButton(
-                  onPressed: _open,
-                  style: TextButton.styleFrom(
-                    minimumSize: const Size(0, 28),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    foregroundColor: accent,
+              child: Row(
+                children: [
+                  Container(width: 3, color: accent),
+                  const SizedBox(width: 10),
+                  Icon(item.icon ?? Icons.info_outline_rounded,
+                      size: 16, color: accent),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      child: Text(
+                        item.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: RelayTheme.uiText(
+                          fontSize: 13,
+                          height: 1.35,
+                          color: scheme.onSurface,
+                        ),
+                      ),
+                    ),
                   ),
-                  child: Text(item.actionLabel!),
-                ),
+                  if (item.actionLabel != null)
+                    TextButton(
+                      onPressed: _open,
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(0, 32),
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        foregroundColor: accent,
+                      ),
+                      child: Text(item.actionLabel!),
+                    ),
+                  if (item.dismissible)
+                    IconButton(
+                      tooltip: '关闭',
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints:
+                          const BoxConstraints.tightFor(width: 32, height: 32),
+                      iconSize: 16,
+                      color: scheme.onSurfaceVariant,
+                      onPressed: _dismiss,
+                      icon: const Icon(Icons.close_rounded),
+                    )
+                  else
+                    const SizedBox(width: 12),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _CardCopy extends StatelessWidget {
+  const _CardCopy({
+    required this.item,
+    required this.body,
+    required this.accent,
+    required this.scheme,
+  });
+
+  final NoticeItem item;
+  final String body;
+  final Color accent;
+  final ColorScheme scheme;
+
+  @override
+  Widget build(BuildContext context) {
+    final kicker = item.kicker?.trim() ?? '';
+    if (kicker.isEmpty) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Flexible(child: _primaryLine(item.title)),
+              if (item.count > 1) ...[
+                const SizedBox(width: 6),
+                _CountBadge(item: item, accent: accent),
               ],
-              if (item.dismissible)
-                IconButton(
-                  tooltip: '关闭',
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints.tightFor(
-                      width: 24, height: 24),
-                  iconSize: 15,
-                  color: scheme.onSurfaceVariant,
-                  onPressed: _dismiss,
-                  icon: const Icon(Icons.close_rounded),
-                ),
             ],
           ),
+          if (body.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            _secondaryLine(body),
+          ],
+        ],
+      );
+    }
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              kicker,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: RelayTheme.uiText(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: accent,
+              ),
+            ),
+            if (item.count > 1) ...[
+              const SizedBox(width: 6),
+              _CountBadge(item: item, accent: accent),
+            ],
+          ],
         ),
+        const SizedBox(height: 2),
+        if (body.isNotEmpty) _primaryLine(body) else _primaryLine(item.title),
+        if (body.isNotEmpty) ...[
+          const SizedBox(height: 1),
+          _secondaryLine(item.title),
+        ],
+      ],
+    );
+  }
+
+  Widget _primaryLine(String text) {
+    return Text(
+      text,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: RelayTheme.uiText(
+        fontSize: 13.5,
+        fontWeight: FontWeight.w600,
+        color: scheme.onSurface,
+      ),
+    );
+  }
+
+  Widget _secondaryLine(String text) {
+    return Text(
+      text,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: RelayTheme.uiText(
+        fontSize: 12,
+        color: scheme.onSurfaceVariant,
       ),
     );
   }

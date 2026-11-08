@@ -15,6 +15,7 @@ import 'package:tongyu_agent_console/src/state/workbench_controller.dart';
 import 'package:tongyu_agent_console/src/theme.dart';
 import 'package:tongyu_agent_console/src/util/notice.dart';
 import 'package:tongyu_agent_console/src/util/attachment_picker.dart';
+import 'package:tongyu_agent_console/src/util/clipboard_image.dart';
 import 'package:tongyu_agent_console/src/util/browser_chrome.dart';
 import 'package:tongyu_agent_console/src/util/voice_recording.dart';
 import 'package:tongyu_agent_console/src/ui/composer_emoji_panel.dart';
@@ -24,6 +25,7 @@ import 'package:tongyu_agent_console/src/util/labels.dart';
 import 'package:tongyu_agent_console/src/util/voice_player.dart';
 import 'package:tongyu_agent_console/src/util/web_emoji_font.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:url_launcher/url_launcher.dart';
 
 /// The middle pane: the conversation itself.
 ///
@@ -90,6 +92,11 @@ class _ChatPanelState extends State<ChatPanel> {
   bool _sending = false;
   bool _uploading = false;
   String? _uploadError;
+
+  /// Guards the async clipboard probe so a held-down Ctrl+V cannot start two
+  /// uploads before the first one has set [_uploading].
+  bool _pasteInFlight = false;
+  WebImagePasteBinding? _webPaste;
   final Map<String, int> _voiceDurations = {};
 
   /// 会话区里的一句话提示（发送被拦截、发送失败、已转发等）。
@@ -204,6 +211,17 @@ class _ChatPanelState extends State<ChatPanel> {
       }
     });
     _scroll.addListener(_onScroll);
+    // 安装包在按键里读剪贴板。网页的截图只在 paste 事件里，不能事后再读。
+    HardwareKeyboard.instance.addHandler(_onPasteKey);
+    _webPaste = bindWebImagePaste(
+      accept: () =>
+          _composerFocus.hasFocus &&
+          !_pasteInFlight &&
+          _canAttachPastedImage(),
+      onFiles: (files) {
+        unawaited(_attachPastedFiles(files));
+      },
+    );
     widget.workbench.addListener(_onWorkbenchChanged);
     widget.assistDraft?.addListener(_adoptAssist);
     _onWorkbenchChanged();
@@ -244,6 +262,8 @@ class _ChatPanelState extends State<ChatPanel> {
 
   @override
   void dispose() {
+    _webPaste?.cancel();
+    HardwareKeyboard.instance.removeHandler(_onPasteKey);
     _readTimer?.cancel();
     if (_draftLoaded && _draftConversationId != null && !_noteMode) {
       unawaited(widget.workbench.api.saveDraft(
@@ -451,6 +471,161 @@ class _ChatPanelState extends State<ChatPanel> {
         setState(() => _uploading = false);
       }
     }
+  }
+
+  /// Ctrl+V / Cmd+V is seen before the TextField's own paste shortcut.
+  ///
+  /// Returning false is deliberate: text paste keeps Flutter's native behaviour
+  /// (selection replacement, undo history, IME), and a bitmap on the clipboard
+  /// is *additionally* queued as an attachment. A user pasting a sentence sees
+  /// exactly what they saw before this feature existed.
+  bool _onPasteKey(KeyEvent event) {
+    // 网页走粘贴事件。这里再读会调到要权限的 clipboard.read，并且和事件各传一次。
+    if (kIsWeb ||
+        event is! KeyDownEvent ||
+        event.logicalKey != LogicalKeyboardKey.keyV ||
+        !supportsClipboardImagePaste) {
+      return false;
+    }
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isAltPressed ||
+        !(keyboard.isControlPressed || keyboard.isMetaPressed)) {
+      return false;
+    }
+    if (!_composerFocus.hasFocus ||
+        _pasteInFlight ||
+        !_canAttachPastedImage()) {
+      return false;
+    }
+    unawaited(_attachPastedImage());
+    return false;
+  }
+
+  /// Mirrors the toolbar's disabled states: a pasted image is an attachment to
+  /// the next public reply, so the same rules as 「发送图片」 apply.
+  bool _canAttachPastedImage() {
+    if (_uploading || _sending) return false;
+    final workbench = widget.workbench;
+    final conversation = workbench.selected;
+    if (conversation == null || workbench.selectedId == null) return false;
+    if (conversation.isHeldByOther(workbench.selfId) && !workbench.seesTeam) {
+      return false;
+    }
+    if (!_noteMode &&
+        conversation.publicReplyBlockReason(workbench.selfId) != null) {
+      return false;
+    }
+    return true;
+  }
+
+  Future<void> _attachPastedImage() async {
+    if (_pasteInFlight) return;
+    _pasteInFlight = true;
+    try {
+      final files = await readNativeClipboardFiles();
+      if (files.isNotEmpty) {
+        await _uploadPastedFiles(files);
+        return;
+      }
+      final image = await readClipboardImage();
+      if (image == null) return;
+      await _uploadPastedFiles([
+        PastedClipboardFile(
+          fileName: '',
+          reportedType: image.contentType,
+          bytes: image.bytes,
+        ),
+      ]);
+    } catch (_) {
+      // Clipboard probing is best-effort; native text paste already ran.
+    } finally {
+      _pasteInFlight = false;
+    }
+  }
+
+  Future<void> _attachPastedFiles(List<PastedClipboardFile> files) async {
+    if (_pasteInFlight || files.isEmpty) return;
+    _pasteInFlight = true;
+    try {
+      await _uploadPastedFiles(files);
+    } catch (_) {
+      // 粘贴事件里的字节读失败时，不打断正在输入的文字。
+    } finally {
+      _pasteInFlight = false;
+    }
+  }
+
+  Future<void> _uploadPastedFiles(List<PastedClipboardFile> files) async {
+    if (!mounted || files.isEmpty) return;
+    final conversationId = widget.workbench.selectedId;
+    if (conversationId == null || !_canAttachPastedImage()) return;
+    setState(() {
+      _uploading = true;
+      _uploadError = null;
+    });
+    try {
+      for (final file in files) {
+        if (!mounted || widget.workbench.selectedId != conversationId) return;
+        final prepared = await _preparePastedFile(file);
+        final uploaded = await widget.workbench.api.upload(
+          conversationId: conversationId,
+          fileName: prepared.fileName,
+          bytes: prepared.bytes,
+          contentType: prepared.contentType,
+        );
+        if (!mounted || widget.workbench.selectedId != conversationId) return;
+        setState(() {
+          _pending.add(Attachment(
+            id: uploaded.id,
+            fileName: uploaded.fileName,
+            contentType: uploaded.contentType,
+            sizeBytes: uploaded.sizeBytes,
+            url: uploaded.url,
+          ));
+        });
+      }
+    } catch (error) {
+      if (mounted) setState(() => _uploadError = '粘贴文件上传失败：$error');
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  Future<({String fileName, String contentType, Uint8List bytes})>
+      _preparePastedFile(PastedClipboardFile file) async {
+    var name = file.fileName.trim();
+    var type = contentTypeForAttachment(name, file.reportedType);
+    var bytes = file.bytes;
+    if (type.startsWith('image/')) {
+      final image = await normalizedClipboardImage(bytes);
+      if (image != null) {
+        bytes = image.bytes;
+        type = image.contentType;
+        if (name.isEmpty || !name.contains('.')) {
+          name = _pastedImageName(image.extension);
+        }
+      }
+    }
+    if (name.isEmpty) name = _pastedImageName(_extensionForType(type));
+    return (fileName: name, contentType: type, bytes: bytes);
+  }
+
+  String _extensionForType(String contentType) => switch (contentType) {
+        'image/jpeg' => 'jpg',
+        'image/gif' => 'gif',
+        'image/webp' => 'webp',
+        'application/pdf' => 'pdf',
+        'text/plain' => 'txt',
+        'application/zip' => 'zip',
+        _ => 'bin',
+      };
+
+  String _pastedImageName(String extension) {
+    final now = DateTime.now();
+    String two(int value) => value.toString().padLeft(2, '0');
+    return 'paste-${now.year}${two(now.month)}${two(now.day)}-'
+        '${two(now.hour)}${two(now.minute)}${two(now.second)}-'
+        '${now.millisecond.toString().padLeft(3, '0')}.$extension';
   }
 
   /// 已结束或别人接待时，输入区换成常驻条，不再用右下角胶囊说同一句话。
@@ -1020,6 +1195,7 @@ class _ChatPanelState extends State<ChatPanel> {
               sending: _sending,
               uploading: _uploading,
               pending: _pending,
+              fileUrl: widget.workbench.api.fileUrl,
               uploadError: _uploadError,
               visitorTyping: workbench.visitorTyping,
               canned: workbench.cannedForSelection,
@@ -1609,6 +1785,12 @@ class _MessageList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final messages = workbench.messages;
+    final imageUrls = <String>[
+      for (final message in messages)
+        if (!message.isDeleted)
+          for (final attachment in message.attachments)
+            if (attachment.isImage) workbench.api.fileUrl(attachment.url),
+    ];
     if (workbench.loadingThread && messages.isEmpty) {
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
     }
@@ -1660,6 +1842,7 @@ class _MessageList extends StatelessWidget {
           message: message,
           selfId: workbench.selfId,
           fileUrl: workbench.api.fileUrl,
+          imageUrls: imageUrls,
           receipt: workbench.receiptFor(message),
           flash: flashSequence != null && message.sequence == flashSequence,
           onRetry: () => onRetry(message),
@@ -2039,6 +2222,7 @@ class _MessageBubble extends StatelessWidget {
     required this.message,
     required this.selfId,
     required this.fileUrl,
+    required this.imageUrls,
     required this.receipt,
     required this.flash,
     required this.onRetry,
@@ -2053,6 +2237,9 @@ class _MessageBubble extends StatelessWidget {
   final ChatMessage message;
   final String selfId;
   final String Function(String) fileUrl;
+
+  /// 当前已加载记录里的图片，顺序与时间线一致。更早的要先翻出来才进这组。
+  final List<String> imageUrls;
   final MessageReceipt receipt;
 
   /// True while this message is the target of a jump, which draws a brief
@@ -2255,6 +2442,7 @@ class _MessageBubble extends StatelessWidget {
                     _Attachments(
                       attachments: message.attachments,
                       fileUrl: fileUrl,
+                      imageUrls: imageUrls,
                       alignEnd: isAgent,
                       voiceDuration: message.voiceDuration,
                     ),
@@ -2966,13 +3154,79 @@ class _NoteBubble extends StatelessWidget {
   }
 }
 
-/// 坐席端图片全屏预览：双指缩放 + 点遮罩/关闭退出。
-void _openImagePreview(BuildContext context, String url) {
+/// 坐席端图片全屏预览：双指缩放，多张时左右切换，点遮罩或关闭退出。
+void _openImagePreview(BuildContext context, List<String> urls, String url) {
+  final gallery = urls.isEmpty ? <String>[url] : urls;
+  var index = gallery.indexOf(url);
+  if (index < 0) {
+    gallery.add(url);
+    index = gallery.length - 1;
+  }
   showDialog<void>(
     context: context,
-    barrierColor: Colors.black.withOpacity(0.88),
+    barrierColor: Colors.black.withValues(alpha: 0.88),
     builder: (dialogContext) {
-      return Dialog(
+      return _ImageGalleryDialog(
+        urls: List<String>.of(gallery),
+        initialIndex: index,
+      );
+    },
+  );
+}
+
+class _ImageGalleryDialog extends StatefulWidget {
+  const _ImageGalleryDialog({required this.urls, required this.initialIndex});
+
+  final List<String> urls;
+  final int initialIndex;
+
+  @override
+  State<_ImageGalleryDialog> createState() => _ImageGalleryDialogState();
+}
+
+class _ImageGalleryDialogState extends State<_ImageGalleryDialog> {
+  late int _index = widget.initialIndex;
+  final _focus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focus.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  void _step(int delta) {
+    final next = _index + delta;
+    if (next < 0 || next >= widget.urls.length) return;
+    setState(() => _index = next);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final multi = widget.urls.length > 1;
+    return Focus(
+      focusNode: _focus,
+      autofocus: true,
+      onKeyEvent: (node, event) {
+        if (event is! KeyDownEvent) return KeyEventResult.ignored;
+        if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+          _step(-1);
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+          _step(1);
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Dialog(
         backgroundColor: Colors.transparent,
         insetPadding: const EdgeInsets.all(16),
         child: Stack(
@@ -2980,38 +3234,84 @@ void _openImagePreview(BuildContext context, String url) {
             Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTap: () => Navigator.of(dialogContext).pop(),
+                onTap: () => Navigator.of(context).pop(),
                 child: const SizedBox.expand(),
               ),
             ),
-            Center(
-              child: InteractiveViewer(
-                minScale: 0.8,
-                maxScale: 4,
-                child: Image.network(
-                  url,
-                  fit: BoxFit.contain,
-                  errorBuilder: (context, error, stack) => const Text(
-                    '图片加载失败',
-                    style: TextStyle(color: Colors.white70),
+            Positioned.fill(
+              child: Center(
+                child: InteractiveViewer(
+                  key: ValueKey(_index),
+                  minScale: 0.8,
+                  maxScale: 4,
+                  child: Image.network(
+                    widget.urls[_index],
+                    fit: BoxFit.contain,
+                    errorBuilder: (context, error, stack) => const Text(
+                      '图片加载失败',
+                      style: TextStyle(color: Colors.white70),
+                    ),
                   ),
                 ),
               ),
             ),
+            if (multi)
+              Positioned(
+                left: 0,
+                top: 0,
+                bottom: 0,
+                child: Align(
+                  alignment: Alignment.center,
+                  child: IconButton(
+                    tooltip: '上一张',
+                    onPressed: _index > 0 ? () => _step(-1) : null,
+                    icon: const Icon(Icons.chevron_left, color: Colors.white),
+                    iconSize: 36,
+                  ),
+                ),
+              ),
+            if (multi)
+              Positioned(
+                right: 48,
+                top: 0,
+                bottom: 0,
+                child: Align(
+                  alignment: Alignment.center,
+                  child: IconButton(
+                    tooltip: '下一张',
+                    onPressed: _index < widget.urls.length - 1
+                        ? () => _step(1)
+                        : null,
+                    icon: const Icon(Icons.chevron_right, color: Colors.white),
+                    iconSize: 36,
+                  ),
+                ),
+              ),
             Positioned(
               top: 0,
               right: 0,
               child: IconButton(
                 tooltip: '关闭',
-                onPressed: () => Navigator.of(dialogContext).pop(),
+                onPressed: () => Navigator.of(context).pop(),
                 icon: const Icon(Icons.close, color: Colors.white),
               ),
             ),
+            if (multi)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 8,
+                child: Text(
+                  '${_index + 1} / ${widget.urls.length}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white70),
+                ),
+              ),
           ],
         ),
-      );
-    },
-  );
+      ),
+    );
+  }
 }
 
 /// Image and file bubbles. Images are loaded straight from the authenticated
@@ -3021,12 +3321,14 @@ class _Attachments extends StatelessWidget {
   const _Attachments({
     required this.attachments,
     required this.fileUrl,
+    required this.imageUrls,
     required this.alignEnd,
     this.voiceDuration,
   });
 
   final List<Attachment> attachments;
   final String Function(String) fileUrl;
+  final List<String> imageUrls;
   final bool alignEnd;
 
   /// The duration the sending device measured. Audio the player has not buffered
@@ -3052,7 +3354,8 @@ class _Attachments extends StatelessWidget {
                       return MouseRegion(
                         cursor: SystemMouseCursors.click,
                         child: GestureDetector(
-                          onTap: () => _openImagePreview(context, url),
+                          onTap: () =>
+                              _openImagePreview(context, imageUrls, url),
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(8),
                             child: ConstrainedBox(
@@ -3255,6 +3558,29 @@ class _VoiceNoteState extends State<_VoiceNote> {
   }
 }
 
+/// 图片留在会话里看。其它文件交给浏览器打开，PDF 和文本可以当场看，其余类型下载。
+Future<void> _openAttachmentPreview(
+  BuildContext context,
+  Attachment attachment,
+  String url,
+  List<String> imageUrls,
+) async {
+  if (attachment.isImage) {
+    _openImagePreview(context, imageUrls, url);
+    return;
+  }
+  final uri = Uri.tryParse(url);
+  if (uri == null) return;
+  final opened = await launchUrl(
+    uri,
+    mode: LaunchMode.externalApplication,
+    webOnlyWindowName: '_blank',
+  );
+  if (!opened && context.mounted) {
+    _ChatTipScope.show(context, '没有打开${attachment.fileName}');
+  }
+}
+
 class _FileChip extends StatelessWidget {
   const _FileChip({required this.attachment, required this.url});
 
@@ -3264,7 +3590,17 @@ class _FileChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => _openAttachmentPreview(
+          context,
+          attachment,
+          url,
+          attachment.isImage ? [url] : const [],
+        ),
+        child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface.withAlpha(160),
@@ -3317,6 +3653,8 @@ class _FileChip extends StatelessWidget {
             icon: const Icon(Icons.link),
           ),
         ],
+      ),
+        ),
       ),
     );
   }
@@ -3447,6 +3785,7 @@ class _Composer extends StatefulWidget {
     required this.sending,
     required this.uploading,
     required this.pending,
+    required this.fileUrl,
     required this.uploadError,
     required this.visitorTyping,
     required this.canned,
@@ -3480,6 +3819,7 @@ class _Composer extends StatefulWidget {
   final bool sending;
   final bool uploading;
   final List<Attachment> pending;
+  final String Function(String) fileUrl;
   final String? uploadError;
   final bool visitorTyping;
   final List<CannedResponse> canned;
@@ -3544,6 +3884,7 @@ class _ComposerState extends State<_Composer> {
     final sending = widget.sending;
     final uploading = widget.uploading;
     final pending = widget.pending;
+    final fileUrl = widget.fileUrl;
     final uploadError = widget.uploadError;
     final visitorTyping = widget.visitorTyping;
     final canned = widget.canned;
@@ -3656,7 +3997,11 @@ class _ComposerState extends State<_Composer> {
                 ),
               ),
               toolIcon(
-                tooltip: lockPublicReply ? lockedHint : '发送图片',
+                tooltip: lockPublicReply
+                    ? lockedHint
+                    : supportsClipboardImagePaste
+                        ? '发送图片（也可 $pasteShortcutLabel 粘贴文件）'
+                        : '发送图片',
                 icon: Icons.image_outlined,
                 accent: RelayTheme.teal,
                 onPressed: uploading || lockPublicReply ? null : onPickImage,
@@ -3766,6 +4111,15 @@ class _ComposerState extends State<_Composer> {
                     ),
                     label: Text(
                         '${attachment.fileName} · ${fileSize(attachment.sizeBytes)}'),
+                    onPressed: () => _openAttachmentPreview(
+                      context,
+                      attachment,
+                      fileUrl(attachment.url),
+                      [
+                        for (final item in pending)
+                          if (item.isImage) fileUrl(item.url),
+                      ],
+                    ),
                     onDeleted: () => onRemovePending(attachment.id),
                   )
               ]),
@@ -3804,7 +4158,9 @@ class _ComposerState extends State<_Composer> {
                               ? lockedHint
                               : visitorTyping
                                   ? '对方正在输入…'
-                                  : '输入回复内容…',
+                                  : supportsClipboardImagePaste
+                                      ? '输入回复内容…（$pasteShortcutLabel 可粘贴文件）'
+                                      : '输入回复内容…',
                       filled: true,
                       fillColor: scheme.surfaceContainerLow,
                       border: OutlineInputBorder(
@@ -4082,6 +4438,15 @@ class _MobileComposerState extends State<_MobileComposer> {
                 for (final a in c.pending)
                   InputChip(
                     label: Text(a.fileName),
+                    onPressed: () => _openAttachmentPreview(
+                      context,
+                      a,
+                      c.fileUrl(a.url),
+                      [
+                        for (final item in c.pending)
+                          if (item.isImage) c.fileUrl(item.url),
+                      ],
+                    ),
                     onDeleted: () => c.onRemovePending(a.id),
                   ),
               ]),
@@ -4158,7 +4523,9 @@ class _MobileComposerState extends State<_MobileComposer> {
                                           : '请先完成接待或转派')
                                       : c.visitorTyping
                                           ? '对方正在输入…'
-                                          : '输入消息…',
+                                          : supportsClipboardImagePaste
+                                              ? '输入消息…（$pasteShortcutLabel 可粘贴文件）'
+                                              : '输入消息…',
                               isDense: true,
                               filled: false,
                               border: InputBorder.none,

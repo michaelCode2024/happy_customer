@@ -91,7 +91,7 @@ class ImageAttachmentPicker implements AttachmentPicker {
     final bytes = await file.readAsBytes();
     return PickedAttachment(
       fileName: file.name.isEmpty ? 'attachment' : file.name,
-      contentType: _contentTypeFor(file.name, file.mimeType),
+      contentType: contentTypeForAttachment(file.name, file.mimeType),
       bytes: bytes,
     );
   }
@@ -120,9 +120,14 @@ class FakeAttachmentPicker implements AttachmentPicker {
 /// Guesses a media type from the file name, preferring whatever the platform
 /// reported. The server validates the type against an allow-list, so a wrong
 /// guess is rejected rather than stored.
-String _contentTypeFor(String fileName, String? reported) {
-  if (reported != null && reported.contains('/')) {
-    return reported;
+///
+/// `application/octet-stream` is what browsers put on a file whose type they
+/// did not recognise. The extension is a better guess, and the server already
+/// rejects a bare octet-stream.
+String contentTypeForAttachment(String fileName, String? reported) {
+  final raw = reported?.split(';').first.trim() ?? '';
+  if (raw.contains('/') && raw != 'application/octet-stream') {
+    return raw;
   }
   final dot = fileName.lastIndexOf('.');
   final extension = dot >= 0 ? fileName.substring(dot + 1).toLowerCase() : '';

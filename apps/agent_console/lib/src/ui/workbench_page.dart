@@ -189,7 +189,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
         serverBase: widget.session.api.server,
       ));
       if (runningOnAndroid) {
-        unawaited(enableBackgroundPush(widget.session.api));
+        unawaited(pushNeedsEnable(widget.session.api));
       }
     });
   }

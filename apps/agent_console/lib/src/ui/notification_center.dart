@@ -37,12 +37,6 @@ class _NotificationCenterState extends State<NotificationCenter> {
     super.initState();
     _load();
     _timer = Timer.periodic(const Duration(seconds: 10), (_) => _load());
-    // 页面加载后自动尝试开启系统后台消息提醒
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      try {
-        await enableBackgroundPush(widget.api);
-      } catch (_) {}
-    });
   }
 
   @override

@@ -963,14 +963,16 @@ export class ChatStore {
     const id = this.#state.activeId;
     // 已读必须面板打开且页面可见有焦点，才能与「已送达」区分开。
     // 嵌在 App / H5 iframe 里时，焦点常在外层，不能因此不上报已读。
-    const inHost = typeof window !== 'undefined' && window.parent !== window;
+    const inHost = this.#inHost();
     const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
     const blurred = !inHost && typeof document !== 'undefined' && typeof document.hasFocus === 'function' && !document.hasFocus();
     if (!id || this.#state.status !== 'READY' || !this.#state.open || hidden || blurred) {
       return;
     }
-    const last = this.#state.messages.filter((message) => message.sequence > 0).at(-1);
-    const boundary = last?.sequence ?? 0;
+    const loaded = this.#state.messages.filter((message) => message.sequence > 0).at(-1);
+    const known = this.#state.conversations.find((item) => item.id === id);
+    // 首屏可能只是最早一页。打开会话要标到当前最后一条，否则后面的未读会留在列表上。
+    const boundary = Math.max(loaded?.sequence ?? 0, known?.lastSequence ?? 0);
     if (boundary <= 0) return;
     try { await this.#api.markRead(id, boundary); } catch { return; }
     const acknowledged = Math.max(boundary, this.#readAcknowledged.get(id) ?? 0);
@@ -1132,7 +1134,11 @@ export class ChatStore {
             void this.#markRead();
           }
         }
-        if (freshEvent && message.senderType !== 'VISITOR' && (message.conversationId !== this.#state.activeId || !this.#state.open || (typeof document !== 'undefined' && (document.visibilityState === 'hidden' || (typeof document.hasFocus === 'function' && !document.hasFocus()))))) {
+        const inHost = this.#inHost();
+        const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+        const blurred = !inHost && typeof document !== 'undefined' && typeof document.hasFocus === 'function' && !document.hasFocus();
+        const viewing = message.conversationId === this.#state.activeId && this.#state.open && !hidden && !blurred;
+        if (freshEvent && message.senderType !== 'VISITOR' && !viewing) {
           this.#patch({ unread: this.#state.unread + 1 });
           this.#emit({ type: 'unread', data: { count: this.#state.unread } });
         }
@@ -1149,7 +1155,9 @@ export class ChatStore {
               item.id === message.conversationId
                 ? {
                     ...item,
-                    visitorUnread: freshEvent && message.senderType !== 'VISITOR' ? (item.visitorUnread ?? 0) + 1 : item.visitorUnread,
+                    visitorUnread: freshEvent && message.senderType !== 'VISITOR' && !viewing
+                      ? (item.visitorUnread ?? 0) + 1
+                      : item.visitorUnread,
                     lastSequence: Math.max(item.lastSequence, message.sequence),
                     lastMessagePreview: isNewest ? message.content.slice(0, 80) : item.lastMessagePreview,
                     lastMessageAt: isNewest ? message.createdAt : item.lastMessageAt,
@@ -1377,6 +1385,15 @@ export class ChatStore {
     }
     const score = conversation.rating;
     return typeof score === 'number' && score >= 1 && score <= 5 ? score : undefined;
+  }
+
+  /**
+   * iframe 宿主或带原生 bridge 的 App 顶层 WebView。后者没被点按前拿不到原生焦点，
+   * document.hasFocus() 恒为 false，不能据此判定访客没在看。
+   */
+  #inHost(): boolean {
+    if (typeof window !== 'undefined' && window.parent !== window) return true;
+    return typeof this.#options.bridge?.postMessage === 'function';
   }
 
   #pickActive(conversations: Conversation[]): string | undefined {

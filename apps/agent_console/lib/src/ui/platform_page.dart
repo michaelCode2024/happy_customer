@@ -899,7 +899,10 @@ class _AboutSection extends StatelessWidget {
                 value: meta.aiAvailable ? '已启用' : '未配置',
               ),
               _Metric(label: '存储', value: meta.storage),
-              _Metric(label: '单文件上限', value: '${meta.uploadMaxMB} MB'),
+              _Metric(
+                label: '单文件上限',
+                value: meta.uploadMaxMB <= 0 ? '不限制' : '${meta.uploadMaxMB} MB',
+              ),
               _Metric(label: 'Webhook 重试', value: '${meta.webhookAttempts} 次'),
             ],
           ),

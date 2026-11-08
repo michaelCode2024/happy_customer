@@ -365,6 +365,10 @@ func (a *API) appendMessage(ctx context.Context, tenantID, conversationID uuid.U
 		// 推送和历史使用同一个最新坐席名称，避免改名后仍显示旧会话身份。
 		_ = a.db.QueryRow(ctx, `select display_name from agent where id=$1 and tenant_id=$2`, *in.SenderID, tenantID).Scan(&view.SenderName)
 	}
+	if in.SenderType == "VISITOR" && in.SenderID != nil && strings.TrimSpace(view.SenderName) == "" {
+		// 实时事件不走消息查询。不补访客名时，离开页面的系统通知标题会落成「客户」。
+		_ = a.db.QueryRow(ctx, `select coalesce(display_name,'') from visitor where id=$1`, *in.SenderID).Scan(&view.SenderName)
+	}
 	if in.ReplyToID != nil {
 		view.ReplyTo = a.replyPreview(ctx, *in.ReplyToID)
 	}
@@ -701,8 +705,26 @@ func (a *API) completeHandoff(ctx context.Context, tenantID, conversationID uuid
 	if err != nil {
 		return nil, "", err
 	}
+	// 没自动分到人时，先看这个入口有没有在线客服。
+	// 人在线但还没点「开始接待」，或入口没开自动分配，都不能对访客说没有客服。
+	// 查不到在线情况时也不说没人。
+	var someoneOnline bool
 	if assignee == nil {
-		if err := receptionNotice(ctx, tx, tenantID, conversationID, "暂无客服可以接单，已为您排队。", "QUEUED", true); err != nil {
+		if tx.QueryRow(ctx, `
+			select exists(
+				select 1
+				  from conversation c
+				  join agent_inbox ai on ai.inbox_id = c.inbox_id
+				  join agent ag on ag.id = ai.agent_id and ag.status = 'ACTIVE'
+				  join agent_presence ap on ap.agent_id = ag.id
+				 where c.id = $1 and `+agentOnlineRecently+`)`, conversationID).Scan(&someoneOnline) != nil {
+			someoneOnline = true
+		}
+		content := "已转接人工，正在等待客服接待。"
+		if !someoneOnline {
+			content = "暂无客服可以接单，已为您排队。"
+		}
+		if err := receptionNotice(ctx, tx, tenantID, conversationID, content, "QUEUED", true); err != nil {
 			return nil, "", err
 		}
 	}
@@ -711,7 +733,9 @@ func (a *API) completeHandoff(ctx context.Context, tenantID, conversationID uuid
 	}
 	a.flushReceptionNotices(ctx)
 	if assignee == nil {
-		// 无人可接时保留待接队列，但必须告诉访客，避免停在「请稍候」无下文。
+		if someoneOnline {
+			return nil, "已转接人工，正在等待客服接待。", nil
+		}
 		return nil, "暂无客服立即接待，已为您排队，上线后会尽快回复。", nil
 	}
 	name := "人工客服"

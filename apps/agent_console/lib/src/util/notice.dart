@@ -4,7 +4,7 @@ import 'package:flutter/widgets.dart';
 ///
 /// 所有站内轻提示都收敛到这两个档位，由右下角 [NoticeHub] 统一渲染。
 enum NoticeKind {
-  /// 轻提示胶囊：图标 + 单行文字 + 可选关闭。
+  /// 短提示条：与卡片同一圆角和左色条，图标 + 一两行文字 + 可选关闭。
   /// 用于「已复制」「发送失败」这类纯反馈，3 秒自隐。
   toast,
 
@@ -22,6 +22,7 @@ class NoticeItem {
     required this.id,
     required this.kind,
     required this.title,
+    this.kicker,
     this.groupKey,
     this.body,
     this.avatarLabel,
@@ -43,8 +44,11 @@ class NoticeItem {
 
   final NoticeKind kind;
 
-  /// 标题。卡片上是一行主文案（如发送者名、事件名）。
+  /// 标题。普通卡片上是主文案；带 [kicker] 时降为副行（如发送者名）。
   final String title;
+
+  /// 眉题。非空时卡片改成新消息版式：眉题在上，正文为主行，标题为副行。
+  final String? kicker;
 
   /// 聚合键（如会话 id）：同键的 [NoticeKind.card] 通知合并为一张并累加计数，
   /// 不再一摞堆叠；最新一条的预览会覆盖旧预览。

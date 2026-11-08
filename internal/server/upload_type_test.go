@@ -15,11 +15,16 @@ func TestFontUploadMimeFallbackAndWhitelist(t *testing.T) {
 	if !a.allowedUploadType("audio/webm;codecs=opus", "语音.webm") {
 		t.Fatal("recording MIME rejected")
 	}
-	if a.allowedUploadType("application/octet-stream", "payload.exe") {
-		t.Fatal("arbitrary executable accepted")
+	if !a.allowedUploadType("application/x-msdownload", "tool.exe") {
+		t.Fatal("executable rejected")
 	}
-	a.cfg.Upload.AllowedTypes = []string{"image/png"}
-	if a.allowedUploadType("application/octet-stream", "Poppins-Bold.woff2") {
-		t.Fatal("explicit whitelist ignored")
+	if !a.allowedUploadType("application/octet-stream", "payload.exe") {
+		t.Fatal("unnamed binary rejected")
+	}
+	if a.allowedUploadType("  ", "payload.exe") {
+		t.Fatal("empty type accepted")
+	}
+	if a.allowedUploadType("application/pdf", "  ") {
+		t.Fatal("empty name accepted")
 	}
 }

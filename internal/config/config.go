@@ -133,7 +133,8 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	maxUploadMB, err := integer("UPLOAD_MAX_MB", 20)
+	// 0 表示不按体积拒绝。正数仍是 MiB 上限，留给显式配置 UPLOAD_MAX_MB 的实例。
+	maxUploadMB, err := integer("UPLOAD_MAX_MB", 0)
 	if err != nil {
 		return Config{}, err
 	}

@@ -12,9 +12,8 @@ import 'package:tongyu_agent_console/src/util/message_alert_stub.dart'
 import 'package:tongyu_agent_console/src/util/push_bridge_stub.dart'
     if (dart.library.html) 'package:tongyu_agent_console/src/util/push_bridge_web.dart';
 
-/// 声音关着，或浏览器还没允许通知，都要提示。
-/// 推送订阅还在核对时先不闪。
-/// 桌面通知已经打开、浏览器推送还没订上时仍要提示，否则关掉标签就收不到。
+/// 声音关着、通知还没允许，或推送还没订上，都要提示。
+/// 核对还没完成时先不闪。订上之后收起，避免每次刷新再问。
 bool showAlertEnableBanner({
   required bool soundOn,
   required bool permissionMissing,
@@ -121,9 +120,11 @@ class _AlertEnableBannerState extends State<AlertEnableBanner>
 
   Future<void> _open() async {
     if (_busy) return;
+    // 先发起浏览器授权和订阅。先播声音会用掉这次点击，Chrome 弹窗不会出现。
+    final opening = enableBackgroundPush(widget.api);
     setState(() => _busy = true);
     turnMessageSoundOn();
-    final message = await enableBackgroundPush(widget.api);
+    final message = await opening;
     rememberDeskAlerts();
     await _refresh();
     if (!mounted) return;
@@ -172,7 +173,6 @@ class _AlertEnableBannerState extends State<AlertEnableBanner>
   Widget build(BuildContext context) {
     if (_dismissed) return const SizedBox.shrink();
     final soundOn = messageSoundEnabled;
-    final deskOn = deskAlertsGranted;
     final missing = notificationPermissionMissing;
     if (!showAlertEnableBanner(
       soundOn: soundOn,
@@ -182,13 +182,13 @@ class _AlertEnableBannerState extends State<AlertEnableBanner>
     )) {
       return const SizedBox.shrink();
     }
-    final pushGap = soundOn && deskOn && !missing && _pushChecked && _pushOff;
+    final finishPush = soundOn && !missing && _pushChecked && _pushOff;
     return DeskBar(
       tone: DeskBarTone.amber,
-      message: pushGap
-          ? '桌面通知已打开。再允许一次浏览器推送，关掉页面后仍能收到消息'
+      message: finishPush
+          ? '通知已允许。再点一次完成订阅，关掉页面后仍能收到消息'
           : '请打开声音和消息通知，离开页面也能知道是谁发来了消息',
-      actionLabel: '立即打开',
+      actionLabel: finishPush ? '完成订阅' : '立即打开',
       onAction: _open,
       onClose: _dismiss,
       busy: _busy,

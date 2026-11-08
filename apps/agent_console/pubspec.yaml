@@ -2,7 +2,7 @@ name: tongyu_agent_console
 description: TongYu cross-platform agent and operations console.
 publish_to: none
 # 与 web/pwa-release.json 同一发版号：名称取前三段，+ 后为去掉点的完整号。
-version: 2026.11.03+2026110304
+version: 2026.11.07+2026110701
 
 # One codebase, four shapes: the desktop build is what an agent sits in all day,
 # the phone build is for on-call shifts, and the web build is a zero-install
@@ -35,6 +35,11 @@ dependencies:
   just_audio: ^0.9.39
   record: ^7.1.2
   file_picker: ^8.0.7
+  # Ctrl+V 粘贴截图：安装包用它读位图（Windows/macOS/Linux 开箱可用）。
+  # 网页不走这个插件：浏览器要在 paste 事件里拿截图，见 clipboard_paste_web.dart。
+  # 纯文本粘贴仍走 TextField 自带的 Clipboard 通道。
+  # 停在 0.5.x：0.6.0 起要求 Flutter >=3.44，会把本项目的最低版本从 3.24 抬高。
+  pasteboard: ^0.5.0
 
 dev_dependencies:
   flutter_test:

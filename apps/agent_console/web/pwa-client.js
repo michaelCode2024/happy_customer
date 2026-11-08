@@ -64,8 +64,11 @@
   window.addEventListener('appinstalled',()=>{installEvent=null;installChanged();});
   const ready= async()=>{
     if(!isSecureContext||!('serviceWorker' in navigator))throw new Error('当前浏览器不支持 PWA，请使用 HTTPS 和支持的浏览器');
-    const existing=await navigator.serviceWorker.getRegistration('/console/');
-    try { registration=await navigator.serviceWorker.register('/console/tongyu-push-sw.js',{scope:'/console/',updateViaCache:'none'}); }
+    const path=location.pathname||'/';
+    const scope=(path==='/console'||path.startsWith('/console/'))?'/console/':new URL('.',location.href).pathname;
+    const workerScope=scope.endsWith('/')?scope:scope+'/';
+    const existing=await navigator.serviceWorker.getRegistration(workerScope);
+    try { registration=await navigator.serviceWorker.register(workerScope+'tongyu-push-sw.js',{scope:workerScope,updateViaCache:'none'}); }
     catch(error) { if(!existing)throw error; registration=existing; }
     registration.addEventListener('updatefound',()=>{
       const worker=registration.installing;

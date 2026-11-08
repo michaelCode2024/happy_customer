@@ -10,6 +10,11 @@ async function paths() {
   return shellPaths;
 }
 self.addEventListener('install', event => event.waitUntil((async () => {
+  // 源码里的 development 只给本机预览接推送。正式包会换成发布号，仍要清单完整才安装。
+  if (SHELL_VERSION === 'development') {
+    if (!self.registration.active) await self.skipWaiting();
+    return;
+  }
   const response = await fetch('/console/pwa-assets.json', {cache:'no-store'});
   if (!response.ok) throw new Error('离线资源清单下载失败');
   const manifest = await response.clone().json();

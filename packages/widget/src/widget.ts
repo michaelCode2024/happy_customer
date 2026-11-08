@@ -177,7 +177,8 @@ export class TongYuWidgetElement extends HTMLElement {
         }
       };
       window.addEventListener('message', this.#parentListener);
-      this.#store?.emitHost({ type: 'viewport-ready' });
+      // hostLayout：支持宿主固定 iframe、只下发可视区（host-viewport layout=frame）。
+      this.#store?.emitHost({ type: 'viewport-ready', data: { hostLayout: 1 } });
       if (typeof ResizeObserver !== 'undefined') {
         this.#resizeObserver = new ResizeObserver(() => {
           const height = Math.ceil(document.documentElement?.scrollHeight || document.body?.scrollHeight || 0);
@@ -196,6 +197,8 @@ export class TongYuWidgetElement extends HTMLElement {
       identityToken?: string;
       keyboardOpen?: boolean;
       height?: number;
+      top?: number;
+      layout?: string;
     } = {};
     try {
       parsed = typeof payload === 'string'
@@ -210,7 +213,9 @@ export class TongYuWidgetElement extends HTMLElement {
     }
     switch (parsed.type) {
       case 'host-viewport':
-        if (typeof parsed.keyboardOpen === 'boolean') {
+        if (parsed.layout === 'frame' && typeof parsed.height === 'number' && typeof parsed.top === 'number') {
+          this.#view?.setHostFrameViewport(parsed.top, parsed.height, parsed.keyboardOpen === true);
+        } else if (typeof parsed.keyboardOpen === 'boolean') {
           const height = typeof parsed.height === 'number' ? parsed.height : 0;
           this.#view?.setHostViewport(parsed.keyboardOpen, height);
         }

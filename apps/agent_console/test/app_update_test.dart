@@ -26,6 +26,39 @@ void main() {
     );
   });
 
+  test('构建号相同则版本名多一段也不再提示', () {
+    expect(
+      isRemoteNewer(
+        localVersion: '2026.11.07',
+        localBuild: 2026110701,
+        remoteVersion: '2026.11.07.1',
+        remoteBuild: 2026110701,
+      ),
+      isFalse,
+    );
+    expect(
+      isRemoteNewer(
+        localVersion: '2026.11.07',
+        localBuild: 0,
+        remoteVersion: '2026.11.07.1',
+        remoteBuild: 0,
+      ),
+      isFalse,
+    );
+  });
+
+  test('初始构建号小于线上构建号时要更新', () {
+    expect(
+      isRemoteNewer(
+        localVersion: '0.1.0',
+        localBuild: 1,
+        remoteVersion: '2026.11.07.1',
+        remoteBuild: 2026110701,
+      ),
+      isTrue,
+    );
+  });
+
   test('无 buildNumber 时按版本号比较', () {
     expect(
       isRemoteNewer(

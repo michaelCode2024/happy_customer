@@ -862,10 +862,11 @@ class WorkbenchController extends ChangeNotifier {
       id: 'preview-${DateTime.now().microsecondsSinceEpoch}',
       kind: NoticeKind.card,
       title: '测试客户',
+      kicker: '新消息',
       body: '这是一条测试消息，用于预览站内弹窗提醒效果。',
       avatarLabel: '测',
       openId: _selectedId ?? '',
-      actionLabel: '去处理',
+      actionLabel: '回复',
     ));
   }
 
@@ -889,11 +890,12 @@ class WorkbenchController extends ChangeNotifier {
         id: id,
         kind: NoticeKind.card,
         title: name,
+        kicker: '新消息',
         body: body,
         avatarLabel: name,
         groupKey: conversationId,
         openId: conversationId,
-        actionLabel: '去处理',
+        actionLabel: '回复',
       ));
     }
     if (visitorAlert != null) {

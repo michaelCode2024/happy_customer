@@ -19,10 +19,10 @@ void main() {
       );
     });
 
-    test('已允许但推送没订上时提示再允许一次', () {
+    test('已允许时不再因为推送没订上弹卡', () {
       expect(
         alertCardStage(permission: 'granted', pushChecked: true, pushOff: true),
-        AlertCardStage.finishPush,
+        isNull,
       );
     });
 

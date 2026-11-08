@@ -4,7 +4,7 @@ import 'package:tongyu_agent_console/src/api/tongyu_api.dart';
 import 'package:tongyu_agent_console/src/ui/alert_enable_banner.dart';
 
 void main() {
-  test('桌面通知已开、浏览器推送还没订上时继续提示；核对完成前不闪', () {
+  test('通知已允许但订阅还没完成时继续提示，核对完成前不闪', () {
     expect(
       showAlertEnableBanner(
         soundOn: true,
