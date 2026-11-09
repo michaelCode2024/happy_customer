@@ -712,7 +712,8 @@ export class WidgetView {
     this.#caretReseatTimer = window.setTimeout(() => {
       this.#caretReseatTimer = undefined;
       const input = this.#input;
-      if (!input || this.#composing || document.activeElement !== input) {
+      // 输入框在组件的 ShadowRoot 内；document.activeElement 只会得到组件宿主。
+      if (!input || this.#composing || this.#root.activeElement !== input) {
         return;
       }
       const start = input.selectionStart;
