@@ -770,10 +770,17 @@ export class WidgetView {
       this.#baselineHeight = window.innerHeight;
     }
     const panel = document.createElement('section');
-    panel.className = `rd-panel${this.#options.embedded ? ' is-embedded' : ''}`;
+    // PC 后台嵌在自己的页签里：铺满内容区，不画手机浮窗，也没有可返回的上一页。
+    const desktopEmbed = this.#options.embedded && this.#options.source === 'PC';
+    panel.className = `rd-panel${this.#options.embedded ? ' is-embedded' : ''}${desktopEmbed ? ' is-desktop' : ''}`;
     panel.setAttribute('role', this.#options.embedded ? 'region' : 'dialog');
     panel.setAttribute('aria-label', this.#options.title);
     panel.hidden = true;
+    const windowControls = desktopEmbed
+      ? ''
+      : this.#options.embedded
+        ? `<button type="button" class="rd-icon rd-page-back" title="返回" aria-label="返回">${ICONS.back}</button>`
+        : `<button type="button" class="rd-icon rd-minimize" title="最小化" aria-label="最小化">${ICONS.minimize}</button><button type="button" class="rd-icon rd-close" title="收起" aria-label="关闭">${ICONS.close}</button>`;
     panel.innerHTML = `
       <header class="rd-header">
         <div class="rd-header-main">
@@ -786,7 +793,7 @@ export class WidgetView {
         </div>
         <div class="rd-header-actions">
           <button type="button" class="rd-icon rd-back" title="返回会话列表" hidden>${ICONS.back}</button>
-          ${this.#options.embedded ? `<button type="button" class="rd-icon rd-page-back" title="返回" aria-label="返回">${ICONS.back}</button>` : `<button type="button" class="rd-icon rd-minimize" title="最小化" aria-label="最小化">${ICONS.minimize}</button><button type="button" class="rd-icon rd-close" title="收起" aria-label="关闭">${ICONS.close}</button>`}
+          ${windowControls}
         </div>
       </header>
       <div class="rd-searchbar" hidden>
@@ -3043,6 +3050,26 @@ ${this.#options.launcher === 'bubble' ? '.rd-launcher-label { display: none; }' 
 .rd-row.is-mine .rd-bubble { background: ${light ? accent + '12' : accent}; color: ${light ? '#202b3d' : '#fff'}; border-color: ${light ? accent + '20' : accent}; border-radius: 10px 2px 10px 10px; }
 .rd-avatar.sm { border-radius: 10px; }
 .is-embedded.rd-panel { border-radius: 0; }
+/* PC 嵌入必须压过前面的 400px 浮层，否则宽屏里仍是一扇手机窗，返回键也会留在顶栏左侧。 */
+.rd-panel.is-embedded.is-desktop {
+  top: 0; right: 0; bottom: 0; left: 0; width: 100%; max-width: none; height: 100%; max-height: none;
+  border: 0; border-radius: 0; box-shadow: none;
+}
+/* 写在嵌入手机顶栏之后，否则安全区和居中标题会把桌面页又收成手机窗口。 */
+.is-desktop .rd-page-back,
+.is-embedded.is-desktop .rd-back { display: none !important; }
+.is-embedded.is-desktop .rd-header {
+  position: relative; min-height: 56px; padding: 12px 20px;
+}
+.is-embedded.is-desktop .rd-header-main { margin: 0; max-width: none; text-align: left; }
+.is-embedded.is-desktop .rd-heading { align-items: flex-start; }
+.is-embedded.is-desktop .rd-heading strong { font-size: 16px; }
+.is-embedded.is-desktop .rd-header-actions { position: static; top: auto; right: auto; }
+.is-embedded.is-desktop .rd-messages { padding: 24px 32px 16px; }
+.is-embedded.is-desktop .rd-bubble-group,
+.is-embedded.is-desktop .rd-row.is-mine .rd-bubble-group { max-width: min(720px, 72%); }
+.is-embedded.is-desktop .rd-composer-row { padding: 12px 24px; }
+.is-embedded.is-desktop .rd-empty { max-width: 720px; }
 /* composer（rd-composer / rd-composer-row / rd-input / rd-hold / rd-send）只在基础层定义，避免多处覆盖；配色仍由企业主色驱动。 */
 @media (max-width: 480px) { .rd-panel:not(.is-embedded) { width: 100vw; border-radius: 0; } .rd-header { padding: 14px 16px; } }
 `;
